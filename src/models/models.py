@@ -19,11 +19,11 @@ class User(db.Model, UserMixin):
         return self.character_id
     
     def get_sso_data(self):
-        return  {
+        return {
             'access_token': self.access_token,
             'refresh_token': self.refresh_token,
             'expires_in': (
-                self.access_token_expires - datetime.now(timezone.utc)
+            self.access_token_expires.astimezone(timezone.utc) - datetime.now(timezone.utc)
             ).total_seconds()
         }
     

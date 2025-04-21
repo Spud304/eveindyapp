@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from src.models.models import db, User
 from src.application import Application
 from src.auth import AuthBlueprint
+from src.user import UserBlueprint
 
 load_dotenv()
 
@@ -41,14 +42,14 @@ app = Application(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DB_NAME}.sqlite'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True
-app.config['SECRET_KEY'] = os.urandom(24)
+app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY")
 
 db.init_app(app)
 
 
 login_manager = LoginManager()
 login_manager.init_app(app)
-
+login_manager.login_view = 'auth.login'
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -61,6 +62,8 @@ with app.app_context():
 auth_blueprint = AuthBlueprint('auth', __name__, CLIENT_ID, CLIENT_SECRET)
 app.register_blueprint(auth_blueprint)
 
+user_blueprint = UserBlueprint('user', __name__)
+app.register_blueprint(user_blueprint)
 
 if __name__ == '__main__':
     app.run(debug=True)

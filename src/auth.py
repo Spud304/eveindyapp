@@ -1,25 +1,21 @@
 import requests
 import os
-import json
 import base64
 
-from flask import Flask
 from flask import redirect
-from flask import render_template
 from flask import request
 from flask import session
 from flask import url_for
 from flask import request
 from flask import jsonify
 from flask import Blueprint
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, login_user, logout_user, current_user
-from dotenv import load_dotenv
+from flask_login import login_user, logout_user, current_user
 
 from src.models.models import db, User
-from src.application import Application
-from datetime import datetime, timedelta, timezone
+from src.utils import generate_token
+from src.constants import ESI_BASE_URL
 
+from datetime import datetime, timedelta, timezone
 
 
 class AuthBlueprint(Blueprint):
@@ -36,12 +32,27 @@ class AuthBlueprint(Blueprint):
         self.add_url_rule('/callback', 'callback', self.callback, methods=['GET'])
         self.add_url_rule('/logout', 'logout', self.logout, methods=['GET'])
 
+    def _get_user_info(self, token):
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        character_id = session.get('user_id')
+        if character_id is None:
+            return None
+        response = requests.get(f"{ESI_BASE_URL}/characters/{character_id}", headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        return None
+
     def login(self):
         """ Redirect to the SSO login page """
+        token = generate_token()
+        session['state'] = token
         sso_url = (
             f"https://login.eveonline.com/oauth/authorize?response_type=code&"
             f"redirect_uri={url_for('auth.callback', _external=True)}&"
-            f"client_id={self.client_id}&scope=publicData&state=spudtest"
+            f"client_id={self.client_id}&scope=publicData&state={token}"
         )
         return redirect(sso_url)
     
@@ -50,7 +61,8 @@ class AuthBlueprint(Blueprint):
         code = request.args.get('code')
         state = request.args.get('state')
 
-        if state != 'spudtest':
+        if state != session.get('state'):
+            # State does not match, possible CSRF attack
             return "Invalid state", 400
 
         token_url = "https://login.eveonline.com/oauth/token"
@@ -82,35 +94,47 @@ class AuthBlueprint(Blueprint):
             return jsonify(user_info_response.json()), user_info_response.status_code
         
         user_info = user_info_response.json()
-        
-        # Check if the user already exists
-        existing_user = User.query.filter_by(character_id=user_info['CharacterID']).first()
-        
-        if existing_user:
-            existing_user.update_token(token_response)
+
+        if current_user.is_authenticated:
+            logout_user()
+            session.pop('user_id', None)
+
+        try:
+            # Check if the user already exists
+            existing_user = User.query.filter_by(character_id=user_info['CharacterID']).first()
+            
+            if existing_user:
+                existing_user.update_token(token_response)
+                db.session.commit()
+                session['user_id'] = existing_user.character_id
+                login_user(existing_user)
+                return redirect(url_for('user.user'))
+            
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=token_response['expires_in'])
+            
+            # Create a new user
+            new_user = User(
+                character_id=user_info['CharacterID'],
+                character_name=user_info['CharacterName'],
+                character_owner_hash=user_info['CharacterOwnerHash'],
+                access_token=token_response['access_token'],
+                access_token_expires=expires_at,
+                refresh_token=token_response['refresh_token']
+            )
+            
+            db.session.add(new_user)
             db.session.commit()
-            session['user_id'] = existing_user.character_id
-            return redirect(url_for('index'))
+            
+            session['user_id'] = new_user.character_id
+            login_user(new_user)
         
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=token_response['expires_in'])
+        except Exception as e:
+            logout_user()
+            db.session.rollback()
+            return jsonify({"error": str(e)}), 500
         
-        # Create a new user
-        new_user = User(
-            character_id=user_info['CharacterID'],
-            character_name=user_info['CharacterName'],
-            character_owner_hash=user_info['CharacterOwnerHash'],
-            access_token=token_response['access_token'],
-            access_token_expires=expires_at,
-            refresh_token=token_response['refresh_token']
-        )
         
-        db.session.add(new_user)
-        db.session.commit()
-        
-        session['user_id'] = new_user.character_id
-        login_user(new_user)
-        
-        return redirect(url_for('index'))
+        return redirect(url_for('user.user'))
     
     def logout(self):
         """ Log the user out and clear the session """
