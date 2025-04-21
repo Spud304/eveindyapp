@@ -53,3 +53,4 @@ Desktop.ini
 
 # Local environment variables
 .env
+src/instance
