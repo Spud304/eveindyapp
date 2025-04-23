@@ -19,10 +19,12 @@ from datetime import datetime, timedelta, timezone
 
 
 class AuthBlueprint(Blueprint):
-    def __init__(self, name, import_name, client_id, client_secret):
+    def __init__(self, name, import_name, client_id, client_secret, scopes):
         self.client_id = client_id
         self.client_secret = client_secret
         self.callback_url = os.environ.get('CALLBACK_URL')
+        self.scopes = scopes
+        # self.scope = self.scopes.split(',') if self.scopes else 'publicData'
         super().__init__(name, import_name)
         
         self._add_routes()
@@ -52,7 +54,7 @@ class AuthBlueprint(Blueprint):
         sso_url = (
             f"https://login.eveonline.com/oauth/authorize?response_type=code&"
             f"redirect_uri={url_for('auth.callback', _external=True)}&"
-            f"client_id={self.client_id}&scope=publicData&state={token}"
+            f"client_id={self.client_id}&scope={self.scopes}&state={token}"
         )
         return redirect(sso_url)
     

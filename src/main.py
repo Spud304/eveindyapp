@@ -26,6 +26,14 @@ CLIENT_ID = os.environ.get('CLIENT_ID')
 CLIENT_SECRET = os.environ.get('CLIENT_SECRET')
 CALLBACK_URL = os.environ.get('CALLBACK_URL')
 DB_NAME = os.environ.get('DB_NAME')
+SCOPES = os.environ.get('SCOPES', 'publicData')
+
+
+# Ensure SCOPES is URL encoded and space delimited
+scopes_list = SCOPES.split()
+encoded_scopes = "%20".join(scopes_list)
+SCOPES = json.loads(SCOPES) if isinstance(SCOPES, str) else SCOPES
+SCOPES = "%20".join(SCOPES)
 
 if CLIENT_ID is None or CLIENT_SECRET is None or CALLBACK_URL is None:
     raise ValueError("CLIENT_ID, CLIENT_SECRET, and CALLBACK_URL must be set in the environment variables.")
@@ -37,6 +45,7 @@ print(f"DB_NAME: {DB_NAME}")
 print(f"CLIENT_ID: {CLIENT_ID}")
 print(f"CLIENT_SECRET: {CLIENT_SECRET}")
 print(f"CALLBACK_URL: {CALLBACK_URL}")
+print(f"SCOPES: {str(SCOPES)}")
 
 app = Application(__name__)
 
@@ -59,7 +68,7 @@ def load_user(user_id):
 with app.app_context():
     db.create_all()
 
-auth_blueprint = AuthBlueprint('auth', __name__, CLIENT_ID, CLIENT_SECRET)
+auth_blueprint = AuthBlueprint('auth', __name__, CLIENT_ID, CLIENT_SECRET, scopes=SCOPES)
 app.register_blueprint(auth_blueprint)
 
 user_blueprint = UserBlueprint('user', __name__)
