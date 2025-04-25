@@ -1,6 +1,14 @@
-<body>
+{% extends "base.html" %}
+{% block title %}User Page{% endblock %}
+{% block content %}
+{% if current_user.is_authenticated %}
     <h1>Welcome, {{ current_user.username }}!</h1>
     <p>This is a protected page.</p>
     <p>Your alliance id is {{user_info.alliance_id}}</p>
     <a href="/logout">Logout</a>
-</body>
+{% else %}
+    <h1>Please log in to access this page.</h1>
+    <a href="/login">Login</a>
+{% endif %}
+{% endblock %}
+<!DOCTYPE html>

@@ -19,6 +19,7 @@ from src.models.models import db, User
 from src.application import Application
 from src.auth import AuthBlueprint
 from src.user import UserBlueprint
+from src.industry import IndustryBlueprint
 
 load_dotenv()
 
@@ -73,6 +74,9 @@ app.register_blueprint(auth_blueprint)
 
 user_blueprint = UserBlueprint('user', __name__)
 app.register_blueprint(user_blueprint)
+
+industry_blueprint = IndustryBlueprint('industry', __name__)
+app.register_blueprint(industry_blueprint)
 
 if __name__ == '__main__':
     app.run(debug=True)
