@@ -34,3 +34,37 @@ class User(db.Model, UserMixin):
             timedelta(seconds=token_response['expires_in'])
         
         db.session.commit()
+
+
+class InvTypes(db.Model):
+    __bind_key__ = "static"
+    __tablename__ = 'InvTypes'
+    typeID = db.Column(db.Integer, primary_key=True)
+    groupID = db.Column(db.Integer)
+    typeName = db.Column(db.String(100), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    mass = db.Column(db.Float)
+    volume = db.Column(db.Float)
+    capacity = db.Column(db.Float)
+    portionSize = db.Column(db.Integer)
+    raceID = db.Column(db.Integer)
+    basePrice = db.Column(db.DECIMAL(19, 4))
+    published = db.Column(db.Boolean)
+    marketGroupID = db.Column(db.Integer)
+    iconID = db.Column(db.Integer)
+    soundID = db.Column(db.Integer)
+    graphicID = db.Column(db.Integer)
+
+    def __repr__(self):
+        return f"InvTypes('{self.typeID}', '{self.groupID}', '{self.typeName}', '{self.description}')"
+
+
+class InvTypeMaterials(db.Model):
+    __bind_key__ = "static"
+    __tablename__ = 'InvTypeMaterials'
+    typeID = db.Column(db.Integer, primary_key=True)
+    materialTypeID = db.Column(db.Integer, primary_key=True)
+    quantity = db.Column(db.Integer, primary_key=True)
+
+    def __repr__(self):
+        return f"InvTypeMaterials('{self.typeID}', '{self.materialTypeID}', '{self.quantity}')"

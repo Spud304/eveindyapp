@@ -12,7 +12,7 @@ from flask import render_template
 from flask import Blueprint
 from flask_login import login_user, logout_user, current_user
 
-from src.models.models import db, User
+from src.models.models import db, User, InvTypes
 from src.utils import generate_token
 from src.constants import ESI_BASE_URL
 
@@ -71,9 +71,19 @@ class IndustryBlueprint(Blueprint):
         response = requests.get(f"{ESI_BASE_URL}/characters/{character_id}/blueprints", headers=headers)
 
         j = response.json()
+
+        for i in j:
+            if i['type_id'] == 0:
+                i['type_id'] = None
+            else:
+                blueprint = InvTypes.query.filter_by(typeID=i['type_id']).first()
+                if blueprint is not None:
+                    i['type_name'] = blueprint.typeName
+                else:
+                    i['type_name'] = None
         
         if response.status_code == 200:
-            return render_template('blueprints.html', blueprints=response.json())
+            return render_template('blueprints.html', blueprints=j)
         
         return jsonify({"error": "Failed to fetch blueprints info"}), response.status_code
     
@@ -99,3 +109,29 @@ class IndustryBlueprint(Blueprint):
             return render_template('jobs.html', jobs_info=response.json())
         
         return jsonify({"error": "Failed to fetch jobs info"}), response.status_code
+    
+    def _get_blueprint_info(self, blueprint_id):
+        blueprint = InvTypes.query.filter_by(type_id=blueprint_id).first()
+
+        if blueprint:
+            return {
+                "type_id": blueprint.typeID,
+                "type_name": blueprint.typeName,
+                "description": blueprint.description,
+                "icon_id": blueprint.iconID,
+            }
+        
+        return None
+    
+    def _get_item_info(self, type_id):
+        items = InvTypes.query.filter_by(typeID=type_id).all()
+        item_info = []
+        for item in items:
+            item_info.append({
+                "type_id": item.typeID,
+                "activity_id": item.activityID,
+                "material_type_id": item.materialTypeID,
+                "quantity": item.quantity,
+            })
+
+        return item_info

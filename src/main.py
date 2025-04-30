@@ -12,6 +12,8 @@ from flask import url_for
 from flask import request
 from flask import jsonify
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from flask_login import LoginManager
 from dotenv import load_dotenv
 
@@ -27,6 +29,7 @@ CLIENT_ID = os.environ.get('CLIENT_ID')
 CLIENT_SECRET = os.environ.get('CLIENT_SECRET')
 CALLBACK_URL = os.environ.get('CALLBACK_URL')
 DB_NAME = os.environ.get('DB_NAME')
+STATIC_DB = os.environ.get('STATIC_DB')
 SCOPES = os.environ.get('SCOPES', 'publicData')
 
 
@@ -53,6 +56,10 @@ app = Application(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DB_NAME}.sqlite'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True
 app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY")
+app.config['SQLALCHEMY_BINDS'] = {
+    'static': f'sqlite:///{STATIC_DB}.sqlite',
+    'base': f'sqlite:///{DB_NAME}.sqlite'
+}
 
 db.init_app(app)
 
