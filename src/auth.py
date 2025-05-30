@@ -52,7 +52,7 @@ class AuthBlueprint(Blueprint):
         token = generate_token()
         session['state'] = token
         sso_url = (
-            f"https://login.eveonline.com/oauth/authorize?response_type=code&"
+            f"https://login.eveonline.com/v2/oauth/authorize?response_type=code&"
             f"redirect_uri={url_for('auth.callback', _external=True)}&"
             f"client_id={self.client_id}&scope={self.scopes}&state={token}"
         )
@@ -67,22 +67,21 @@ class AuthBlueprint(Blueprint):
             # State does not match, possible CSRF attack
             return "Invalid state", 400
 
-        token_url = "https://login.eveonline.com/oauth/token"
+        token_url = "https://login.eveonline.com/v2/oauth/token"
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'Authorization': f'Basic {base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()}'
+            'Authorization': f'Basic {base64.urlsafe_b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()}'
         }
         data = {
             'grant_type': 'authorization_code',
             'code': code,
-            'redirect_uri': url_for('auth.callback', _external=True)
+            # 'redirect_uri': url_for('auth.callback', _external=True)
         }
 
         response = requests.post(token_url, headers=headers, data=data)
         token_response = response.json()
-
         if response.status_code != 200:
-            return jsonify(token_response), response.status_code
+            return jsonify(response), response.status_code
 
         # Store the user in the database
         user_info_url = "https://login.eveonline.com/oauth/verify"

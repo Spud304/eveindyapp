@@ -28,6 +28,7 @@ class User(db.Model, UserMixin):
         }
     
     def update_token(self, token_response):
+        
         self.access_token = token_response['access_token']
         self.refresh_token = token_response['refresh_token']
         self.access_token_expires = datetime.now(timezone.utc) + \

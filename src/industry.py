@@ -70,6 +70,10 @@ class IndustryBlueprint(Blueprint):
         
         response = requests.get(f"{ESI_BASE_URL}/characters/{character_id}/blueprints", headers=headers)
 
+        if response.status_code != 200:
+            return jsonify({"error": "Failed to fetch blueprints info"}), response.status_code
+        
+        # Process the response JSON
         j = response.json()
 
         for i in j:
