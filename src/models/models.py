@@ -41,15 +41,17 @@ class User(db.Model, UserMixin):
 
         db.session.commit()
 
-class cached_locations(db.Model):
+class CachedLocations(db.Model):
     __bind_key__ = "base"
-    __tablename__ = 'cached_locations'
+    __tablename__ = 'CachedLocations'
 
     location_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     location_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    location_cost_index: Mapped[float] = mapped_column(Float, nullable=True)
+    location_cost_index_last_updated: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self):
-        return f"cached_locations('{self.location_id}', '{self.location_name}')"
+        return f"CachedLocations('{self.location_id}', '{self.location_name}')"
 
 class CachedToonInfo(db.Model):
     __bind_key__ = "base"
@@ -72,6 +74,7 @@ class CachedMarketData(db.Model):
 
     type_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     price: Mapped[float] = mapped_column(Float, nullable=False)
+    adjusted_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cached_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 class CachedBlueprint(db.Model):
@@ -153,3 +156,11 @@ class IndustryBlueprints(db.Model):
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     maxProductionLimit: Mapped[Optional[int]] = mapped_column(Integer)
+
+
+class MapSolarSystems(db.Model):
+    __bind_key__ = "static"
+    __tablename__ = 'mapSolarSystems'
+
+    solarSystemID: Mapped[int] = mapped_column(Integer, primary_key=True)
+    solarSystemName: Mapped[Optional[str]] = mapped_column(String(100))

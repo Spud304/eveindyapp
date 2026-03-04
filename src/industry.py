@@ -10,9 +10,9 @@ from flask import Blueprint
 from flask_login import login_required, current_user
 from sqlalchemy import select
 
-from src.models.models import db, InvTypes, cached_locations, CachedBlueprint, IndustryActivityMaterials, IndustryActivityProducts, IndustryBlueprints
+from src.models.models import db, InvTypes, CachedLocations, CachedBlueprint, IndustryActivityMaterials, IndustryActivityProducts, IndustryBlueprints, MapSolarSystems
 from src.constants import ESI_BASE_URL
-from src.utils import esi_get, esi_headers, batch_type_names, batch_market_info
+from src.utils import esi_get, esi_headers, batch_type_names, batch_market_info, get_manufacturing_cost_index
 
 BLUEPRINT_CACHE_MAX_AGE = timedelta(hours=24)
 
@@ -54,6 +54,7 @@ class IndustryBlueprint(Blueprint):
         self.add_url_rule('/industry/jobs', 'jobs', login_required(self.get_jobs), methods=['GET'])
         self.add_url_rule('/industry/calculator', 'calculator', login_required(self.get_calculator), methods=['GET'])
         self.add_url_rule('/industry/calculator/search', 'calculator_search', login_required(self.search_items), methods=['GET'])
+        self.add_url_rule('/industry/calculator/search_systems', 'calculator_search_systems', login_required(self.search_systems), methods=['GET'])
 
     def get_industry(self):
         return render_template('industry.html')
@@ -249,11 +250,32 @@ class IndustryBlueprint(Blueprint):
         ).all()
         return jsonify([{"type_id": r.typeID, "name": r.typeName} for r in results])
 
+    def search_systems(self):
+        q = request.args.get('q', '', type=str).strip()
+        if len(q) < 2:
+            return jsonify([])
+        results = db.session.execute(
+            select(MapSolarSystems.solarSystemID, MapSolarSystems.solarSystemName)
+            .where(MapSolarSystems.solarSystemName.ilike(f'%{q}%'))
+            .limit(15)
+        ).all()
+        return jsonify([{"system_id": r.solarSystemID, "name": r.solarSystemName} for r in results])
+
     def get_calculator(self):
         product_type_id = request.args.get('product_type_id', 0, type=int)
         desired_qty = request.args.get('quantity', 1, type=int)
         desired_qty = max(1, desired_qty)
+        system_id = request.args.get('system_id', 0, type=int)
+        facility_tax = request.args.get('facility_tax', 10.0, type=float)
         char_id = current_user.character_id
+
+        # Resolve system name for display
+        system_name = None
+        if system_id:
+            system_name = db.session.execute(
+                select(MapSolarSystems.solarSystemName)
+                .where(MapSolarSystems.solarSystemID == system_id)
+            ).scalar_one_or_none()
 
         # Check once whether this user has any cached blueprints
         has_blueprints = db.session.execute(
@@ -263,7 +285,8 @@ class IndustryBlueprint(Blueprint):
         ).scalar_one_or_none() is not None
 
         if not product_type_id:
-            return render_template('calculator.html', product=None, has_blueprints=has_blueprints)
+            return render_template('calculator.html', product=None, has_blueprints=has_blueprints,
+                                   system_id=system_id, system_name=system_name, facility_tax=facility_tax)
 
         # Look up product name
         product_name = db.session.execute(
@@ -387,15 +410,39 @@ class IndustryBlueprint(Blueprint):
             [{"name": type_names.get(tid, f"Unknown ({tid})"), "quantity": qty} for tid, qty in raw_materials.items()],
             key=lambda m: m["name"]
         )
-        # Batch fetch prices for all materials
-        prices = batch_market_info(set(raw_materials.keys()))
+        # Batch fetch prices (average + adjusted) for all materials
+        all_material_ids = set(raw_materials.keys())
+        # Also need adjusted prices for EIV computation (base qty materials for each BP)
+        eiv_material_ids = set()
+        for bp_id in tree_bp_ids:
+            for mat_id, _ in materials_by_bp.get(bp_id, []):
+                eiv_material_ids.add(mat_id)
+        all_price_ids = all_material_ids | eiv_material_ids
+        prices, adjusted_prices = batch_market_info(all_price_ids)
+
         for m in materials:
             type_id = next((tid for tid, name in type_names.items() if name == m["name"]), None)
             price = prices.get(type_id) if type_id else None
             m["unit_price"] = price
             m["total_price"] = price * m["quantity"] if price else None
 
-        total_cost = sum((m["total_price"] for m in materials if m["total_price"] is not None), 0)
+        total_material_cost = sum((m["total_price"] for m in materials if m["total_price"] is not None), 0.0)
+
+        # Compute job costs per blueprint
+        SCC_SURCHARGE = 0.015
+        system_cost_index = get_manufacturing_cost_index(system_id) if system_id else 0.0
+
+        for bp in bp_statuses:
+            bp_id = bp["type_id"]
+            # EIV = sum of (adjusted_price * base_qty) for ME 0 materials
+            eiv_per_run = 0.0
+            for mat_id, base_qty in materials_by_bp.get(bp_id, []):
+                eiv_per_run += adjusted_prices.get(mat_id, 0.0) * base_qty
+            bp["eiv_per_run"] = eiv_per_run
+            bp["job_cost"] = eiv_per_run * bp["runs_needed"] * (system_cost_index + facility_tax / 100 + SCC_SURCHARGE)
+
+        total_job_cost = sum(bp["job_cost"] for bp in bp_statuses)
+        grand_total = total_material_cost + total_job_cost
 
         # Summary counts
         owned_bpo_count = sum(1 for b in bp_statuses if b["status"] == "owned_bpo")
@@ -414,7 +461,12 @@ class IndustryBlueprint(Blueprint):
             bpc_only_count=bpc_only_count,
             missing_count=missing_count,
             has_blueprints=has_blueprints,
-            total_cost=total_cost,
+            total_material_cost=total_material_cost,
+            total_job_cost=total_job_cost,
+            grand_total=grand_total,
+            system_id=system_id,
+            system_name=system_name,
+            facility_tax=facility_tax,
         )
 
     def get_jobs(self):
@@ -429,7 +481,7 @@ class IndustryBlueprint(Blueprint):
             return {}
 
         cached = db.session.execute(
-            select(cached_locations).where(cached_locations.location_id.in_(location_ids))
+            select(CachedLocations).where(CachedLocations.location_id.in_(location_ids))
         ).scalars().all()
         names = {row.location_id: row.location_name for row in cached}
 
@@ -438,7 +490,7 @@ class IndustryBlueprint(Blueprint):
         for loc_id in missing:
             name = self._fetch_location_name(loc_id, headers)
             names[loc_id] = name
-            new_entries.append(cached_locations(location_id=loc_id, location_name=name))  # type: ignore[call-arg]
+            new_entries.append(CachedLocations(location_id=loc_id, location_name=name))  # type: ignore[call-arg]
 
         if new_entries:
             db.session.add_all(new_entries)

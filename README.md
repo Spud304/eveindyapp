@@ -102,13 +102,10 @@ src/
 ## TODO
 
 - Token refresh -- access tokens expire after ~20 minutes; the app should automatically refresh them using the stored refresh token before making ESI calls
-- Market price integration -- pull Jita buy/sell prices to estimate build costs and profit margins on the calculator page
 - Invention support -- handle T2 blueprint invention chains (datacores, decryptors, probability)
 - Multi-character support -- allow users to link multiple characters and aggregate blueprint ownership
 - Job notifications -- alert when industry jobs complete
-- Export to clipboard -- copy material lists and shopping lists in a paste-friendly format
 - Search improvements -- support partial matching and category filtering on the calculator search
-- Caching layer for ESI market/price data to reduce API calls
 - Test suite -- add unit and integration tests for the DFS logic and ESI helpers
 - Station support -- get location names for blueprints in stations, not just in hangars
 - Station rigs support -- pull station rigs from SDE and show them as modifiers on the material calculator when, also station type, i.e. azbel, tatara, etc
