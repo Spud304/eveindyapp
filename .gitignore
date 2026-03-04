@@ -55,3 +55,6 @@ Desktop.ini
 # Local environment variables
 .env
 src/instance
+
+# AI generated files and artifacts
+.claude

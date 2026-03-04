@@ -51,6 +51,16 @@ class cached_locations(db.Model):
     def __repr__(self):
         return f"cached_locations('{self.location_id}', '{self.location_name}')"
 
+class cached_toon_info(db.Model):
+    __bind_key__ = "base"
+    __tablename__ = 'cached_toon_info'
+
+    character_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    character_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    corporation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    corporation_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    alliance_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    alliance_name: Mapped[Optional[str]] = mapped_column(String(255))
 
 class CachedBlueprint(db.Model):
     __bind_key__ = "base"
