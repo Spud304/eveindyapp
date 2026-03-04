@@ -11,8 +11,13 @@
 <div class="nc-panel nc-animate nc-animate-d1" style="max-width: 500px;">
     <div class="nc-panel-title"><span class="nc-icon"></span>Character Info</div>
     <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
-        <span class="nc-text-dim">Corporation:</span><span class="nc-text-bright">{{ user_info.corporation_name }}</span>
-        <span class="nc-text-dim">Alliance:</span> <span class="nc-text-bright">{{ user_info.alliance_name }}</span>
+        <span class="nc-text-dim">Corporation: </span><span class="nc-text-bright">{{ user_info.corporation_name }}</span>
+    </div>
+    <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
+        <span class="nc-text-dim">Alliance: </span><span class="nc-text-bright">{{ user_info.alliance_name or "None" }}</span>
+    </div>
+    <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
+        <span class="nc-text-dim">Wallet Balance: </span><span class="nc-text-bright">{{ "{:,.2f} ISK".format(user_info.wallet_balance) }}</span>
     </div>
 </div>
 

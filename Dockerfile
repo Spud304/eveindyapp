@@ -10,8 +10,11 @@ RUN uv sync --frozen --no-dev --no-cache
 
 # Copy source
 COPY src/ ./src/
+COPY migrations/ ./migrations/
+COPY entrypoint.sh ./
 
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 5050
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:5050", "--preload", "--log-level", "info", "--access-logfile", "-", "--error-logfile", "-", "src.main:app"]

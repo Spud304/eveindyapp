@@ -61,6 +61,10 @@ class cached_toon_info(db.Model):
     corporation_name: Mapped[str] = mapped_column(String(255), nullable=False)
     alliance_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     alliance_name: Mapped[Optional[str]] = mapped_column(String(255))
+    wallet_balance: Mapped[float] = mapped_column(Float, nullable=True)
+
+    def __repr__(self):
+        return f"cached_toon_info('{self.character_id}', '{self.character_name}', '{self.corporation_id}', '{self.corporation_name}', '{self.alliance_id}', '{self.alliance_name}', '{self.wallet_balance}')"
 
 class CachedBlueprint(db.Model):
     __bind_key__ = "base"

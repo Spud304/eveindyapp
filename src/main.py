@@ -5,6 +5,8 @@ import logging
 from flask_login import LoginManager
 from dotenv import load_dotenv
 
+from flask_migrate import Migrate
+
 from src.models.models import db, User
 from src.application import Application
 from src.auth import AuthBlueprint
@@ -50,6 +52,7 @@ app.config['SQLALCHEMY_BINDS'] = {
 }
 
 db.init_app(app)
+migrate = Migrate(app, db)
 
 
 login_manager = LoginManager()
