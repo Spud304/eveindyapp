@@ -296,7 +296,7 @@
 </div>
 
 {# Blueprint Inventory #}
-<div class="nc-panel nc-collapsible nc-animate nc-animate-d2">
+<div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d2">
     <div class="nc-panel-title"><span class="nc-icon"></span>Blueprint Inventory<span class="nc-chevron">&#9662;</span></div>
     <div class="nc-panel-body">
     <div class="nc-summary-line">
@@ -357,7 +357,7 @@
     <input type="hidden" name="quantity" value="{{ desired_qty }}">
     <input type="hidden" name="system_id" value="{{ system_id }}">
     <input type="hidden" name="facility_tax" value="{{ facility_tax }}">
-    <div class="nc-panel nc-collapsible nc-animate nc-animate-d3">
+    <div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
         <div class="nc-panel-title"><span class="nc-icon"></span>ME Overrides<span class="nc-chevron">&#9662;</span></div>
         <div class="nc-panel-body">
         <div class="nc-bp-grid">
@@ -395,7 +395,7 @@
 
 {# Materials Required #}
 {% if materials %}
-<div class="nc-panel nc-collapsible nc-animate nc-animate-d3">
+<div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
     <div class="nc-panel-title"><span class="nc-icon"></span>Materials Required<span class="nc-chevron">&#9662;</span></div>
     <div class="nc-panel-body">
     <table class="nc-table">
@@ -433,7 +433,7 @@
 
 {# Manufacturing Jobs #}
 {% if bp_statuses %}
-<div class="nc-panel nc-collapsible nc-animate nc-animate-d3">
+<div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
     <div class="nc-panel-title"><span class="nc-icon"></span>Manufacturing Jobs<span class="nc-chevron">&#9662;</span></div>
     <div class="nc-panel-body">
     <table class="nc-table">
@@ -469,7 +469,7 @@
 {# BPC Copy Plan #}
 {% set copy_bps = bp_statuses|selectattr('status', 'eq', 'owned_bpo')|selectattr('copy_jobs', 'gt', 0)|list %}
 {% if copy_bps %}
-<div class="nc-panel nc-bpc-panel nc-collapsible nc-animate nc-animate-d4">
+<div class="nc-panel nc-bpc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d4">
     <div class="nc-panel-title"><span class="nc-icon"></span>BPC Copy Plan<span class="nc-chevron">&#9662;</span></div>
     <div class="nc-panel-body">
     <table class="nc-table">
@@ -499,7 +499,7 @@
 {# Missing Blueprints #}
 {% set missing_bps = bp_statuses|selectattr('status', 'eq', 'missing')|list %}
 {% if missing_bps %}
-<div class="nc-panel nc-missing-panel nc-collapsible nc-animate nc-animate-d4">
+<div class="nc-panel nc-missing-panel nc-collapsible nc-collapsed nc-animate nc-animate-d4">
     <div class="nc-panel-title"><span class="nc-icon"></span>Missing Blueprints<span class="nc-chevron">&#9662;</span></div>
     <div class="nc-panel-body">
     <table class="nc-table">
