@@ -1,31 +1,51 @@
 {% extends "base.html" %}
-{% block title %}Blueprint Page{% endblock %}
+{% block title %}Blueprints{% endblock %}
 {% block content %}
 
-    <h1>Blueprints</h1>
-    <div class="container">
-        <div class="columns is-multiline">
-            {% for blueprint in blueprints %}
-            <div class="column is-one-quarter">
-                <div class="card">
-                    <div class="card-content">
-                        <p class="title">{{ blueprint.type_name }}</p>
-                        <p class="subtitle">
-                            <strong>Blueprint ID:</strong> {{ blueprint.type_id }}<br>
-                            <strong>Blueprint Location:</strong> {{ blueprint.location_id }}<br>
-                            <strong>Blueprint Runs:</strong> {{ blueprint.runs }}<br>
-                        </p>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
+<div class="nc-header nc-animate">
+    <h1 class="nc-title">Blueprints</h1>
+    <p class="nc-subtitle">
+        {{ blueprints|length }} blueprint{{ "s" if blueprints|length != 1 else "" }} found
+        {% if cached_at %}
+            {% set age_seconds = (now_utc - cached_at).total_seconds() | int %}
+            {% if age_seconds < 60 %}
+                &middot; Cached just now
+            {% elif age_seconds < 3600 %}
+                &middot; Cached {{ (age_seconds // 60) | int }}m ago
+            {% else %}
+                &middot; Cached {{ (age_seconds // 3600) | int }}h ago
+            {% endif %}
+        {% endif %}
+    </p>
+    <form method="POST" action="{{ url_for('industry.blueprints_refresh') }}" style="margin-top: 0.5rem;">
+        <button type="submit" class="nc-btn nc-btn-sm nc-btn-dim">Refresh from ESI</button>
+    </form>
+</div>
 
-{% if current_user.is_authenticated %}
-    <a href="{{ url_for('user.user') }}" class="button is-primary">Back to Profile</a>
+{% if blueprints %}
+<div class="nc-card-grid nc-animate nc-animate-d1">
+    {% for blueprint in blueprints %}
+    <div class="nc-card">
+        <div class="nc-card-title">{{ blueprint.type_name }}</div>
+        <div class="nc-card-body">
+            <strong>ID:</strong> {{ blueprint.type_id }}<br>
+            <strong>Location:</strong> {{ blueprint.location_name }}<br>
+            <strong>Runs:</strong> {{ blueprint.runs }}
+        </div>
+        <a href="{{ url_for('industry.blueprint_materials', type_id=blueprint.type_id) }}" class="nc-btn nc-btn-sm">Materials</a>
+    </div>
+    {% endfor %}
+</div>
 {% else %}
-    <a href="{{ url_for('auth.login') }}" class="button is-primary">Login</a>
+<div class="nc-empty nc-animate nc-animate-d1">No blueprints found.</div>
 {% endif %}
+
+<div class="nc-btn-group nc-animate nc-animate-d2">
+    {% if current_user.is_authenticated %}
+    <a href="{{ url_for('user.user') }}" class="nc-btn nc-btn-dim">Back to Profile</a>
+    {% else %}
+    <a href="{{ url_for('auth.login') }}" class="nc-btn">Login</a>
+    {% endif %}
+</div>
 
 {% endblock %}

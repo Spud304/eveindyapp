@@ -6,10 +6,10 @@ from flask import redirect
 from flask import request
 from flask import session
 from flask import url_for
-from flask import request
 from flask import jsonify
 from flask import Blueprint
 from flask_login import login_user, logout_user, current_user
+from sqlalchemy import select
 
 from src.models.models import db, User
 from src.utils import generate_token
@@ -42,7 +42,7 @@ class AuthBlueprint(Blueprint):
         character_id = session.get('user_id')
         if character_id is None:
             return None
-        response = requests.get(f"{ESI_BASE_URL}/characters/{character_id}", headers=headers)
+        response = requests.get(f"{ESI_BASE_URL}/characters/{character_id}", headers=headers, timeout=10)
         if response.status_code == 200:
             return response.json()
         return None
@@ -78,7 +78,7 @@ class AuthBlueprint(Blueprint):
             # 'redirect_uri': url_for('auth.callback', _external=True)
         }
 
-        response = requests.post(token_url, headers=headers, data=data)
+        response = requests.post(token_url, headers=headers, data=data, timeout=10)
         token_response = response.json()
         if response.status_code != 200:
             return jsonify(response), response.status_code
@@ -89,7 +89,7 @@ class AuthBlueprint(Blueprint):
             'Authorization': f"Bearer {token_response['access_token']}"
         }
         
-        user_info_response = requests.get(user_info_url, headers=user_info_headers)
+        user_info_response = requests.get(user_info_url, headers=user_info_headers, timeout=10)
         
         if user_info_response.status_code != 200:
             return jsonify(user_info_response.json()), user_info_response.status_code
@@ -102,7 +102,9 @@ class AuthBlueprint(Blueprint):
 
         try:
             # Check if the user already exists
-            existing_user = User.query.filter_by(character_id=user_info['CharacterID']).first()
+            existing_user = db.session.execute(
+                select(User).where(User.character_id == user_info['CharacterID'])
+            ).scalar_one_or_none()
             
             if existing_user:
                 existing_user.update_token(token_response)

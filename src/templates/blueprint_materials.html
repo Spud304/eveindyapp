@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}{{ blueprint_name }} - Materials{% endblock %}
+{% block head %}
+<style>
+    /* === PAGE-SPECIFIC: Blueprint Materials === */
+    .nc-subtitle .nc-run-count {
+        color: var(--nc-gold);
+    }
+    .nc-runs-input {
+        max-width: 140px;
+    }
+    .nc-bp-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 0.8rem;
+        margin-bottom: 1.2rem;
+    }
+    .nc-bp-card {
+        background: rgba(0, 200, 255, 0.02);
+        border: 1px solid rgba(0, 200, 255, 0.06);
+        padding: 0.7rem 0.9rem;
+        transition: border-color 0.2s, background 0.2s;
+    }
+    .nc-bp-card:hover {
+        border-color: var(--nc-border-bright);
+        background: rgba(0, 200, 255, 0.04);
+    }
+    .nc-bp-name {
+        font-family: var(--nc-font-display) !important;
+        font-weight: 600;
+        font-size: 0.8rem;
+        color: var(--nc-text-bright);
+        margin-bottom: 0.4rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .nc-bp-fields {
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-end;
+    }
+    .nc-bp-fields .nc-field {
+        flex: 1;
+    }
+    .nc-bp-fields .nc-field-label {
+        font-size: 0.6rem !important;
+        margin-bottom: 0.2rem !important;
+    }
+    .nc-table .nc-bpc-count {
+        color: var(--nc-gold);
+        font-weight: bold;
+    }
+    .nc-bpc-panel .nc-panel-title .nc-icon {
+        background: var(--nc-gold);
+    }
+    .nc-bpc-panel::before {
+        background: linear-gradient(90deg, var(--nc-gold), transparent 40%) !important;
+    }
+    /* BPC checkbox toggle */
+    .nc-bpc-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .nc-bpc-toggle input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 14px;
+        height: 14px;
+        border: 1px solid var(--nc-border);
+        background: rgba(0, 200, 255, 0.05);
+        cursor: pointer;
+        position: relative;
+        flex-shrink: 0;
+    }
+    .nc-bpc-toggle input[type="checkbox"]:checked {
+        border-color: var(--nc-teal, #00c8ff);
+        background: rgba(0, 200, 255, 0.15);
+    }
+    .nc-bpc-toggle input[type="checkbox"]:checked::after {
+        content: "✓";
+        position: absolute;
+        top: -1px;
+        left: 1px;
+        font-size: 11px;
+        color: var(--nc-teal, #00c8ff);
+    }
+    .nc-bpc-toggle .nc-bpc-runs-input {
+        width: 60px;
+    }
+    .nc-bpc-toggle .nc-bpc-runs-input[disabled] {
+        display: none;
+    }
+    .nc-bpc-toggle .nc-bpc-runs-input::-webkit-inner-spin-button,
+    .nc-bpc-toggle .nc-bpc-runs-input::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    .nc-bpc-toggle .nc-bpc-runs-input {
+        -moz-appearance: textfield;
+    }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="nc-header nc-animate">
+    <h1 class="nc-title">{{ blueprint_name }}</h1>
+    <p class="nc-subtitle">Raw Materials — <span class="nc-run-count">{{ "{:,}".format(runs) }}</span> run{{ "s" if runs != 1 else "" }}</p>
+</div>
+
+{% if tree_blueprints %}
+<form method="GET" action="{{ url_for('industry.blueprint_materials', type_id=type_id) }}">
+    <div class="nc-panel nc-animate nc-animate-d1">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Production Settings</div>
+
+        <div class="nc-field nc-runs-input" style="margin-bottom: 1rem;">
+            <label class="nc-field-label">Runs</label>
+            <div class="control">
+                <input class="nc-input" type="number" name="runs" value="{{ runs }}" min="1" style="width: 100%;">
+            </div>
+        </div>
+
+        <div class="nc-bp-grid">
+            {% for bp in tree_blueprints %}
+            <div class="nc-bp-card">
+                <div class="nc-bp-name" title="{{ bp.name }}">{{ bp.name }}</div>
+                <div class="nc-bp-fields">
+                    <div class="nc-field">
+                        <label class="nc-field-label">ME</label>
+                        <div class="nc-select is-small is-fullwidth select">
+                            <select name="me_{{ bp.type_id }}" class="nc-input" style="width: 100%;">
+                                {% for i in range(11) %}
+                                <option value="{{ i }}" {% if bp.me == i %}selected{% endif %}>ME {{ i }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="nc-field">
+                        <label class="nc-field-label">BPC</label>
+                        <input type="hidden" name="bpc_{{ bp.type_id }}" value="0">
+                        <div class="nc-bpc-toggle">
+                            <input type="checkbox" data-bpc-toggle="{{ bp.type_id }}" {% if bp.bpc_max_runs > 0 %}checked{% endif %}>
+                            <input class="nc-input nc-bpc-runs-input" type="number" name="bpc_{{ bp.type_id }}" value="{{ bp.bpc_max_runs if bp.bpc_max_runs > 0 else 1 }}" min="1" {% if bp.bpc_max_runs == 0 %}disabled{% endif %}>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <button type="submit" class="nc-btn">Recalculate</button>
+    </div>
+</form>
+{% endif %}
+
+{% if materials %}
+<div class="nc-panel nc-animate nc-animate-d2">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Materials Required</div>
+    <table class="nc-table">
+        <thead>
+            <tr>
+                <th>Material</th>
+                <th class="nc-qty-header">Quantity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for mat in materials %}
+            <tr>
+                <td>{{ mat.name }}</td>
+                <td class="nc-qty">{{ "{:,}".format(mat.quantity) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="nc-multibuy-btn">
+        <button type="button" class="nc-btn nc-btn-sm" onclick="copyMultibuy(this)">Copy Multibuy</button>
+        <span class="nc-copied">Copied!</span>
+    </div>
+    <textarea id="multibuyData" style="display:none;">{% for mat in materials %}{{ mat.name }} {{ mat.quantity }}
+{% endfor %}</textarea>
+</div>
+{% else %}
+<div class="nc-empty nc-animate nc-animate-d2">No manufacturing materials found for this blueprint.</div>
+{% endif %}
+
+{% if bpc_info %}
+<div class="nc-panel nc-bpc-panel nc-animate nc-animate-d3">
+    <div class="nc-panel-title"><span class="nc-icon"></span>BPC Acquisition Plan</div>
+    <table class="nc-table">
+        <thead>
+            <tr>
+                <th>Blueprint</th>
+                <th class="nc-qty-header">Total Runs</th>
+                <th class="nc-qty-header">Runs / BPC</th>
+                <th class="nc-qty-header">BPCs Needed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bp in bpc_info %}
+            <tr>
+                <td>{{ bp.name }}</td>
+                <td class="nc-qty">{{ "{:,}".format(bp.total_runs) }}</td>
+                <td class="nc-qty">{{ "{:,}".format(bp.max_runs) }}</td>
+                <td class="nc-qty nc-bpc-count">{{ "{:,}".format(bp.bpc_count) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="nc-animate nc-animate-d4" style="margin-top: 1.5rem;">
+    <a href="{{ url_for('industry.blueprints') }}" class="nc-btn nc-btn-dim">Back to Blueprints</a>
+</div>
+
+<script>
+document.querySelectorAll('[data-bpc-toggle]').forEach(function(cb) {
+    var numInput = cb.parentElement.querySelector('.nc-bpc-runs-input');
+    cb.addEventListener('change', function() {
+        if (cb.checked) {
+            numInput.disabled = false;
+            numInput.focus();
+        } else {
+            numInput.disabled = true;
+        }
+    });
+});
+
+function copyMultibuy(btn) {
+    var text = document.getElementById('multibuyData').value.trim();
+    navigator.clipboard.writeText(text).then(function() {
+        var msg = btn.nextElementSibling;
+        msg.classList.add('nc-show');
+        setTimeout(function() { msg.classList.remove('nc-show'); }, 2000);
+    });
+}
+</script>
+
+{% endblock %}

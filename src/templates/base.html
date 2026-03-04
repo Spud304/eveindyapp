@@ -1,3 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}EVE Industry{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <style>
+        /* === EVE NEOCOM THEME — GLOBAL === */
+        :root {
+            --nc-void: #060a10;
+            --nc-deep: #0b1018;
+            --nc-panel: #0d1520;
+            --nc-panel-light: #111d2b;
+            --nc-border: rgba(0, 200, 255, 0.15);
+            --nc-border-bright: rgba(0, 200, 255, 0.35);
+            --nc-teal: #00c8ff;
+            --nc-teal-dim: #0088aa;
+            --nc-teal-glow: rgba(0, 200, 255, 0.08);
+            --nc-cyan: #3df0f0;
+            --nc-gold: #d4a844;
+            --nc-gold-dim: rgba(212, 168, 68, 0.6);
+            --nc-text: #c8d6e0;
+            --nc-text-dim: #6a8090;
+            --nc-text-bright: #e8f4ff;
+            --nc-red: #ff4444;
+            --nc-green: #44cc66;
+            --nc-row-hover: rgba(0, 200, 255, 0.04);
+            --nc-row-stripe: rgba(0, 200, 255, 0.02);
+            --nc-font-display: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            --nc-font-mono: 'Cascadia Mono', 'Consolas', 'SF Mono', 'Monaco', monospace;
+        }
+
+        /* === BODY & HERO === */
+        body {
+            background: var(--nc-void);
+        }
+        .hero.is-primary {
+            background: var(--nc-void) !important;
+        }
+        .hero.is-primary .hero-body {
+            background:
+                radial-gradient(ellipse at 50% 0%, rgba(0, 100, 160, 0.08) 0%, transparent 60%),
+                var(--nc-void) !important;
+            padding-top: 2rem !important;
+            align-items: flex-start !important;
+        }
+        .hero-body .container.has-text-centered {
+            text-align: left !important;
+            max-width: 1100px;
+        }
+
+        /* === NAVBAR === */
+        .hero.is-primary .navbar {
+            background: var(--nc-deep) !important;
+            border-bottom: 1px solid var(--nc-border);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+        }
+        .hero.is-primary .navbar-menu {
+            background: transparent !important;
+        }
+        .hero.is-primary .navbar-item {
+            font-family: var(--nc-font-display);
+            font-weight: 600;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--nc-text-dim) !important;
+            transition: color 0.2s, text-shadow 0.2s;
+            padding: 0.5rem 1rem;
+        }
+        .hero.is-primary .navbar-item:hover,
+        .hero.is-primary .navbar-item:focus {
+            background: transparent !important;
+            color: var(--nc-teal) !important;
+            text-shadow: 0 0 8px rgba(0, 200, 255, 0.3);
+        }
+        .hero.is-primary .navbar-item.is-active {
+            color: var(--nc-teal) !important;
+        }
+
+        /* === HEADER BLOCK === */
+        .nc-header {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--nc-border);
+            position: relative;
+        }
+        .nc-header::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            width: 120px;
+            height: 1px;
+            background: var(--nc-teal);
+        }
+        .nc-title {
+            font-family: var(--nc-font-display) !important;
+            font-weight: 700 !important;
+            font-size: 1.8rem !important;
+            color: var(--nc-text-bright) !important;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.2rem !important;
+        }
+        .nc-subtitle {
+            font-family: var(--nc-font-mono) !important;
+            font-size: 0.85rem !important;
+            color: var(--nc-teal) !important;
+            letter-spacing: 0.05em;
+        }
+
+        /* === PANELS === */
+        .nc-panel {
+            background: var(--nc-panel) !important;
+            border: 1px solid var(--nc-border) !important;
+            border-radius: 0 !important;
+            padding: 1.4rem 1.6rem !important;
+            position: relative;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4) !important;
+            contain: content;
+            margin-bottom: 1.5rem;
+        }
+        .nc-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, var(--nc-teal), transparent 40%);
+            opacity: 0.5;
+        }
+        .nc-panel-title {
+            font-family: var(--nc-font-display) !important;
+            font-weight: 600 !important;
+            font-size: 0.9rem !important;
+            color: var(--nc-teal) !important;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 1.2rem !important;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid rgba(0, 200, 255, 0.08);
+        }
+        .nc-panel-title .nc-icon {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background: var(--nc-teal);
+            margin-right: 8px;
+            vertical-align: middle;
+            position: relative;
+            top: -1px;
+        }
+
+        /* === CARDS (industry overview, blueprints) === */
+        .nc-card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .nc-card {
+            background: var(--nc-panel);
+            border: 1px solid var(--nc-border);
+            padding: 1.2rem 1.4rem;
+            position: relative;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            contain: content;
+        }
+        .nc-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, var(--nc-teal), transparent 50%);
+            opacity: 0.3;
+        }
+        .nc-card:hover {
+            border-color: var(--nc-border-bright);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 8px rgba(0, 200, 255, 0.05);
+        }
+        .nc-card-title {
+            font-family: var(--nc-font-display);
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--nc-text-bright);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+        .nc-card-body {
+            font-family: var(--nc-font-mono);
+            font-size: 0.75rem;
+            color: var(--nc-text-dim);
+            line-height: 1.6;
+            margin-bottom: 0.8rem;
+        }
+        .nc-card-body strong {
+            color: var(--nc-text);
+        }
+
+        /* === BUTTONS === */
+        .nc-btn {
+            display: inline-block;
+            font-family: var(--nc-font-display) !important;
+            font-weight: 600;
+            font-size: 0.8rem !important;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            text-decoration: none;
+            background: transparent !important;
+            color: var(--nc-teal) !important;
+            border: 1px solid var(--nc-teal) !important;
+            border-radius: 0 !important;
+            padding: 0.5em 1.5em !important;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+        }
+        .nc-btn:hover {
+            background: rgba(0, 200, 255, 0.1) !important;
+            box-shadow: 0 0 15px rgba(0, 200, 255, 0.2);
+            color: var(--nc-text-bright) !important;
+        }
+        .nc-btn-sm {
+            font-size: 0.7rem !important;
+            padding: 0.35em 1em !important;
+        }
+        .nc-btn-dim {
+            color: var(--nc-text-dim) !important;
+            border-color: var(--nc-border) !important;
+        }
+        .nc-btn-dim:hover {
+            color: var(--nc-text) !important;
+            border-color: var(--nc-teal-dim) !important;
+            background: rgba(0, 200, 255, 0.05) !important;
+            box-shadow: 0 0 10px rgba(0, 200, 255, 0.1);
+        }
+        .nc-btn-gold {
+            color: var(--nc-gold) !important;
+            border-color: var(--nc-gold) !important;
+        }
+        .nc-btn-gold:hover {
+            background: rgba(212, 168, 68, 0.1) !important;
+            box-shadow: 0 0 15px rgba(212, 168, 68, 0.15);
+            color: #e8c060 !important;
+        }
+        .nc-btn-group {
+            display: flex;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+        }
+
+        /* === FORM ELEMENTS === */
+        .nc-field-label {
+            font-family: var(--nc-font-mono) !important;
+            font-size: 0.7rem !important;
+            color: var(--nc-text-dim) !important;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.3rem !important;
+        }
+        .nc-input,
+        .nc-select select {
+            background: var(--nc-void) !important;
+            border: 1px solid var(--nc-border) !important;
+            border-radius: 0 !important;
+            color: var(--nc-text) !important;
+            font-family: var(--nc-font-mono) !important;
+            font-size: 0.8rem !important;
+            padding: 0.4em 0.6em;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            height: 2em;
+        }
+        .nc-input:focus,
+        .nc-select select:focus {
+            border-color: var(--nc-teal) !important;
+            box-shadow: 0 0 0 1px var(--nc-teal), 0 0 10px rgba(0, 200, 255, 0.15) !important;
+            outline: none;
+        }
+        .nc-input::placeholder {
+            color: var(--nc-text-dim) !important;
+            opacity: 0.5;
+        }
+        .nc-select select option {
+            background: var(--nc-deep);
+            color: var(--nc-text);
+        }
+        .nc-select::after {
+            border-color: var(--nc-teal) !important;
+        }
+
+        /* === TABLES === */
+        .nc-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--nc-font-mono);
+            font-size: 0.8rem;
+        }
+        .nc-table thead th {
+            background: rgba(0, 200, 255, 0.05) !important;
+            color: var(--nc-teal) !important;
+            font-family: var(--nc-font-display) !important;
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.6em 1em !important;
+            border-bottom: 1px solid var(--nc-border-bright) !important;
+            text-align: left;
+        }
+        .nc-table tbody td {
+            padding: 0.55em 1em !important;
+            color: var(--nc-text) !important;
+            border-bottom: 1px solid rgba(0, 200, 255, 0.04) !important;
+            background: transparent !important;
+        }
+        .nc-table tbody tr:nth-child(even) td {
+            background: var(--nc-row-stripe) !important;
+        }
+        .nc-table tbody tr:hover td {
+            background: var(--nc-row-hover) !important;
+        }
+        .nc-table .nc-qty {
+            color: var(--nc-text-bright);
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+        }
+        .nc-table thead th.nc-qty-header {
+            text-align: right;
+        }
+
+        /* === STATUS TAGS === */
+        .nc-tag {
+            display: inline-block;
+            font-family: var(--nc-font-mono);
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 0.2em 0.6em;
+            border: 1px solid;
+        }
+        .nc-tag-active {
+            color: var(--nc-green);
+            border-color: var(--nc-green);
+        }
+        .nc-tag-ready {
+            color: var(--nc-gold);
+            border-color: var(--nc-gold);
+        }
+        .nc-tag-delivered {
+            color: var(--nc-teal);
+            border-color: var(--nc-teal);
+        }
+        .nc-tag-danger {
+            color: var(--nc-red);
+            border-color: var(--nc-red);
+        }
+        .nc-tag-default {
+            color: var(--nc-text-dim);
+            border-color: var(--nc-border);
+        }
+
+        /* === EMPTY STATE === */
+        .nc-empty {
+            font-family: var(--nc-font-mono);
+            font-size: 0.85rem;
+            color: var(--nc-text-dim);
+            padding: 2rem;
+            text-align: center;
+            border: 1px dashed var(--nc-border);
+        }
+
+        /* === MULTIBUY COPY === */
+        .nc-multibuy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4em;
+            margin-top: 0.8rem;
+        }
+        .nc-multibuy-btn .nc-copied {
+            font-family: var(--nc-font-mono);
+            font-size: 0.7rem;
+            color: var(--nc-green);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .nc-multibuy-btn .nc-copied.nc-show {
+            opacity: 1;
+        }
+
+        /* === TEXT UTILITIES === */
+        .nc-text { color: var(--nc-text); }
+        .nc-text-bright { color: var(--nc-text-bright); }
+        .nc-text-dim { color: var(--nc-text-dim); }
+        .nc-text-teal { color: var(--nc-teal); }
+        .nc-text-gold { color: var(--nc-gold); }
+        .nc-mono { font-family: var(--nc-font-mono); }
+
+        /* === ANIMATIONS === */
+        @keyframes nc-fade-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .nc-animate {
+            animation: nc-fade-in 0.4s ease-out both;
+        }
+        .nc-animate-d1 { animation-delay: 0.05s; }
+        .nc-animate-d2 { animation-delay: 0.12s; }
+        .nc-animate-d3 { animation-delay: 0.2s; }
+        .nc-animate-d4 { animation-delay: 0.28s; }
+    </style>
+    {% block head %}{% endblock %}
+</head>
 <body>
     <section class="hero is-primary is-fullheight">
 
@@ -13,10 +430,19 @@
                             <a href="{{ url_for('user.user') }}" class="navbar-item">
                                 Profile
                             </a>
+                            <a href="{{ url_for('industry.industry') }}" class="navbar-item">
+                                Industry
+                            </a>
                             <a href="{{ url_for('industry.blueprints') }}" class="navbar-item">
                                 Blueprints
                             </a>
-                            
+                            <a href="{{ url_for('industry.calculator') }}" class="navbar-item">
+                                Calculator
+                            </a>
+                            <a href="{{ url_for('industry.jobs') }}" class="navbar-item">
+                                Jobs
+                            </a>
+
                             {% endif %}
                             {% if not current_user.is_authenticated %}
                             <a href="{{ url_for('auth.login') }}" class="navbar-item">
@@ -42,3 +468,4 @@
         </div>
     </section>
 </body>
+</html>

@@ -1,19 +1,7 @@
-import requests
 import os
 import json
-import base64
+import logging
 
-from flask import Flask
-from flask import redirect
-from flask import render_template
-from flask import request
-from flask import session
-from flask import url_for
-from flask import request
-from flask import jsonify
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from flask_login import LoginManager
 from dotenv import load_dotenv
 
@@ -25,13 +13,19 @@ from src.industry import IndustryBlueprint
 
 load_dotenv()
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%dT%H:%M:%S',
+)
+logger = logging.getLogger(__name__)
+
 CLIENT_ID = os.environ.get('CLIENT_ID')
 CLIENT_SECRET = os.environ.get('CLIENT_SECRET')
 CALLBACK_URL = os.environ.get('CALLBACK_URL')
 DB_NAME = os.environ.get('DB_NAME')
 STATIC_DB = os.environ.get('STATIC_DB')
 SCOPES = os.environ.get('SCOPES', 'publicData')
-
 
 # Ensure SCOPES is URL encoded and space delimited
 scopes_list = SCOPES.split()
@@ -45,16 +39,10 @@ if CLIENT_ID is None or CLIENT_SECRET is None or CALLBACK_URL is None:
 if DB_NAME is None:
     raise ValueError("DB_NAME must be set in the environment variables.")
 
-print(f"DB_NAME: {DB_NAME}")
-print(f"CLIENT_ID: {CLIENT_ID}")
-print(f"CLIENT_SECRET: {CLIENT_SECRET}")
-print(f"CALLBACK_URL: {CALLBACK_URL}")
-print(f"SCOPES: {str(SCOPES)}")
-
-app = Application(__name__)
+instance_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
+app = Application(__name__, instance_path=instance_path)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DB_NAME}.sqlite'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True
 app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY")
 app.config['SQLALCHEMY_BINDS'] = {
     'static': f'sqlite:///{STATIC_DB}.sqlite',
@@ -71,7 +59,7 @@ login_manager.login_view = 'auth.login'
 @login_manager.user_loader
 def load_user(user_id):
     """ Load the user from the database """
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 with app.app_context():
     db.create_all()
@@ -86,4 +74,4 @@ industry_blueprint = IndustryBlueprint('industry', __name__)
 app.register_blueprint(industry_blueprint)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False, host="localhost", port=5050)

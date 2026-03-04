@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Industry Jobs{% endblock %}
+{% block content %}
+
+<div class="nc-header nc-animate">
+    <h1 class="nc-title">Industry Jobs</h1>
+    <p class="nc-subtitle">Manufacturing &amp; research activity</p>
+</div>
+
+{% if jobs_info %}
+<div class="nc-panel nc-animate nc-animate-d1">
+    <table class="nc-table">
+        <thead>
+            <tr>
+                <th>Job ID</th>
+                <th>Activity</th>
+                <th>Blueprint</th>
+                <th>Product</th>
+                <th class="nc-qty-header">Runs</th>
+                <th>Status</th>
+                <th class="nc-qty-header">Cost</th>
+                <th>Start</th>
+                <th>End</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs_info %}
+            {% set activity_map = {1: "Manufacturing", 3: "Research TE", 4: "Research ME", 5: "Copying", 8: "Invention", 9: "Reactions"} %}
+            <tr>
+                <td>{{ job.job_id }}</td>
+                <td>{{ activity_map.get(job.activity_id, job.activity_id) }}</td>
+                <td>{{ job.blueprint_type_id }}</td>
+                <td>{{ job.product_type_id | default('-') }}</td>
+                <td class="nc-qty">{{ job.runs }}</td>
+                <td>
+                    <span class="nc-tag
+                        {% if job.status == 'active' %} nc-tag-active
+                        {% elif job.status == 'ready' %} nc-tag-ready
+                        {% elif job.status == 'delivered' %} nc-tag-delivered
+                        {% elif job.status == 'cancelled' or job.status == 'reverted' %} nc-tag-danger
+                        {% else %} nc-tag-default
+                        {% endif %}">
+                        {{ job.status }}
+                    </span>
+                </td>
+                <td class="nc-qty">{{ "{:,.0f}".format(job.cost) if job.cost else '-' }}</td>
+                <td class="nc-mono nc-text-dim" style="font-size:0.7rem;">{{ job.start_date | replace('T', ' ') | replace('Z', '') if job.start_date else '-' }}</td>
+                <td class="nc-mono nc-text-dim" style="font-size:0.7rem;">{{ job.end_date | replace('T', ' ') | replace('Z', '') if job.end_date else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="nc-empty nc-animate nc-animate-d1">No industry jobs found.</div>
+{% endif %}
+
+<div class="nc-btn-group nc-animate nc-animate-d2">
+    <a href="{{ url_for('industry.blueprints') }}" class="nc-btn">View Blueprints</a>
+    {% if current_user.is_authenticated %}
+    <a href="{{ url_for('user.user') }}" class="nc-btn nc-btn-dim">Back to Profile</a>
+    {% endif %}
+</div>
+
+{% endblock %}

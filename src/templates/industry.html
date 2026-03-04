@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Industry{% endblock %}
+{% block content %}
+
+<div class="nc-header nc-animate">
+    <h1 class="nc-title">Industry Overview</h1>
+    <p class="nc-subtitle">Production management</p>
+</div>
+
+<div class="nc-card-grid nc-animate nc-animate-d1">
+    <div class="nc-card">
+        <div class="nc-card-title">Blueprints</div>
+        <div class="nc-card-body">View your blueprint library</div>
+        <a href="{{ url_for('industry.blueprints') }}" class="nc-btn nc-btn-sm">View Blueprints</a>
+    </div>
+    <div class="nc-card">
+        <div class="nc-card-title">Jobs</div>
+        <div class="nc-card-body">View active and completed industry jobs</div>
+        <a href="{{ url_for('industry.jobs') }}" class="nc-btn nc-btn-sm nc-btn-gold">View Jobs</a>
+    </div>
+    <div class="nc-card">
+        <div class="nc-card-title">Calculator</div>
+        <div class="nc-card-body">Plan a build: check blueprint coverage, materials, and copy jobs</div>
+        <a href="{{ url_for('industry.calculator') }}" class="nc-btn nc-btn-sm">Calculator</a>
+    </div>
+</div>
+
+{% if current_user.is_authenticated %}
+<div class="nc-animate nc-animate-d2">
+    <a href="{{ url_for('user.user') }}" class="nc-btn nc-btn-dim">Back to Profile</a>
+</div>
+{% endif %}
+
+{% endblock %}

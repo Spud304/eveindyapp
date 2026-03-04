@@ -1,6 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Index Page{% endblock %}
+{% block title %}EVE Industry{% endblock %}
 {% block content %}
-<p>Welcome to the Index Page!</p>
+
+<div class="nc-header nc-animate">
+    <h1 class="nc-title">EVE Industry Tracker</h1>
+    <p class="nc-subtitle">Welcome, capsuleer</p>
+</div>
+
+<div class="nc-panel nc-animate nc-animate-d1" style="max-width: 500px;">
+    <p class="nc-mono nc-text" style="font-size: 0.85rem; line-height: 1.8;">
+        Track your blueprints, plan production runs, and manage industry jobs.
+    </p>
+    <div style="margin-top: 1.2rem;">
+        {% if current_user.is_authenticated %}
+        <a href="{{ url_for('industry.industry') }}" class="nc-btn">Enter Industry</a>
+        {% else %}
+        <a href="{{ url_for('auth.login') }}" class="nc-btn">Login with EVE SSO</a>
+        {% endif %}
+    </div>
+</div>
+
 {% endblock %}
-<!DOCTYPE html>

@@ -1,8 +1,8 @@
 from flask import Flask, render_template
 
 class Application(Flask):
-    def __init__(self, import_name):
-        super().__init__(import_name)
+    def __init__(self, import_name, **kwargs):
+        super().__init__(import_name, **kwargs)
         self._add_routes()
 
     def _add_routes(self):

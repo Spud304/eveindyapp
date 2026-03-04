@@ -1,0 +1,521 @@
+{% extends "base.html" %}
+{% block title %}Manufacturing Calculator{% endblock %}
+{% block head %}
+<style>
+    .nc-search-panel {
+        contain: none;
+        overflow: visible;
+    }
+    .nc-search-wrap {
+        position: relative;
+        max-width: 400px;
+    }
+    .nc-search-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--nc-deep);
+        border: 1px solid var(--nc-border-bright);
+        border-top: none;
+        z-index: 100;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    .nc-search-dropdown .nc-search-item {
+        padding: 0.5em 0.8em;
+        font-family: var(--nc-font-mono);
+        font-size: 0.8rem;
+        color: var(--nc-text);
+        cursor: pointer;
+        border-bottom: 1px solid rgba(0, 200, 255, 0.04);
+    }
+    .nc-search-dropdown .nc-search-item:hover,
+    .nc-search-dropdown .nc-search-item.nc-active {
+        background: var(--nc-row-hover);
+        color: var(--nc-text-bright);
+    }
+    .nc-search-dropdown .nc-search-empty {
+        padding: 0.5em 0.8em;
+        font-family: var(--nc-font-mono);
+        font-size: 0.75rem;
+        color: var(--nc-text-dim);
+    }
+    .nc-calc-form {
+        display: flex;
+        gap: 0.8rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+    }
+    .nc-calc-form .nc-field {
+        flex-shrink: 0;
+    }
+    .nc-calc-form .nc-field-search {
+        flex: 1;
+        min-width: 250px;
+    }
+    .nc-qty-input {
+        width: 100px;
+    }
+    .nc-status-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+        vertical-align: middle;
+    }
+    .nc-dot-bpo { background: var(--nc-teal); }
+    .nc-dot-bpc { background: var(--nc-gold); }
+    .nc-dot-missing { background: var(--nc-red); }
+    .nc-summary-line {
+        font-family: var(--nc-font-mono);
+        font-size: 0.75rem;
+        color: var(--nc-text-dim);
+        margin-bottom: 1rem;
+    }
+    .nc-summary-line span { margin-right: 1.2em; }
+    .nc-action-bpo { color: var(--nc-teal); }
+    .nc-action-bpc { color: var(--nc-gold); }
+    .nc-action-missing { color: var(--nc-red); }
+    .nc-build-summary {
+        font-family: var(--nc-font-mono);
+        font-size: 0.85rem;
+        color: var(--nc-text);
+        margin-bottom: 0.3rem;
+    }
+    .nc-build-summary strong { color: var(--nc-text-bright); }
+    .nc-build-detail {
+        font-family: var(--nc-font-mono);
+        font-size: 0.75rem;
+        color: var(--nc-text-dim);
+        margin-bottom: 1.5rem;
+    }
+    .nc-notice {
+        font-family: var(--nc-font-mono);
+        font-size: 0.8rem;
+        color: var(--nc-gold);
+        padding: 0.8rem 1rem;
+        border: 1px dashed var(--nc-gold-dim);
+        margin-bottom: 1.5rem;
+    }
+    .nc-notice a {
+        color: var(--nc-teal);
+        text-decoration: underline;
+    }
+    .nc-missing-panel::before {
+        background: linear-gradient(90deg, var(--nc-red), transparent 40%) !important;
+    }
+    .nc-missing-panel .nc-panel-title .nc-icon {
+        background: var(--nc-red);
+    }
+    .nc-bpc-panel::before {
+        background: linear-gradient(90deg, var(--nc-gold), transparent 40%) !important;
+    }
+    .nc-bpc-panel .nc-panel-title .nc-icon {
+        background: var(--nc-gold);
+    }
+    .nc-bp-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 0.8rem;
+        margin-bottom: 1.2rem;
+    }
+    .nc-bp-card {
+        background: rgba(0, 200, 255, 0.02);
+        border: 1px solid rgba(0, 200, 255, 0.06);
+        padding: 0.7rem 0.9rem;
+        transition: border-color 0.2s, background 0.2s;
+    }
+    .nc-bp-card:hover {
+        border-color: var(--nc-border-bright);
+        background: rgba(0, 200, 255, 0.04);
+    }
+    .nc-bp-name {
+        font-family: var(--nc-font-display) !important;
+        font-weight: 600;
+        font-size: 0.8rem;
+        color: var(--nc-text-bright);
+        margin-bottom: 0.4rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .nc-bp-fields {
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-end;
+    }
+    .nc-bp-fields .nc-field { flex: 1; }
+    .nc-bp-fields .nc-field-label {
+        font-size: 0.6rem !important;
+        margin-bottom: 0.2rem !important;
+    }
+    /* === COLLAPSIBLE PANELS === */
+    .nc-collapsible .nc-panel-title {
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+    }
+    .nc-collapsible .nc-panel-title .nc-chevron {
+        margin-left: auto;
+        font-size: 0.7rem;
+        color: var(--nc-text-dim);
+        transition: transform 0.2s;
+    }
+    .nc-collapsible.nc-collapsed .nc-panel-title {
+        margin-bottom: 0 !important;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+    .nc-collapsible.nc-collapsed .nc-panel-body {
+        display: none;
+    }
+    .nc-collapsible.nc-collapsed .nc-panel-title .nc-chevron {
+        transform: rotate(-90deg);
+    }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="nc-header nc-animate">
+    <h1 class="nc-title">Manufacturing Calculator</h1>
+    <p class="nc-subtitle">Plan builds, check blueprint coverage, materials &amp; copy jobs</p>
+</div>
+
+{% if not has_blueprints %}
+<div class="nc-notice nc-animate nc-animate-d1">
+    No cached blueprints found. <a href="{{ url_for('industry.blueprints') }}">Fetch your blueprints from ESI</a> first so the calculator can check what you own. It still works without them, but everything will show as missing.
+</div>
+{% endif %}
+
+{% if error is defined and error %}
+<div class="nc-notice nc-animate nc-animate-d1">{{ error }}</div>
+{% endif %}
+
+<form method="GET" action="{{ url_for('industry.calculator') }}" id="calcForm">
+    <div class="nc-panel nc-search-panel nc-animate nc-animate-d1">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Search Item</div>
+        <div class="nc-calc-form">
+            <div class="nc-field nc-field-search">
+                <label class="nc-field-label">Item</label>
+                <div class="nc-search-wrap">
+                    <input class="nc-input" type="text" id="itemSearch" autocomplete="off"
+                           placeholder="Search for a manufacturable item..."
+                           value="{{ product.name if product else '' }}"
+                           style="width: 100%;">
+                    <input type="hidden" name="product_type_id" id="productTypeId"
+                           value="{{ product.type_id if product else '' }}">
+                    <div class="nc-search-dropdown" id="searchDropdown" style="display:none;"></div>
+                </div>
+            </div>
+            <div class="nc-field">
+                <label class="nc-field-label">Quantity</label>
+                <input class="nc-input nc-qty-input" type="number" name="quantity" min="1"
+                       value="{{ desired_qty if desired_qty is defined else 1 }}">
+            </div>
+            <div class="nc-field">
+                <button type="submit" class="nc-btn">Calculate</button>
+            </div>
+        </div>
+    </div>
+
+{% if product %}
+    {# Carry ME overrides as hidden fields #}
+    {% for bp in bp_statuses %}
+    <input type="hidden" name="me_{{ bp.type_id }}" value="{{ bp.me }}" class="me-hidden" data-bpid="{{ bp.type_id }}">
+    {% endfor %}
+</form>
+
+{# Build Summary #}
+<div class="nc-animate nc-animate-d2">
+    <div class="nc-build-summary">Building <strong>{{ "{:,}".format(desired_qty) }} &times; {{ product.name }}</strong></div>
+    <div class="nc-build-detail">{{ "{:,}".format(top_runs) }} manufacturing run{{ "s" if top_runs != 1 else "" }} ({{ product_qty_per_run }} per run)</div>
+</div>
+
+{# Blueprint Inventory #}
+<div class="nc-panel nc-collapsible nc-animate nc-animate-d2">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Blueprint Inventory<span class="nc-chevron">&#9662;</span></div>
+    <div class="nc-panel-body">
+    <div class="nc-summary-line">
+        <span><span class="nc-status-dot nc-dot-bpo"></span>{{ owned_bpo_count }} owned (BPO)</span>
+        <span><span class="nc-status-dot nc-dot-bpc"></span>{{ bpc_only_count }} BPC-only</span>
+        <span><span class="nc-status-dot nc-dot-missing"></span>{{ missing_count }} missing</span>
+    </div>
+    <table class="nc-table">
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th>Blueprint</th>
+                <th>ME</th>
+                <th class="nc-qty-header">Runs Needed</th>
+                <th>You Have</th>
+                <th>Action Needed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bp in bp_statuses %}
+            <tr>
+                <td>
+                    {% if bp.status == 'owned_bpo' %}
+                    <span class="nc-status-dot nc-dot-bpo" title="BPO owned"></span>
+                    {% elif bp.status == 'owned_bpc_only' %}
+                    <span class="nc-status-dot nc-dot-bpc" title="BPC only"></span>
+                    {% else %}
+                    <span class="nc-status-dot nc-dot-missing" title="Missing"></span>
+                    {% endif %}
+                </td>
+                <td>{{ bp.name }}</td>
+                <td>{{ bp.me }}</td>
+                <td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td>
+                <td>{{ bp.you_have if bp.you_have else '—' }}</td>
+                <td>
+                    {% if bp.status == 'owned_bpo' and bp.copy_jobs > 0 %}
+                    <span class="nc-action-bpo">Copy &times;{{ bp.copy_jobs }}</span>
+                    {% elif bp.status == 'owned_bpc_only' and bp.runs_shortfall > 0 %}
+                    <span class="nc-action-bpc">Shortfall: {{ bp.runs_shortfall }} runs</span>
+                    {% elif bp.status == 'owned_bpc_only' and bp.runs_shortfall == 0 %}
+                    <span class="nc-action-bpo">Covered</span>
+                    {% elif bp.status == 'missing' %}
+                    <span class="nc-action-missing">Acquire blueprint</span>
+                    {% else %}
+                    <span class="nc-action-bpo">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+{# ME Override Section #}
+<form method="GET" action="{{ url_for('industry.calculator') }}" id="meForm">
+    <input type="hidden" name="product_type_id" value="{{ product.type_id }}">
+    <input type="hidden" name="quantity" value="{{ desired_qty }}">
+    <div class="nc-panel nc-collapsible nc-animate nc-animate-d3">
+        <div class="nc-panel-title"><span class="nc-icon"></span>ME Overrides<span class="nc-chevron">&#9662;</span></div>
+        <div class="nc-panel-body">
+        <div class="nc-bp-grid">
+            {% for bp in bp_statuses %}
+            <div class="nc-bp-card">
+                <div class="nc-bp-name" title="{{ bp.name }}">
+                    {% if bp.status == 'owned_bpo' %}
+                    <span class="nc-status-dot nc-dot-bpo"></span>
+                    {% elif bp.status == 'owned_bpc_only' %}
+                    <span class="nc-status-dot nc-dot-bpc"></span>
+                    {% else %}
+                    <span class="nc-status-dot nc-dot-missing"></span>
+                    {% endif %}
+                    {{ bp.name }}
+                </div>
+                <div class="nc-bp-fields">
+                    <div class="nc-field">
+                        <label class="nc-field-label">ME</label>
+                        <div class="nc-select is-small is-fullwidth select">
+                            <select name="me_{{ bp.type_id }}" class="nc-input" style="width: 100%;">
+                                {% for i in range(11) %}
+                                <option value="{{ i }}" {% if bp.me == i %}selected{% endif %}>ME {{ i }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <button type="submit" class="nc-btn">Recalculate</button>
+        </div>
+    </div>
+</form>
+
+{# Materials Required #}
+{% if materials %}
+<div class="nc-panel nc-collapsible nc-animate nc-animate-d3">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Materials Required<span class="nc-chevron">&#9662;</span></div>
+    <div class="nc-panel-body">
+    <table class="nc-table">
+        <thead>
+            <tr>
+                <th>Material</th>
+                <th class="nc-qty-header">Quantity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for mat in materials %}
+            <tr>
+                <td>{{ mat.name }}</td>
+                <td class="nc-qty">{{ "{:,}".format(mat.quantity) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="nc-multibuy-btn">
+        <button type="button" class="nc-btn nc-btn-sm" onclick="copyMultibuy(this)">Copy Multibuy</button>
+        <span class="nc-copied">Copied!</span>
+    </div>
+    <textarea id="multibuyData" style="display:none;">{% for mat in materials %}{{ mat.name }} {{ mat.quantity }}
+{% endfor %}</textarea>
+    </div>
+</div>
+{% endif %}
+
+{# BPC Copy Plan #}
+{% set copy_bps = bp_statuses|selectattr('status', 'eq', 'owned_bpo')|selectattr('copy_jobs', 'gt', 0)|list %}
+{% if copy_bps %}
+<div class="nc-panel nc-bpc-panel nc-collapsible nc-animate nc-animate-d4">
+    <div class="nc-panel-title"><span class="nc-icon"></span>BPC Copy Plan<span class="nc-chevron">&#9662;</span></div>
+    <div class="nc-panel-body">
+    <table class="nc-table">
+        <thead>
+            <tr>
+                <th>Blueprint</th>
+                <th class="nc-qty-header">Runs Needed</th>
+                <th class="nc-qty-header">Max Runs / Copy</th>
+                <th class="nc-qty-header">Copy Jobs</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bp in copy_bps %}
+            <tr>
+                <td>{{ bp.name }}</td>
+                <td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td>
+                <td class="nc-qty">{{ "{:,}".format(bp.max_prod_limit) }}</td>
+                <td class="nc-qty" style="color: var(--nc-gold); font-weight: bold;">{{ "{:,}".format(bp.copy_jobs) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+{# Missing Blueprints #}
+{% set missing_bps = bp_statuses|selectattr('status', 'eq', 'missing')|list %}
+{% if missing_bps %}
+<div class="nc-panel nc-missing-panel nc-collapsible nc-animate nc-animate-d4">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Missing Blueprints<span class="nc-chevron">&#9662;</span></div>
+    <div class="nc-panel-body">
+    <table class="nc-table">
+        <thead>
+            <tr>
+                <th>Blueprint</th>
+                <th class="nc-qty-header">Runs Needed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bp in missing_bps %}
+            <tr>
+                <td>{{ bp.name }}</td>
+                <td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim); margin-top: 0.8rem;">
+        Acquire via contracts, market, or invention
+    </p>
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+</form>
+{% endif %}
+
+<div class="nc-animate nc-animate-d4" style="margin-top: 1.5rem;">
+    <a href="{{ url_for('industry.industry') }}" class="nc-btn nc-btn-dim">Back to Industry</a>
+</div>
+
+<script>
+(function() {
+    var input = document.getElementById('itemSearch');
+    var dropdown = document.getElementById('searchDropdown');
+    var hidden = document.getElementById('productTypeId');
+    var debounceTimer = null;
+    var activeIndex = -1;
+
+    input.addEventListener('input', function() {
+        clearTimeout(debounceTimer);
+        var q = input.value.trim();
+        if (q.length < 2) {
+            dropdown.style.display = 'none';
+            return;
+        }
+        debounceTimer = setTimeout(function() {
+            fetch('{{ url_for("industry.calculator_search") }}?q=' + encodeURIComponent(q))
+                .then(function(r) { return r.json(); })
+                .then(function(items) {
+                    activeIndex = -1;
+                    if (!items.length) {
+                        dropdown.innerHTML = '<div class="nc-search-empty">No results</div>';
+                        dropdown.style.display = 'block';
+                        return;
+                    }
+                    dropdown.innerHTML = items.map(function(item) {
+                        return '<div class="nc-search-item" data-id="' + item.type_id + '">' + item.name + '</div>';
+                    }).join('');
+                    dropdown.style.display = 'block';
+                });
+        }, 250);
+    });
+
+    input.addEventListener('keydown', function(e) {
+        var items = dropdown.querySelectorAll('.nc-search-item');
+        if (!items.length) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeIndex = Math.min(activeIndex + 1, items.length - 1);
+            updateActive(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIndex = Math.max(activeIndex - 1, 0);
+            updateActive(items);
+        } else if (e.key === 'Enter' && activeIndex >= 0) {
+            e.preventDefault();
+            selectItem(items[activeIndex]);
+        }
+    });
+
+    function updateActive(items) {
+        items.forEach(function(el, i) {
+            el.classList.toggle('nc-active', i === activeIndex);
+        });
+    }
+
+    function selectItem(el) {
+        hidden.value = el.getAttribute('data-id');
+        input.value = el.textContent;
+        dropdown.style.display = 'none';
+    }
+
+    dropdown.addEventListener('click', function(e) {
+        var item = e.target.closest('.nc-search-item');
+        if (item) selectItem(item);
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.nc-search-wrap')) {
+            dropdown.style.display = 'none';
+        }
+    });
+})();
+
+function copyMultibuy(btn) {
+    var text = document.getElementById('multibuyData').value.trim();
+    navigator.clipboard.writeText(text).then(function() {
+        var msg = btn.nextElementSibling;
+        msg.classList.add('nc-show');
+        setTimeout(function() { msg.classList.remove('nc-show'); }, 2000);
+    });
+}
+
+document.querySelectorAll('.nc-collapsible .nc-panel-title').forEach(function(title) {
+    title.addEventListener('click', function() {
+        title.closest('.nc-collapsible').classList.toggle('nc-collapsed');
+    });
+});
+</script>
+
+{% endblock %}
