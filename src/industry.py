@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from src.models.models import db, InvTypes, cached_locations, CachedBlueprint, IndustryActivityMaterials, IndustryActivityProducts, IndustryBlueprints
 from src.constants import ESI_BASE_URL
-from src.utils import esi_get, esi_headers, batch_type_names
+from src.utils import esi_get, esi_headers, batch_type_names, batch_market_info
 
 BLUEPRINT_CACHE_MAX_AGE = timedelta(hours=24)
 
@@ -387,6 +387,15 @@ class IndustryBlueprint(Blueprint):
             [{"name": type_names.get(tid, f"Unknown ({tid})"), "quantity": qty} for tid, qty in raw_materials.items()],
             key=lambda m: m["name"]
         )
+        # Batch fetch prices for all materials
+        prices = batch_market_info(set(raw_materials.keys()))
+        for m in materials:
+            type_id = next((tid for tid, name in type_names.items() if name == m["name"]), None)
+            price = prices.get(type_id) if type_id else None
+            m["unit_price"] = price
+            m["total_price"] = price * m["quantity"] if price else None
+
+        total_cost = sum((m["total_price"] for m in materials if m["total_price"] is not None), 0)
 
         # Summary counts
         owned_bpo_count = sum(1 for b in bp_statuses if b["status"] == "owned_bpo")
@@ -405,6 +414,7 @@ class IndustryBlueprint(Blueprint):
             bpc_only_count=bpc_only_count,
             missing_count=missing_count,
             has_blueprints=has_blueprints,
+            total_cost=total_cost,
         )
 
     def get_jobs(self):

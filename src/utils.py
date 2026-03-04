@@ -65,17 +65,47 @@ def batch_type_names(type_ids: set[int]) -> dict[int, str]:
     ).all()
     return {r.typeID: r.typeName for r in rows}
 
-def get_market_info(type_id: int) -> dict:
-    """Get market info for a type ID, including price and volume."""
-    db_entry = db.session.get(CachedMarketData, type_id)
-    if db_entry and (db_entry.cached_at > datetime.now() - timedelta(hours=1)):
-        return {"price": db_entry.price}
-    url = f"https://esi.evetech.net/latest/markets/prices/?datasource=tranquility&market_group_id={type_id}"
+def batch_market_info(type_ids: set[int]) -> dict[int, float]:
+    """Get prices for multiple type IDs. Returns {type_id: price}.
+
+    Checks cache first, then fetches all prices from ESI in a single call
+    for any that are missing or stale.
+    """
+    if not type_ids:
+        return {}
+
+    cutoff = datetime.now() - timedelta(hours=1)
+    result = {}
+
+    # Check cache for all requested type_ids
+    cached = db.session.execute(
+        select(CachedMarketData).where(CachedMarketData.type_id.in_(type_ids))
+    ).scalars().all()
+
+    stale_or_missing = set(type_ids)
+    for entry in cached:
+        if entry.cached_at > cutoff:
+            result[entry.type_id] = entry.price
+            stale_or_missing.discard(entry.type_id)
+
+    if not stale_or_missing:
+        return result
+
+    # Single ESI call returns all market prices
+    url = "https://esi.evetech.net/latest/markets/prices/?datasource=tranquility"
     status, data = esi_get(url)
-    if status == 200 and isinstance(data, list) and data:
-        db_entry = CachedMarketData(type_id=type_id, price=data[0]['average_price'], cached_at=datetime.now())
-        db.session.merge(db_entry)
-        db.session.commit()
-        return data[0]  # Return the first entry which should be the relevant one
-    logger.warning("Failed to get market info for type_id %s: status %s", type_id, status)
-    return {}
+    if status != 200 or not isinstance(data, list):
+        logger.warning("Failed to fetch market prices: status %s", status)
+        return result
+
+    now = datetime.now()
+    prices_by_type = {item['type_id']: item.get('average_price', 0) for item in data}
+
+    for tid in stale_or_missing:
+        price = prices_by_type.get(tid)
+        if price is not None:
+            result[tid] = price
+            db.session.merge(CachedMarketData(type_id=tid, price=price, cached_at=now))
+
+    db.session.commit()
+    return result

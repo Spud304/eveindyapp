@@ -340,6 +340,7 @@
             <tr>
                 <th>Material</th>
                 <th class="nc-qty-header">Quantity</th>
+                <th class="nc-qty-header">Total Cost</th>
             </tr>
         </thead>
         <tbody>
@@ -347,8 +348,14 @@
             <tr>
                 <td>{{ mat.name }}</td>
                 <td class="nc-qty">{{ "{:,}".format(mat.quantity) }}</td>
+                <td class="nc-qty">{{ "{:,.2f} ISK".format(mat.total_price) }}</td>
             </tr>
             {% endfor %}
+            <tr>
+                <td><strong>Total</strong></td>
+                <td class="nc-qty"></td>
+                <td class="nc-qty">{{ "{:,.2f} ISK".format(total_cost) }}</td>
+            </tr>
         </tbody>
     </table>
     <div class="nc-multibuy-btn">
