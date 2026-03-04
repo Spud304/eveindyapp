@@ -4,7 +4,7 @@ from flask import Blueprint
 from flask_login import login_required, current_user
 
 from src.constants import ESI_BASE_URL
-from src.models.models import db, cached_toon_info
+from src.models.models import db, CachedToonInfo
 from src.utils import esi_get
 
 
@@ -17,7 +17,7 @@ class UserBlueprint(Blueprint):
         self.add_url_rule('/user', 'user', login_required(self.get_user), methods=['GET'])
 
     def get_user(self):
-        cached_info = cached_toon_info.query.filter_by(character_id=current_user.character_id).first()
+        cached_info = CachedToonInfo.query.filter_by(character_id=current_user.character_id).first()
         if cached_info:
             if cached_info.wallet_balance is None: # since its a seperate call that could fail independently, we want to try to update it if its missing
                 wallet_status, wallet_data = esi_get(f"{ESI_BASE_URL}/characters/{current_user.character_id}/wallet")
@@ -40,7 +40,7 @@ class UserBlueprint(Blueprint):
             data['corporation_name'] = self._corporation_id_to_name(corporation_id) if corporation_id else None
             wallet_status, wallet_data = esi_get(f"{ESI_BASE_URL}/characters/{current_user.character_id}/wallet")
             data['wallet_balance'] = wallet_data if wallet_status == 200 and wallet_data else 0.0
-            cached_toon_info_entry = cached_toon_info(
+            CachedToonInfo_entry = CachedToonInfo(
                 character_id=current_user.character_id,
                 character_name=data['name'],
                 corporation_id=data['corporation_id'],
@@ -49,7 +49,7 @@ class UserBlueprint(Blueprint):
                 alliance_name=data.get('alliance_name'),
                 wallet_balance=data['wallet_balance']
             )
-            db.session.add(cached_toon_info_entry)
+            db.session.add(CachedToonInfo_entry)
             db.session.commit()
             return render_template('user.html', user_info=data)
         return jsonify({"error": "Failed to fetch user info"}), status or 500

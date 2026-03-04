@@ -2,13 +2,14 @@ import logging
 import random
 import hmac
 import hashlib
-
 import requests
+
 from flask import current_app
 from flask_login import current_user
 from sqlalchemy import select
+from datetime import datetime, timedelta
 
-from src.models.models import db, InvTypes
+from src.models.models import db, InvTypes, CachedMarketData
 
 logger = logging.getLogger(__name__)
 
@@ -63,3 +64,18 @@ def batch_type_names(type_ids: set[int]) -> dict[int, str]:
         select(InvTypes.typeID, InvTypes.typeName).where(InvTypes.typeID.in_(type_ids))
     ).all()
     return {r.typeID: r.typeName for r in rows}
+
+def get_market_info(type_id: int) -> dict:
+    """Get market info for a type ID, including price and volume."""
+    db_entry = db.session.get(CachedMarketData, type_id)
+    if db_entry and (db_entry.cached_at > datetime.now() - timedelta(hours=1)):
+        return {"price": db_entry.price}
+    url = f"https://esi.evetech.net/latest/markets/prices/?datasource=tranquility&market_group_id={type_id}"
+    status, data = esi_get(url)
+    if status == 200 and isinstance(data, list) and data:
+        db_entry = CachedMarketData(type_id=type_id, price=data[0]['average_price'], cached_at=datetime.now())
+        db.session.merge(db_entry)
+        db.session.commit()
+        return data[0]  # Return the first entry which should be the relevant one
+    logger.warning("Failed to get market info for type_id %s: status %s", type_id, status)
+    return {}

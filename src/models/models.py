@@ -51,9 +51,9 @@ class cached_locations(db.Model):
     def __repr__(self):
         return f"cached_locations('{self.location_id}', '{self.location_name}')"
 
-class cached_toon_info(db.Model):
+class CachedToonInfo(db.Model):
     __bind_key__ = "base"
-    __tablename__ = 'cached_toon_info'
+    __tablename__ = 'CachedToonInfo'
 
     character_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     character_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -64,7 +64,15 @@ class cached_toon_info(db.Model):
     wallet_balance: Mapped[float] = mapped_column(Float, nullable=True)
 
     def __repr__(self):
-        return f"cached_toon_info('{self.character_id}', '{self.character_name}', '{self.corporation_id}', '{self.corporation_name}', '{self.alliance_id}', '{self.alliance_name}', '{self.wallet_balance}')"
+        return f"CachedToonInfo('{self.character_id}', '{self.character_name}', '{self.corporation_id}', '{self.corporation_name}', '{self.alliance_id}', '{self.alliance_name}', '{self.wallet_balance}')"
+
+class CachedMarketData(db.Model):
+    __bind_key__ = "base"
+    __tablename__ = 'cached_market_data'
+
+    type_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    cached_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 class CachedBlueprint(db.Model):
     __bind_key__ = "base"
