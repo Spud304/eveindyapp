@@ -1,0 +1,635 @@
+{% extends "base.html" %}
+{% block title %}Configuration{% endblock %}
+{% block head %}
+<style>
+    .nc-search-panel { contain: none; overflow: visible; }
+    .nc-search-wrap { position: relative; max-width: 300px; }
+    .nc-search-dropdown {
+        position: absolute; top: 100%; left: 0; right: 0;
+        background: var(--nc-panel-light); border: 1px solid var(--nc-border-bright);
+        border-top: none; z-index: 101; max-height: 300px; overflow-y: auto;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    }
+    .nc-search-dropdown .nc-search-item {
+        padding: 0.5em 0.8em; font-family: var(--nc-font-mono); font-size: 0.8rem;
+        color: var(--nc-text); cursor: pointer; border-bottom: 1px solid rgba(0, 200, 255, 0.04);
+    }
+    .nc-search-dropdown .nc-search-item:hover,
+    .nc-search-dropdown .nc-search-item.nc-active {
+        background: var(--nc-row-hover); color: var(--nc-text-bright);
+    }
+    .nc-search-dropdown .nc-search-empty {
+        padding: 0.5em 0.8em; font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim);
+    }
+    .nc-blacklist-add {
+        display: flex; gap: 0.8rem; align-items: flex-end; margin-bottom: 1rem;
+    }
+    .nc-blacklist-table { margin-top: 0.5rem; }
+
+    /* Modal overlay */
+    .nc-modal-overlay {
+        display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+        z-index: 200; align-items: center; justify-content: center;
+    }
+    .nc-modal-overlay.nc-show { display: flex; }
+    .nc-modal {
+        background: var(--nc-panel); border: 1px solid var(--nc-border-bright);
+        padding: 1.6rem; width: 500px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
+        box-shadow: 0 4px 30px rgba(0,0,0,0.6);
+    }
+    .nc-modal-title {
+        font-family: var(--nc-font-display); font-weight: 600; font-size: 1rem;
+        color: var(--nc-teal); text-transform: uppercase; letter-spacing: 0.1em;
+        margin-bottom: 1.2rem; padding-bottom: 0.5rem;
+        border-bottom: 1px solid rgba(0, 200, 255, 0.08);
+    }
+    .nc-modal-row { margin-bottom: 1rem; }
+    .nc-modal-row label {
+        display: block; font-family: var(--nc-font-mono); font-size: 0.7rem;
+        color: var(--nc-text-dim); text-transform: uppercase; letter-spacing: 0.08em;
+        margin-bottom: 0.3rem;
+    }
+    .nc-modal-row input, .nc-modal-row select {
+        width: 100%; box-sizing: border-box;
+    }
+    .nc-modal-actions {
+        display: flex; gap: 0.8rem; margin-top: 1.5rem;
+    }
+    .nc-rig-slot { margin-bottom: 0.6rem; }
+    .nc-rig-slot-header {
+        display: flex; align-items: center; gap: 0.5rem;
+    }
+    .nc-rig-clear {
+        font-size: 0.65rem; cursor: pointer; color: var(--nc-text-dim);
+        border: 1px solid var(--nc-border); padding: 0.15em 0.4em;
+        background: transparent; font-family: var(--nc-font-mono);
+    }
+    .nc-rig-clear:hover { color: var(--nc-red); border-color: var(--nc-red); }
+
+    .nc-station-card {
+        background: rgba(0, 200, 255, 0.02); border: 1px solid rgba(0, 200, 255, 0.06);
+        padding: 0.8rem 1rem; margin-bottom: 0.6rem;
+        display: flex; justify-content: space-between; align-items: center;
+        transition: border-color 0.2s;
+    }
+    .nc-station-card:hover { border-color: var(--nc-border-bright); }
+    .nc-station-info { flex: 1; }
+    .nc-station-name {
+        font-family: var(--nc-font-display); font-weight: 600; font-size: 0.85rem;
+        color: var(--nc-text-bright);
+    }
+    .nc-station-detail {
+        font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim);
+        margin-top: 0.2rem;
+    }
+    .nc-station-rigs {
+        font-family: var(--nc-font-mono); font-size: 0.65rem; color: var(--nc-text-dim);
+        margin-top: 0.2rem;
+    }
+    .nc-station-actions { display: flex; gap: 0.5rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="nc-header nc-animate">
+    <h1 class="nc-title">Configuration</h1>
+    <p class="nc-subtitle">Manufacturing stations &amp; production blacklist</p>
+</div>
+
+{# Section 1: Stations #}
+<div class="nc-panel nc-search-panel nc-animate nc-animate-d1">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Stations</div>
+    <div id="stationList">
+        {% for station in config.stations %}
+        <div class="nc-station-card" data-station-id="{{ station.id }}">
+            <div class="nc-station-info">
+                <div class="nc-station-name">{{ station.name }}</div>
+                <div class="nc-station-detail">
+                    {{ station.system_name or 'No system' }} &middot;
+                    {{ station.structure_type|capitalize }} &middot;
+                    Tax {{ station.facility_tax }}%
+                </div>
+                <div class="nc-station-rigs">
+                    {% for rig_id in station.rigs %}
+                        {% if rig_id %}{{ rig_names.get(rig_id, 'Unknown rig') }}{% else %}Empty slot{% endif %}{{ ', ' if not loop.last else '' }}
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="nc-station-actions">
+                <button type="button" class="nc-btn nc-btn-sm nc-station-edit" data-station='{{ station|tojson }}'>Edit</button>
+                <button type="button" class="nc-btn nc-btn-sm nc-btn-dim nc-station-delete" data-station-id="{{ station.id }}">Delete</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% if not config.stations %}
+    <div class="nc-empty" id="stationEmpty">No stations configured</div>
+    {% endif %}
+    <div style="margin-top: 1rem;">
+        <button type="button" class="nc-btn nc-btn-sm" id="addStationBtn">Add Station</button>
+    </div>
+</div>
+
+{# Station Modal #}
+<div class="nc-modal-overlay" id="stationModal">
+    <div class="nc-modal">
+        <div class="nc-modal-title" id="modalTitle">Add Station</div>
+        <input type="hidden" id="modalStationId" value="">
+
+        <div class="nc-modal-row">
+            <label>Station Name</label>
+            <input class="nc-input" type="text" id="modalName" placeholder="My Raitaru">
+        </div>
+        <div class="nc-modal-row">
+            <label>System</label>
+            <div class="nc-search-wrap" style="max-width: 100%;">
+                <input class="nc-input" type="text" id="modalSystem" autocomplete="off" placeholder="Solar system..." style="width: 100%;">
+                <input type="hidden" id="modalSystemId" value="">
+                <div class="nc-search-dropdown" id="modalSystemDrop" style="display:none;"></div>
+            </div>
+        </div>
+        <div class="nc-modal-row">
+            <label>Structure Type</label>
+            <div class="nc-select" style="width: 100%;">
+                <select class="nc-input" id="modalStructureType" style="width: 100%;">
+                    <option value="raitaru">Raitaru (Medium)</option>
+                    <option value="azbel">Azbel (Large)</option>
+                    <option value="sotiyo">Sotiyo (X-Large)</option>
+                    <option value="athanor">Athanor (Medium)</option>
+                    <option value="tatara">Tatara (Large)</option>
+                </select>
+            </div>
+        </div>
+        <div class="nc-modal-row">
+            <label>Facility Tax %</label>
+            <input class="nc-input" type="number" id="modalTax" min="0" step="0.1" value="10.0" style="width: 120px;">
+        </div>
+        <div class="nc-modal-row">
+            <label>Rigs (ME)</label>
+            <div id="rigSlots">
+                {% for i in range(3) %}
+                <div class="nc-rig-slot">
+                    <div class="nc-rig-slot-header">
+                        <span style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim);">Slot {{ i+1 }}</span>
+                        <button type="button" class="nc-rig-clear" data-slot="{{ i }}">Clear</button>
+                    </div>
+                    <div class="nc-search-wrap" style="max-width: 100%; margin-top: 0.2rem;">
+                        <input class="nc-input nc-rig-input" type="text" autocomplete="off"
+                               placeholder="Search ME rig..." style="width: 100%;" data-slot="{{ i }}">
+                        <input type="hidden" class="nc-rig-hidden" data-slot="{{ i }}" value="">
+                        <div class="nc-search-dropdown nc-rig-dropdown" data-slot="{{ i }}" style="display:none;"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="nc-modal-actions">
+            <button type="button" class="nc-btn" id="modalSaveBtn">Save</button>
+            <button type="button" class="nc-btn nc-btn-dim" id="modalCancelBtn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+{# Section 2: Production Blacklist #}
+<div class="nc-panel nc-search-panel nc-animate nc-animate-d2">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Production Blacklist</div>
+    <p style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim); margin-bottom: 1rem;">
+        Blacklisted items are treated as raw materials — the calculator will not recurse into their blueprints.
+    </p>
+    <div class="nc-blacklist-add">
+        <div class="nc-field" style="flex: 1; min-width: 250px;">
+            <label class="nc-field-label">Item</label>
+            <div class="nc-search-wrap">
+                <input class="nc-input" type="text" id="blacklistSearch" autocomplete="off"
+                       placeholder="Search for an item..." style="width: 100%;">
+                <input type="hidden" id="blacklistTypeId" value="">
+                <div class="nc-search-dropdown" id="blacklistDropdown" style="display:none;"></div>
+            </div>
+        </div>
+        <div class="nc-field">
+            <button type="button" class="nc-btn nc-btn-sm" id="blacklistAddBtn">Add</button>
+        </div>
+    </div>
+    <table class="nc-table nc-blacklist-table" id="blacklistTable">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th style="width: 100px;"></th>
+            </tr>
+        </thead>
+        <tbody id="blacklistBody">
+            {% for item in blacklist_items %}
+            <tr data-typeid="{{ item.type_id }}">
+                <td>{{ item.name }}</td>
+                <td class="nc-qty"><button type="button" class="nc-btn nc-btn-sm nc-btn-dim nc-bl-remove" data-typeid="{{ item.type_id }}">Remove</button></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not blacklist_items %}
+    <div class="nc-empty" id="blacklistEmpty">No items blacklisted</div>
+    {% endif %}
+</div>
+
+<div class="nc-animate nc-animate-d3" style="margin-top: 1.5rem;">
+    <a href="{{ url_for('industry.calculator') }}" class="nc-btn nc-btn-dim">Back to Calculator</a>
+</div>
+
+<script>
+(function() {
+    var STRUCTURE_RIG_SIZES = {raitaru: 2, azbel: 3, sotiyo: 4, athanor: 2, tatara: 3};
+
+    // ===== Station CRUD =====
+    var modal = document.getElementById('stationModal');
+    var modalTitle = document.getElementById('modalTitle');
+    var modalStationId = document.getElementById('modalStationId');
+    var modalName = document.getElementById('modalName');
+    var modalSystem = document.getElementById('modalSystem');
+    var modalSystemId = document.getElementById('modalSystemId');
+    var modalStructureType = document.getElementById('modalStructureType');
+    var modalTax = document.getElementById('modalTax');
+
+    function openModal(station) {
+        if (station) {
+            modalTitle.textContent = 'Edit Station';
+            modalStationId.value = station.id;
+            modalName.value = station.name || '';
+            modalSystem.value = station.system_name || '';
+            modalSystemId.value = station.system_id || '';
+            modalStructureType.value = station.structure_type || 'raitaru';
+            modalTax.value = station.facility_tax != null ? station.facility_tax : 10.0;
+            var rigs = station.rigs || [null, null, null];
+            for (var i = 0; i < 3; i++) {
+                document.querySelector('.nc-rig-hidden[data-slot="'+i+'"]').value = rigs[i] || '';
+                var input = document.querySelector('.nc-rig-input[data-slot="'+i+'"]');
+                input.value = '';
+                if (rigs[i] && station._rig_names && station._rig_names[rigs[i]]) {
+                    input.value = station._rig_names[rigs[i]];
+                } else if (rigs[i]) {
+                    // try to load name
+                    input.value = 'Rig #' + rigs[i];
+                }
+            }
+        } else {
+            modalTitle.textContent = 'Add Station';
+            modalStationId.value = '';
+            modalName.value = '';
+            modalSystem.value = '';
+            modalSystemId.value = '';
+            modalStructureType.value = 'raitaru';
+            modalTax.value = 10.0;
+            for (var i = 0; i < 3; i++) {
+                document.querySelector('.nc-rig-hidden[data-slot="'+i+'"]').value = '';
+                document.querySelector('.nc-rig-input[data-slot="'+i+'"]').value = '';
+            }
+        }
+        modal.classList.add('nc-show');
+    }
+
+    function closeModal() {
+        modal.classList.remove('nc-show');
+    }
+
+    document.getElementById('addStationBtn').addEventListener('click', function() { openModal(null); });
+    document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
+    modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+
+    document.getElementById('modalSaveBtn').addEventListener('click', function() {
+        var rigs = [];
+        for (var i = 0; i < 3; i++) {
+            var v = document.querySelector('.nc-rig-hidden[data-slot="'+i+'"]').value;
+            rigs.push(v ? parseInt(v) : null);
+        }
+        var payload = {
+            name: modalName.value.trim(),
+            system_id: modalSystemId.value ? parseInt(modalSystemId.value) : null,
+            system_name: modalSystem.value.trim() || null,
+            structure_type: modalStructureType.value,
+            facility_tax: parseFloat(modalTax.value) || 10.0,
+            rigs: rigs
+        };
+        var stationId = modalStationId.value;
+        var url, method;
+        if (stationId) {
+            payload.id = parseInt(stationId);
+            url = '{{ url_for("config.station_update") }}';
+        } else {
+            url = '{{ url_for("config.station_add") }}';
+        }
+        fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderStations(data.stations, data.rig_names);
+            closeModal();
+        });
+    });
+
+    // Delegated edit/delete
+    document.getElementById('stationList').addEventListener('click', function(e) {
+        var editBtn = e.target.closest('.nc-station-edit');
+        if (editBtn) {
+            var station = JSON.parse(editBtn.getAttribute('data-station'));
+            // Resolve rig names from current page data
+            station._rig_names = {{ rig_names|tojson }};
+            openModal(station);
+            return;
+        }
+        var delBtn = e.target.closest('.nc-station-delete');
+        if (delBtn) {
+            var sid = parseInt(delBtn.getAttribute('data-station-id'));
+            fetch('{{ url_for("config.station_remove") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: sid})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) { renderStations(data.stations, data.rig_names); });
+        }
+    });
+
+    function renderStations(stations, rigNames) {
+        var list = document.getElementById('stationList');
+        var empty = document.getElementById('stationEmpty');
+        if (!stations.length) {
+            list.innerHTML = '';
+            if (!empty) {
+                var div = document.createElement('div');
+                div.className = 'nc-empty';
+                div.id = 'stationEmpty';
+                div.textContent = 'No stations configured';
+                list.after(div);
+            } else {
+                empty.style.display = '';
+            }
+            return;
+        }
+        if (empty) empty.style.display = 'none';
+        list.innerHTML = stations.map(function(s) {
+            var rigsText = (s.rigs || []).map(function(rid) {
+                if (!rid) return 'Empty slot';
+                return rigNames[rid] || ('Rig #' + rid);
+            }).join(', ');
+            return '<div class="nc-station-card" data-station-id="' + s.id + '">' +
+                '<div class="nc-station-info">' +
+                '<div class="nc-station-name">' + escHtml(s.name) + '</div>' +
+                '<div class="nc-station-detail">' + escHtml(s.system_name || 'No system') + ' &middot; ' +
+                    capitalize(s.structure_type) + ' &middot; Tax ' + s.facility_tax + '%</div>' +
+                '<div class="nc-station-rigs">' + escHtml(rigsText) + '</div>' +
+                '</div>' +
+                '<div class="nc-station-actions">' +
+                '<button type="button" class="nc-btn nc-btn-sm nc-station-edit" data-station=\'' + JSON.stringify(s).replace(/'/g, '&#39;') + '\'>Edit</button>' +
+                '<button type="button" class="nc-btn nc-btn-sm nc-btn-dim nc-station-delete" data-station-id="' + s.id + '">Delete</button>' +
+                '</div></div>';
+        }).join('');
+        // Store rig names for edit modal
+        window._currentRigNames = rigNames;
+    }
+
+    function escHtml(str) {
+        var d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+    function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
+
+    // ===== Dropdown helpers =====
+    var activeDropdown = null;
+
+    function blockOutsideClicks(e) {
+        if (!e.target.closest('.nc-search-wrap')) {
+            e.preventDefault();
+            e.stopPropagation();
+            hideActiveDrop();
+        }
+    }
+
+    function showDrop(drop) {
+        if (activeDropdown && activeDropdown !== drop) activeDropdown.style.display = 'none';
+        if (!activeDropdown) document.addEventListener('click', blockOutsideClicks, true);
+        activeDropdown = drop;
+        drop.style.display = 'block';
+    }
+    function hideActiveDrop() {
+        if (activeDropdown) activeDropdown.style.display = 'none';
+        activeDropdown = null;
+        document.removeEventListener('click', blockOutsideClicks, true);
+    }
+
+    // ===== System autocomplete in modal =====
+    var sysDebounce = null;
+    var sysActiveIdx = -1;
+    var sysDrop = document.getElementById('modalSystemDrop');
+
+    modalSystem.addEventListener('input', function() {
+        clearTimeout(sysDebounce);
+        var q = modalSystem.value.trim();
+        if (q.length < 2) { hideActiveDrop(); return; }
+        sysDebounce = setTimeout(function() {
+            fetch('{{ url_for("config.config_search_systems") }}?q=' + encodeURIComponent(q))
+                .then(function(r) { return r.json(); })
+                .then(function(items) {
+                    sysActiveIdx = -1;
+                    if (!items.length) {
+                        sysDrop.innerHTML = '<div class="nc-search-empty">No results</div>';
+                        showDrop(sysDrop); return;
+                    }
+                    sysDrop.innerHTML = items.map(function(item) {
+                        return '<div class="nc-search-item" data-id="' + item.system_id + '">' + item.name + '</div>';
+                    }).join('');
+                    showDrop(sysDrop);
+                });
+        }, 250);
+    });
+
+    modalSystem.addEventListener('keydown', function(e) {
+        var items = sysDrop.querySelectorAll('.nc-search-item');
+        if (!items.length) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); sysActiveIdx = Math.min(sysActiveIdx + 1, items.length - 1); sysUpdate(items); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); sysActiveIdx = Math.max(sysActiveIdx - 1, 0); sysUpdate(items); }
+        else if (e.key === 'Enter' && sysActiveIdx >= 0) { e.preventDefault(); sysSel(items[sysActiveIdx]); }
+    });
+
+    function sysUpdate(items) { items.forEach(function(el, i) { el.classList.toggle('nc-active', i === sysActiveIdx); }); }
+    function sysSel(el) {
+        modalSystemId.value = el.getAttribute('data-id');
+        modalSystem.value = el.textContent;
+        hideActiveDrop();
+    }
+    sysDrop.addEventListener('click', function(e) {
+        var item = e.target.closest('.nc-search-item');
+        if (item) sysSel(item);
+    });
+
+    // ===== Rig autocomplete =====
+    var rigDebounces = {};
+    var rigActiveIdxs = {};
+
+    document.querySelectorAll('.nc-rig-input').forEach(function(input) {
+        var slot = input.getAttribute('data-slot');
+        var dropdown = document.querySelector('.nc-rig-dropdown[data-slot="'+slot+'"]');
+        input.addEventListener('input', function() {
+            clearTimeout(rigDebounces[slot]);
+            var q = input.value.trim();
+            if (q.length < 2) { hideActiveDrop(); return; }
+            rigDebounces[slot] = setTimeout(function() {
+                var rigSize = STRUCTURE_RIG_SIZES[modalStructureType.value] || 2;
+                fetch('{{ url_for("config.config_search_rigs") }}?q=' + encodeURIComponent(q) + '&rig_size=' + rigSize)
+                    .then(function(r) { return r.json(); })
+                    .then(function(items) {
+                        rigActiveIdxs[slot] = -1;
+                        if (!items.length) {
+                            dropdown.innerHTML = '<div class="nc-search-empty">No results</div>';
+                            showDrop(dropdown); return;
+                        }
+                        dropdown.innerHTML = items.map(function(item) {
+                            return '<div class="nc-search-item" data-id="' + item.type_id + '">' + item.name + '</div>';
+                        }).join('');
+                        showDrop(dropdown);
+                    });
+            }, 250);
+        });
+
+        input.addEventListener('keydown', function(e) {
+            var items = dropdown.querySelectorAll('.nc-search-item');
+            if (!items.length) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); rigActiveIdxs[slot] = Math.min((rigActiveIdxs[slot]||0) + 1, items.length - 1); rigUpdate(items, slot); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); rigActiveIdxs[slot] = Math.max((rigActiveIdxs[slot]||0) - 1, 0); rigUpdate(items, slot); }
+            else if (e.key === 'Enter' && (rigActiveIdxs[slot]||0) >= 0) { e.preventDefault(); rigSel(items[rigActiveIdxs[slot]], slot); }
+        });
+    });
+
+    function rigUpdate(items, slot) {
+        var idx = rigActiveIdxs[slot] || 0;
+        items.forEach(function(el, i) { el.classList.toggle('nc-active', i === idx); });
+    }
+    function rigSel(el, slot) {
+        document.querySelector('.nc-rig-hidden[data-slot="'+slot+'"]').value = el.getAttribute('data-id');
+        document.querySelector('.nc-rig-input[data-slot="'+slot+'"]').value = el.textContent;
+        hideActiveDrop();
+    }
+
+    document.querySelectorAll('.nc-rig-dropdown').forEach(function(dropdown) {
+        dropdown.addEventListener('click', function(e) {
+            var item = e.target.closest('.nc-search-item');
+            if (item) rigSel(item, dropdown.getAttribute('data-slot'));
+        });
+    });
+
+    // Clear rig slot
+    document.querySelectorAll('.nc-rig-clear').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var slot = btn.getAttribute('data-slot');
+            document.querySelector('.nc-rig-hidden[data-slot="'+slot+'"]').value = '';
+            document.querySelector('.nc-rig-input[data-slot="'+slot+'"]').value = '';
+        });
+    });
+
+    // ===== Blacklist =====
+    var blInput = document.getElementById('blacklistSearch');
+    var blDropdown = document.getElementById('blacklistDropdown');
+    var blHidden = document.getElementById('blacklistTypeId');
+    var blDebounce = null;
+    var blActiveIdx = -1;
+
+    blInput.addEventListener('input', function() {
+        clearTimeout(blDebounce);
+        var q = blInput.value.trim();
+        if (q.length < 2) { hideActiveDrop(); return; }
+        blDebounce = setTimeout(function() {
+            fetch('{{ url_for("config.config_search_items") }}?q=' + encodeURIComponent(q))
+                .then(function(r) { return r.json(); })
+                .then(function(items) {
+                    blActiveIdx = -1;
+                    if (!items.length) {
+                        blDropdown.innerHTML = '<div class="nc-search-empty">No results</div>';
+                        showDrop(blDropdown); return;
+                    }
+                    blDropdown.innerHTML = items.map(function(item) {
+                        return '<div class="nc-search-item" data-id="' + item.type_id + '">' + item.name + '</div>';
+                    }).join('');
+                    showDrop(blDropdown);
+                });
+        }, 250);
+    });
+
+    blInput.addEventListener('keydown', function(e) {
+        var items = blDropdown.querySelectorAll('.nc-search-item');
+        if (!items.length) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); blActiveIdx = Math.min(blActiveIdx + 1, items.length - 1); blUpdate(items); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); blActiveIdx = Math.max(blActiveIdx - 1, 0); blUpdate(items); }
+        else if (e.key === 'Enter' && blActiveIdx >= 0) { e.preventDefault(); blSel(items[blActiveIdx]); }
+    });
+
+    function blUpdate(items) { items.forEach(function(el, i) { el.classList.toggle('nc-active', i === blActiveIdx); }); }
+    function blSel(el) {
+        blHidden.value = el.getAttribute('data-id');
+        blInput.value = el.textContent;
+        hideActiveDrop();
+    }
+    blDropdown.addEventListener('click', function(e) {
+        var item = e.target.closest('.nc-search-item');
+        if (item) blSel(item);
+    });
+
+    // Blacklist Add
+    document.getElementById('blacklistAddBtn').addEventListener('click', function() {
+        var typeId = blHidden.value;
+        if (!typeId) return;
+        fetch('{{ url_for("config.blacklist_add") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type_id: parseInt(typeId)})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderBlacklist(data.blacklist);
+            blInput.value = '';
+            blHidden.value = '';
+        });
+    });
+
+    // Blacklist Remove
+    document.getElementById('blacklistTable').addEventListener('click', function(e) {
+        var btn = e.target.closest('.nc-bl-remove');
+        if (!btn) return;
+        var typeId = parseInt(btn.getAttribute('data-typeid'));
+        fetch('{{ url_for("config.blacklist_remove") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type_id: typeId})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) { renderBlacklist(data.blacklist); });
+    });
+
+    function renderBlacklist(items) {
+        var body = document.getElementById('blacklistBody');
+        var empty = document.getElementById('blacklistEmpty');
+        if (!items.length) {
+            body.innerHTML = '';
+            if (!empty) {
+                var div = document.createElement('div');
+                div.className = 'nc-empty';
+                div.id = 'blacklistEmpty';
+                div.textContent = 'No items blacklisted';
+                document.getElementById('blacklistTable').after(div);
+            } else {
+                empty.style.display = '';
+            }
+            return;
+        }
+        if (empty) empty.style.display = 'none';
+        body.innerHTML = items.map(function(item) {
+            return '<tr data-typeid="' + item.type_id + '">' +
+                '<td>' + item.name + '</td>' +
+                '<td class="nc-qty"><button type="button" class="nc-btn nc-btn-sm nc-btn-dim nc-bl-remove" data-typeid="' + item.type_id + '">Remove</button></td>' +
+                '</tr>';
+        }).join('');
+    }
+})();
+</script>
+
+{% endblock %}

@@ -1,6 +1,9 @@
+import logging
 import math
 
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 from flask import jsonify
 from flask import render_template
@@ -8,13 +11,199 @@ from flask import request
 from flask import redirect, url_for
 from flask import Blueprint
 from flask_login import login_required, current_user
-from sqlalchemy import select
+from sqlalchemy import select, text
 
-from src.models.models import db, InvTypes, CachedLocations, CachedBlueprint, IndustryActivityMaterials, IndustryActivityProducts, IndustryBlueprints, MapSolarSystems
+from src.models.models import db, InvTypes, InvGroups, CachedLocations, CachedBlueprint, IndustryActivityMaterials, IndustryActivityProducts, IndustryBlueprints, MapSolarSystems
 from src.constants import ESI_BASE_URL
 from src.utils import esi_get, esi_headers, batch_type_names, batch_market_info, get_manufacturing_cost_index
+from src.config import load_user_config
+from src.industry_constants import (
+    STRUCTURE_BASE_ME, STRUCTURE_RIG_SIZE,
+    BASIC_SMALL_SHIP_GROUPS, BASIC_MEDIUM_SHIP_GROUPS, BASIC_LARGE_SHIP_GROUPS,
+    ADV_SMALL_SHIP_GROUPS, ADV_MEDIUM_SHIP_GROUPS, ADV_LARGE_SHIP_GROUPS,
+    CAPITAL_SHIP_GROUPS, RIG_GROUP_TO_CATEGORIES, ALL_ME_RIG_GROUPS,
+    ATTR_ME_BONUS, ATTR_HIGHSEC_MODIFIER, ATTR_LOWSEC_MODIFIER, ATTR_NULLSEC_MODIFIER,
+)
 
 BLUEPRINT_CACHE_MAX_AGE = timedelta(hours=24)
+
+
+def _load_type_group_category_maps():
+    """Load {typeID: groupID} and {groupID: categoryID} from SDE."""
+    type_to_group = {}
+    for row in db.session.execute(select(InvTypes.typeID, InvTypes.groupID)).all():
+        if row.groupID is not None:
+            type_to_group[row.typeID] = row.groupID
+
+    group_to_category = {}
+    for row in db.session.execute(select(InvGroups.groupID, InvGroups.categoryID)).all():
+        if row.categoryID is not None:
+            group_to_category[row.groupID] = row.categoryID
+
+    return type_to_group, group_to_category
+
+
+def _classify_product_for_rig(product_type_id, type_to_group, group_to_category):
+    """Classify a product into a rig category for station ME matching.
+
+    Returns one of: equipment, ammunition, drone_fighter,
+    basic_small_ship, basic_medium_ship, basic_large_ship,
+    adv_small_ship, adv_medium_ship, adv_large_ship,
+    capital_ship, adv_component, basic_capital_component, structure, or None.
+    """
+    group_id = type_to_group.get(product_type_id)
+    if group_id is None:
+        return None
+
+    category_id = group_to_category.get(group_id)
+    if category_id is None:
+        return None
+
+    if category_id == 7:
+        return 'equipment'
+    if category_id == 8:
+        return 'ammunition'
+    if category_id in (18, 87):
+        return 'drone_fighter'
+    if category_id == 6:
+        if group_id in BASIC_SMALL_SHIP_GROUPS:
+            return 'basic_small_ship'
+        if group_id in BASIC_MEDIUM_SHIP_GROUPS:
+            return 'basic_medium_ship'
+        if group_id in BASIC_LARGE_SHIP_GROUPS:
+            return 'basic_large_ship'
+        if group_id in ADV_SMALL_SHIP_GROUPS:
+            return 'adv_small_ship'
+        if group_id in ADV_MEDIUM_SHIP_GROUPS:
+            return 'adv_medium_ship'
+        if group_id in ADV_LARGE_SHIP_GROUPS:
+            return 'adv_large_ship'
+        if group_id in CAPITAL_SHIP_GROUPS:
+            return 'capital_ship'
+        return None
+    if category_id == 17:
+        if group_id in (334, 964):
+            return 'adv_component'
+        if group_id in (873, 913):
+            return 'basic_capital_component'
+        if group_id == 536:
+            return 'structure'
+        return None
+    if category_id == 65:
+        return 'structure'
+
+    return None
+
+
+def _load_rig_data():
+    """Load ME bonus + security multipliers from dgmTypeAttributes for all ME rig types.
+
+    Returns {typeID: {'me_bonus': float, 'sec_mult': {'hs': float, 'ls': float, 'ns': float}, 'group_id': int}}
+    """
+    # Get all typeIDs in ME rig groups (ORM routes to static DB)
+    rig_rows = db.session.execute(
+        select(InvTypes.typeID, InvTypes.groupID)
+        .where(InvTypes.groupID.in_(ALL_ME_RIG_GROUPS))
+        .where(InvTypes.published == True)
+    ).all()
+    if not rig_rows:
+        return {}
+
+    rig_type_ids = {r.typeID for r in rig_rows}
+    type_to_rig_group = {r.typeID: r.groupID for r in rig_rows}
+
+    # Fetch dogma attributes from static DB via engine
+    type_list = ','.join(str(t) for t in rig_type_ids)
+    attr_ids = f"{ATTR_ME_BONUS},{ATTR_HIGHSEC_MODIFIER},{ATTR_LOWSEC_MODIFIER},{ATTR_NULLSEC_MODIFIER}"
+    attrs_sql = text(f"""
+        SELECT typeID, attributeID, COALESCE(valueFloat, valueInt) as value
+        FROM dgmTypeAttributes
+        WHERE typeID IN ({type_list}) AND attributeID IN ({attr_ids})
+    """)
+    engine = db.engines['static']
+    with engine.connect() as conn:
+        attr_rows = conn.execute(attrs_sql).all()
+
+    # Build per-type attribute map
+    type_attrs = {}
+    for type_id, attr_id, value in attr_rows:
+        type_attrs.setdefault(type_id, {})[attr_id] = value
+
+    rig_data = {}
+    for type_id in rig_type_ids:
+        attrs = type_attrs.get(type_id, {})
+        me_bonus = abs(attrs.get(ATTR_ME_BONUS, 0.0))
+        rig_data[type_id] = {
+            'me_bonus': me_bonus,
+            'sec_mult': {
+                'hs': attrs.get(ATTR_HIGHSEC_MODIFIER, 1.0),
+                'ls': attrs.get(ATTR_LOWSEC_MODIFIER, 1.9),
+                'ns': attrs.get(ATTR_NULLSEC_MODIFIER, 2.1),
+            },
+            'group_id': type_to_rig_group[type_id],
+        }
+
+    return rig_data
+
+
+def _get_security_class(security_status):
+    """Determine security class from system security status."""
+    if security_status is None:
+        return 'hs'
+    if security_status >= 0.45:
+        return 'hs'
+    if security_status > 0.0:
+        return 'ls'
+    return 'ns'
+
+
+def _compute_station_me(station, product_rig_category, system_security, rig_data):
+    """Compute effective ME% for a station given a product rig category.
+
+    Returns the total ME% (0-100 scale) or 0 if no matching rig.
+    """
+    structure_type = station.get('structure_type', '')
+    base_me = STRUCTURE_BASE_ME.get(structure_type, 0.0)
+
+    # Find best matching rig in this station's rig slots
+    best_rig_effective = 0.0
+    sec_class = _get_security_class(system_security)
+
+    for rig_id in station.get('rigs', []):
+        if rig_id is None:
+            continue
+        rig = rig_data.get(rig_id)
+        if not rig:
+            continue
+        # Check if this rig covers the product category
+        categories_covered = RIG_GROUP_TO_CATEGORIES.get(rig['group_id'], set())
+        if product_rig_category not in categories_covered:
+            continue
+        # Compute effective ME for this rig
+        rig_effective = rig['me_bonus'] * rig['sec_mult'].get(sec_class, 1.0) / 100
+        best_rig_effective = max(best_rig_effective, rig_effective)
+
+    # structure_total_me = 1 - (1 - base_me/100) * (1 - rig_effective_me)
+    total_me = (1 - (1 - base_me / 100) * (1 - best_rig_effective)) * 100
+    return total_me
+
+
+def _pick_best_station(stations, product_rig_category, system_securities, rig_data):
+    """For a product rig category, find the station with highest effective ME.
+
+    Returns (station_dict, effective_me_percent) or (None, 0).
+    """
+    best_station = None
+    best_me = 0.0
+
+    for station in stations:
+        sec = system_securities.get(station.get('system_id'))
+        me = _compute_station_me(station, product_rig_category, sec, rig_data)
+        if me > best_me:
+            best_me = me
+            best_station = station
+
+    return best_station, best_me
 
 
 def _load_sde_manufacturing_data():
@@ -23,6 +212,7 @@ def _load_sde_manufacturing_data():
     Returns:
         materials_by_bp: {typeID: [(materialTypeID, quantity), ...]}
         products_by_product: {productTypeID: (blueprintTypeID, quantity)}
+        bp_to_product: {blueprintTypeID: productTypeID}
     """
     materials_by_bp = {}
     for row in db.session.execute(
@@ -32,13 +222,15 @@ def _load_sde_manufacturing_data():
         materials_by_bp.setdefault(row.typeID, []).append((row.materialTypeID, row.quantity))
 
     products_by_product = {}
+    bp_to_product = {}
     for row in db.session.execute(
         select(IndustryActivityProducts)
         .where(IndustryActivityProducts.activityID == 1)
     ).scalars():
         products_by_product[row.productTypeID] = (row.typeID, row.quantity)
+        bp_to_product[row.typeID] = row.productTypeID
 
-    return materials_by_bp, products_by_product
+    return materials_by_bp, products_by_product, bp_to_product
 
 
 class IndustryBlueprint(Blueprint):
@@ -165,7 +357,9 @@ class IndustryBlueprint(Blueprint):
 
     def refresh_blueprints(self):
         headers = esi_headers()
-        self._fetch_and_cache_blueprints(headers)
+        result = self._fetch_and_cache_blueprints(headers)
+        if result is None:
+            return jsonify({"error": "Failed to refresh blueprints from ESI"}), 500
         return redirect(url_for('industry.blueprints'))
 
     def get_blueprint_materials(self, type_id: int):
@@ -177,7 +371,7 @@ class IndustryBlueprint(Blueprint):
         runs = max(1, request.args.get('runs', 1, type=int))
 
         # Pre-load SDE data for DFS
-        materials_by_bp, products_by_product = _load_sde_manufacturing_data()
+        materials_by_bp, products_by_product, _bp_to_product = _load_sde_manufacturing_data()
 
         # Discover all blueprints in the build tree
         tree_bp_ids = _discover_blueprints(type_id, set(), materials_by_bp, products_by_product)
@@ -265,17 +459,12 @@ class IndustryBlueprint(Blueprint):
         product_type_id = request.args.get('product_type_id', 0, type=int)
         desired_qty = request.args.get('quantity', 1, type=int)
         desired_qty = max(1, desired_qty)
-        system_id = request.args.get('system_id', 0, type=int)
-        facility_tax = request.args.get('facility_tax', 10.0, type=float)
         char_id = current_user.character_id
 
-        # Resolve system name for display
-        system_name = None
-        if system_id:
-            system_name = db.session.execute(
-                select(MapSolarSystems.solarSystemName)
-                .where(MapSolarSystems.solarSystemID == system_id)
-            ).scalar_one_or_none()
+        # Load user config
+        config = load_user_config(char_id)
+        stations = config.get("stations", [])
+        blacklist = set(config.get("blacklist", []))
 
         # Check once whether this user has any cached blueprints
         has_blueprints = db.session.execute(
@@ -286,7 +475,7 @@ class IndustryBlueprint(Blueprint):
 
         if not product_type_id:
             return render_template('calculator.html', product=None, has_blueprints=has_blueprints,
-                                   system_id=system_id, system_name=system_name, facility_tax=facility_tax)
+                                   stations=stations)
 
         # Look up product name
         product_name = db.session.execute(
@@ -303,6 +492,7 @@ class IndustryBlueprint(Blueprint):
 
         if not bp_product:
             return render_template('calculator.html', product=None, has_blueprints=has_blueprints,
+                                   stations=stations,
                                    error=f"No manufacturing blueprint found for this item.")
 
         top_bp_id = bp_product.typeID
@@ -310,10 +500,46 @@ class IndustryBlueprint(Blueprint):
         top_runs = math.ceil(desired_qty / product_qty_per_run)
 
         # Pre-load SDE data for DFS
-        materials_by_bp, products_by_product = _load_sde_manufacturing_data()
+        materials_by_bp, products_by_product, bp_to_product = _load_sde_manufacturing_data()
 
-        # Discover full blueprint tree
-        tree_bp_ids = _discover_blueprints(top_bp_id, set(), materials_by_bp, products_by_product)
+        # Load classification maps
+        type_to_group, group_to_category = _load_type_group_category_maps()
+
+        # Pre-fetch security status for all station systems
+        system_ids = {s['system_id'] for s in stations if s.get('system_id')}
+        system_securities = {}
+        if system_ids:
+            sec_rows = db.session.execute(
+                select(MapSolarSystems.solarSystemID, MapSolarSystems.security)
+                .where(MapSolarSystems.solarSystemID.in_(system_ids))
+            ).all()
+            system_securities = {r.solarSystemID: r.security for r in sec_rows}
+
+        # Load rig data from SDE
+        rig_data = _load_rig_data()
+
+        # Discover full blueprint tree (respecting blacklist)
+        tree_bp_ids = _discover_blueprints(top_bp_id, set(), materials_by_bp, products_by_product, blacklist)
+
+        # Build structure_me_by_bp: classify each blueprint's product, pick best station
+        structure_me_by_bp = {}
+        bp_rig_categories = {}
+        bp_station_assignments = {}
+        for bp_id in tree_bp_ids:
+            prod_id = bp_to_product.get(bp_id)
+            if prod_id:
+                rig_cat = _classify_product_for_rig(prod_id, type_to_group, group_to_category)
+            else:
+                rig_cat = None
+            bp_rig_categories[bp_id] = rig_cat
+
+            if rig_cat and stations:
+                best_station, best_me = _pick_best_station(stations, rig_cat, system_securities, rig_data)
+                structure_me_by_bp[bp_id] = best_me
+                bp_station_assignments[bp_id] = best_station
+            else:
+                structure_me_by_bp[bp_id] = 0
+                bp_station_assignments[bp_id] = None
 
         # Query user's cached blueprints for these types
         cached_bps = db.session.execute(
@@ -345,10 +571,12 @@ class IndustryBlueprint(Blueprint):
                     me_levels[bp_id] = 0
 
         # Compute runs needed per blueprint
-        runs_needed = _compute_runs_needed(top_bp_id, me_levels, top_runs, materials_by_bp, products_by_product)
+        runs_needed = _compute_runs_needed(top_bp_id, me_levels, top_runs, materials_by_bp,
+                                           products_by_product, blacklist, structure_me_by_bp)
 
         # Resolve raw materials
-        raw_materials = _resolve_material_tree(top_bp_id, {}, me_levels, materials_by_bp, products_by_product)
+        raw_materials = _resolve_material_tree(top_bp_id, {}, me_levels, materials_by_bp,
+                                               products_by_product, blacklist, structure_me_by_bp)
         if top_runs > 1:
             raw_materials = {tid: qty * top_runs for tid, qty in raw_materials.items()}
 
@@ -391,6 +619,7 @@ class IndustryBlueprint(Blueprint):
                 runs_shortfall = needed
                 copy_jobs = 0
 
+            assigned_station = bp_station_assignments.get(bp_id)
             bp_statuses.append({
                 "type_id": bp_id,
                 "name": type_names.get(bp_id, f"Unknown ({bp_id})"),
@@ -403,6 +632,8 @@ class IndustryBlueprint(Blueprint):
                 "copy_jobs": copy_jobs,
                 "max_prod_limit": max_prod,
                 "you_have": _describe_ownership(own),
+                "station_name": assigned_station['name'] if assigned_station else None,
+                "structure_me": structure_me_by_bp.get(bp_id, 0),
             })
 
         # Sort materials
@@ -428,12 +659,27 @@ class IndustryBlueprint(Blueprint):
 
         total_material_cost = sum((m["total_price"] for m in materials if m["total_price"] is not None), 0.0)
 
-        # Compute job costs per blueprint
+        # Compute job costs per blueprint using station assignments
         SCC_SURCHARGE = 0.015
-        system_cost_index = get_manufacturing_cost_index(system_id) if system_id else 0.0
+
+        # Pre-fetch cost indices for all unique station system_ids
+        cost_indices = {}
+        for station in stations:
+            sid = station.get('system_id')
+            if sid and sid not in cost_indices:
+                cost_indices[sid] = get_manufacturing_cost_index(sid)
 
         for bp in bp_statuses:
             bp_id = bp["type_id"]
+            assigned_station = bp_station_assignments.get(bp_id)
+            if assigned_station:
+                sys_id = assigned_station.get('system_id')
+                facility_tax = assigned_station.get('facility_tax', 10.0)
+                system_cost_index = cost_indices.get(sys_id, 0.0) if sys_id else 0.0
+            else:
+                facility_tax = 0.0
+                system_cost_index = 0.0
+
             # EIV = sum of (adjusted_price * base_qty) for ME 0 materials
             eiv_per_run = 0.0
             for mat_id, base_qty in materials_by_bp.get(bp_id, []):
@@ -464,9 +710,7 @@ class IndustryBlueprint(Blueprint):
             total_material_cost=total_material_cost,
             total_job_cost=total_job_cost,
             grand_total=grand_total,
-            system_id=system_id,
-            system_name=system_name,
-            facility_tax=facility_tax,
+            stations=stations,
         )
 
     def get_jobs(self):
@@ -486,107 +730,170 @@ class IndustryBlueprint(Blueprint):
         names = {row.location_id: row.location_name for row in cached}
 
         missing = location_ids - names.keys()
-        new_entries = []
+        if not missing:
+            return names
+
+        # IDs that can't be resolved directly (or return 403) may be containers
+        # inside stations. Build asset map lazily to walk the chain if needed.
+        asset_map = None
         for loc_id in missing:
             name = self._fetch_location_name(loc_id, headers)
+            if name is None or name == "Unknown Location":
+                # Unrecognized ID range or ESI failed — try asset chain fallback.
+                if asset_map is None:
+                    asset_map = self._build_asset_location_map(headers)
+                station_id = self._follow_asset_chain(loc_id, asset_map)
+                if station_id:
+                    resolved = self._fetch_location_name(station_id, headers)
+                    if resolved and resolved != "Unknown Location":
+                        name = resolved
+                name = name or "Unknown Location"
             names[loc_id] = name
-            new_entries.append(CachedLocations(location_id=loc_id, location_name=name))  # type: ignore[call-arg]
+            db.session.merge(CachedLocations(location_id=loc_id, location_name=name))  # type: ignore[call-arg]
 
-        if new_entries:
-            db.session.add_all(new_entries)
+        if missing:
             db.session.commit()
 
         return names
 
-    def _fetch_location_name(self, location_id: int, headers: dict) -> str:
+    def _build_asset_location_map(self, headers: dict) -> dict:
+        """Fetch character assets and return {item_id: location_id} map."""
+        char_id = current_user.character_id
+        url = f"{ESI_BASE_URL}/characters/{char_id}/assets/"
+        asset_map = {}
+        page = 1
+        while True:
+            status, data = esi_get(url, headers=headers, params={"page": page})
+            if status != 200 or not data:
+                break
+            for asset in data:
+                asset_map[asset['item_id']] = asset['location_id']
+            if len(data) < 1000:
+                break
+            page += 1
+        return asset_map
+
+    @staticmethod
+    def _follow_asset_chain(item_id: int, asset_map: dict, max_depth: int = 10) -> int | None:
+        """Walk asset_map from item_id until we reach a station/structure ID."""
+        current = item_id
+        for _ in range(max_depth):
+            parent = asset_map.get(current)
+            if parent is None:
+                return None
+            if 60_000_000 <= parent <= 63_999_999:
+                return parent
+            if parent > 1_000_000_000_000:
+                return parent
+            current = parent
+        return None
+
+    def _fetch_location_name(self, location_id: int, headers: dict) -> str | None:
+        """Resolve a location ID to a name. Returns None if the ID isn't a known type."""
         # NPC stations: 60000000–63999999
         if 60_000_000 <= location_id <= 63_999_999:
             url = f"{ESI_BASE_URL}/universe/stations/{location_id}/"
-            key = "name"
         # Player-owned structures: IDs > 1 trillion
         elif location_id > 1_000_000_000_000:
             url = f"{ESI_BASE_URL}/universe/structures/{location_id}/"
-            key = "name"
         # Solar systems: 30000000–39999999
         elif 30_000_000 <= location_id <= 39_999_999:
             url = f"{ESI_BASE_URL}/universe/systems/{location_id}/"
-            key = "name"
         else:
-            return "Unknown Location"
+            return None
 
         status, data = esi_get(url, headers=headers)
         if status == 200 and data:
-            return data.get(key, "Unknown Location")
+            return data.get("name", "Unknown Location")
+        logger.warning("Failed to resolve location %s: status=%s data=%s", location_id, status, data)
         return "Unknown Location"
 
 
 # --- DFS helpers (pure dict lookups, no DB calls) ---
 
 def _discover_blueprints(blueprint_type_id: int, discovered: set,
-                         materials_by_bp: dict, products_by_product: dict) -> set:
+                         materials_by_bp: dict, products_by_product: dict,
+                         blacklist: set = None) -> set:
     """DFS to find all blueprint type IDs in the build tree."""
     if blueprint_type_id in discovered:
         return discovered
     discovered.add(blueprint_type_id)
     for material_type_id, _ in materials_by_bp.get(blueprint_type_id, []):
+        if blacklist and material_type_id in blacklist:
+            continue
         sub = products_by_product.get(material_type_id)
         if sub:
-            _discover_blueprints(sub[0], discovered, materials_by_bp, products_by_product)
+            _discover_blueprints(sub[0], discovered, materials_by_bp, products_by_product, blacklist)
     return discovered
 
 
 def _resolve_material_tree(blueprint_type_id: int, cache: dict, me_levels: dict,
-                           materials_by_bp: dict, products_by_product: dict) -> dict:
+                           materials_by_bp: dict, products_by_product: dict,
+                           blacklist: set = None, structure_me_by_bp: dict = None) -> dict:
     """DFS over the manufacturing tree. Returns {material_type_id: quantity} for 1 run.
     Results are memoized in cache to avoid redundant traversal of shared sub-components.
-    me_levels maps blueprint_type_id -> ME level (0-10) for material reduction."""
+    me_levels maps blueprint_type_id -> ME level (0-10) for material reduction.
+    structure_me_by_bp maps blueprint_type_id -> structure ME bonus (0-100) for additional reduction."""
     if blueprint_type_id in cache:
         return cache[blueprint_type_id]
 
     cache[blueprint_type_id] = {}  # cycle sentinel
 
     me = me_levels.get(blueprint_type_id, 0)
+    struct_me = (structure_me_by_bp or {}).get(blueprint_type_id, 0)
 
     result = {}
     for material_type_id, base_qty in materials_by_bp.get(blueprint_type_id, []):
-        adjusted_qty = max(1, math.ceil(base_qty * (1 - me / 100)))
+        adjusted_qty = max(1, math.ceil(base_qty * (1 - me / 100) * (1 - struct_me / 100)))
 
-        sub = products_by_product.get(material_type_id)
-        if sub:
-            sub_bp_id, sub_product_qty = sub
-            sub_tree = _resolve_material_tree(sub_bp_id, cache, me_levels, materials_by_bp, products_by_product)
-            runs_needed = math.ceil(adjusted_qty / sub_product_qty)
-            for raw_id, raw_qty in sub_tree.items():
-                result[raw_id] = result.get(raw_id, 0) + raw_qty * runs_needed
-        else:
+        if blacklist and material_type_id in blacklist:
             result[material_type_id] = result.get(material_type_id, 0) + adjusted_qty
+        else:
+            sub = products_by_product.get(material_type_id)
+            if sub:
+                sub_bp_id, sub_product_qty = sub
+                sub_tree = _resolve_material_tree(sub_bp_id, cache, me_levels, materials_by_bp,
+                                                  products_by_product, blacklist, structure_me_by_bp)
+                runs_needed = math.ceil(adjusted_qty / sub_product_qty)
+                for raw_id, raw_qty in sub_tree.items():
+                    result[raw_id] = result.get(raw_id, 0) + raw_qty * runs_needed
+            else:
+                result[material_type_id] = result.get(material_type_id, 0) + adjusted_qty
 
     cache[blueprint_type_id] = result
     return result
 
 
 def _compute_runs_needed(blueprint_type_id, me_levels, top_runs,
-                         materials_by_bp, products_by_product):
+                         materials_by_bp, products_by_product,
+                         blacklist: set = None, structure_me_by_bp: dict = None):
     """Returns {bp_type_id: total_runs_needed} across the full tree."""
     runs_needed = {blueprint_type_id: top_runs}
-    _runs_dfs(blueprint_type_id, top_runs, me_levels, runs_needed, materials_by_bp, products_by_product)
+    _runs_dfs(blueprint_type_id, top_runs, me_levels, runs_needed,
+              materials_by_bp, products_by_product, blacklist, structure_me_by_bp)
     return runs_needed
 
 
 def _runs_dfs(blueprint_type_id, parent_runs, me_levels, runs_needed,
-              materials_by_bp, products_by_product):
+              materials_by_bp, products_by_product,
+              blacklist: set = None, structure_me_by_bp: dict = None):
     """Recursive helper: propagate run counts down the build tree."""
     me = me_levels.get(blueprint_type_id, 0)
+    struct_me = (structure_me_by_bp or {}).get(blueprint_type_id, 0)
 
     for material_type_id, base_qty in materials_by_bp.get(blueprint_type_id, []):
-        adjusted_qty = max(1, math.ceil(base_qty * (1 - me / 100)))
+        adjusted_qty = max(1, math.ceil(base_qty * (1 - me / 100) * (1 - struct_me / 100)))
+
+        if blacklist and material_type_id in blacklist:
+            continue
 
         sub = products_by_product.get(material_type_id)
         if sub:
             sub_bp_id, sub_product_qty = sub
             child_runs = math.ceil(adjusted_qty * parent_runs / sub_product_qty)
             runs_needed[sub_bp_id] = runs_needed.get(sub_bp_id, 0) + child_runs
-            _runs_dfs(sub_bp_id, child_runs, me_levels, runs_needed, materials_by_bp, products_by_product)
+            _runs_dfs(sub_bp_id, child_runs, me_levels, runs_needed,
+                      materials_by_bp, products_by_product, blacklist, structure_me_by_bp)
 
 
 def _describe_ownership(own):

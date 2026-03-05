@@ -164,3 +164,22 @@ class MapSolarSystems(db.Model):
 
     solarSystemID: Mapped[int] = mapped_column(Integer, primary_key=True)
     solarSystemName: Mapped[Optional[str]] = mapped_column(String(100))
+    security: Mapped[Optional[float]] = mapped_column(Float)
+
+
+class InvGroups(db.Model):
+    __bind_key__ = "static"
+    __tablename__ = 'invGroups'
+
+    groupID: Mapped[int] = mapped_column(Integer, primary_key=True)
+    categoryID: Mapped[Optional[int]] = mapped_column(Integer)
+    groupName: Mapped[Optional[str]] = mapped_column(String(100))
+
+
+class UserConfig(db.Model):
+    __bind_key__ = "base"
+    __tablename__ = 'user_config'
+
+    character_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default='{}')
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

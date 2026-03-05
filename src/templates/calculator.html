@@ -15,12 +15,13 @@
         top: 100%;
         left: 0;
         right: 0;
-        background: var(--nc-deep);
+        background: var(--nc-panel-light);
         border: 1px solid var(--nc-border-bright);
         border-top: none;
-        z-index: 100;
+        z-index: 101;
         max-height: 300px;
         overflow-y: auto;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     }
     .nc-search-dropdown .nc-search-item {
         padding: 0.5em 0.8em;
@@ -201,7 +202,6 @@
 </style>
 {% endblock %}
 {% block content %}
-
 <div class="nc-header nc-animate">
     <h1 class="nc-title">Manufacturing Calculator</h1>
     <p class="nc-subtitle">Plan builds, check blueprint coverage, materials &amp; copy jobs</p>
@@ -238,23 +238,6 @@
                 <input class="nc-input nc-qty-input" type="number" name="quantity" min="1"
                        value="{{ desired_qty if desired_qty is defined else 1 }}">
             </div>
-            <div class="nc-field nc-field-search" style="min-width: 180px; flex: 0 1 220px;">
-                <label class="nc-field-label">System</label>
-                <div class="nc-search-wrap" style="max-width: 220px;">
-                    <input class="nc-input" type="text" id="systemSearch" autocomplete="off"
-                           placeholder="Solar system..."
-                           value="{{ system_name if system_name else '' }}"
-                           style="width: 100%;">
-                    <input type="hidden" name="system_id" id="systemId"
-                           value="{{ system_id if system_id else '' }}">
-                    <div class="nc-search-dropdown" id="systemDropdown" style="display:none;"></div>
-                </div>
-            </div>
-            <div class="nc-field">
-                <label class="nc-field-label">Facility Tax %</label>
-                <input class="nc-input nc-tax-input" type="number" name="facility_tax" min="0" step="0.1"
-                       value="{{ facility_tax if facility_tax is defined else 10 }}">
-            </div>
             <div class="nc-field">
                 <button type="submit" class="nc-btn">Calculate</button>
             </div>
@@ -284,15 +267,25 @@
             <span>Job Fees: {{ "{:,.2f}".format(total_job_cost) }} ISK</span>
         </div>
     </div>
-    {% if system_name %}
     <div style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim);">
-        System: {{ system_name }} | Facility Tax: {{ facility_tax }}% | SCC Surcharge: 1.5%
-    </div>
+    {% if stations %}
+        {% set station_names = [] %}
+        {% for bp in bp_statuses %}
+            {% if bp.station_name and bp.station_name not in station_names %}
+                {% if station_names.append(bp.station_name) %}{% endif %}
+            {% endif %}
+        {% endfor %}
+        {% if station_names %}
+        <span>Stations: {{ station_names|join(', ') }}</span>
+        <span style="margin-left: 1em;">SCC: 1.5%</span>
+        {% else %}
+        <span>No matching station rigs for these blueprints</span>
+        <span style="margin-left: 1em;">SCC: 1.5%</span>
+        {% endif %}
     {% else %}
-    <div style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim);">
-        No system selected — job fees assume 0% system cost index. Set a system above for accurate costs.
-    </div>
+        No stations configured — <a href="{{ url_for('config.config') }}" style="color: var(--nc-teal); text-decoration: underline;">set up in Config</a> for accurate job costs and structure ME bonuses.
     {% endif %}
+    </div>
 </div>
 
 {# Blueprint Inventory #}
@@ -355,8 +348,6 @@
 <form method="GET" action="{{ url_for('industry.calculator') }}" id="meForm">
     <input type="hidden" name="product_type_id" value="{{ product.type_id }}">
     <input type="hidden" name="quantity" value="{{ desired_qty }}">
-    <input type="hidden" name="system_id" value="{{ system_id }}">
-    <input type="hidden" name="facility_tax" value="{{ facility_tax }}">
     <div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
         <div class="nc-panel-title"><span class="nc-icon"></span>ME Overrides<span class="nc-chevron">&#9662;</span></div>
         <div class="nc-panel-body">
@@ -440,6 +431,8 @@
         <thead>
             <tr>
                 <th>Blueprint</th>
+                <th>Station</th>
+                <th class="nc-qty-header">Struct ME</th>
                 <th class="nc-qty-header">Runs</th>
                 <th class="nc-qty-header">EIV / Run</th>
                 <th class="nc-qty-header">Job Cost</th>
@@ -449,6 +442,8 @@
             {% for bp in bp_statuses %}
             <tr>
                 <td>{{ bp.name }}</td>
+                <td style="font-size: 0.7rem; color: var(--nc-text-dim);">{{ bp.station_name or '—' }}</td>
+                <td class="nc-qty">{{ "{:.2f}".format(bp.structure_me) }}%</td>
                 <td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td>
                 <td class="nc-qty">{{ "{:,.2f}".format(bp.eiv_per_run) }} ISK</td>
                 <td class="nc-qty">{{ "{:,.2f}".format(bp.job_cost) }} ISK</td>
@@ -456,6 +451,8 @@
             {% endfor %}
             <tr>
                 <td><strong>Total</strong></td>
+                <td></td>
+                <td class="nc-qty"></td>
                 <td class="nc-qty"></td>
                 <td class="nc-qty"></td>
                 <td class="nc-qty"><strong>{{ "{:,.2f}".format(total_job_cost) }} ISK</strong></td>
@@ -541,12 +538,32 @@
     var hidden = document.getElementById('productTypeId');
     var debounceTimer = null;
     var activeIndex = -1;
+    var dropdownOpen = false;
+
+    function blockOutsideClicks(e) {
+        if (!e.target.closest('.nc-search-wrap')) {
+            e.preventDefault();
+            e.stopPropagation();
+            hideDropdown();
+        }
+    }
+
+    function showDropdown() {
+        dropdown.style.display = 'block';
+        if (!dropdownOpen) document.addEventListener('click', blockOutsideClicks, true);
+        dropdownOpen = true;
+    }
+    function hideDropdown() {
+        dropdown.style.display = 'none';
+        document.removeEventListener('click', blockOutsideClicks, true);
+        dropdownOpen = false;
+    }
 
     input.addEventListener('input', function() {
         clearTimeout(debounceTimer);
         var q = input.value.trim();
         if (q.length < 2) {
-            dropdown.style.display = 'none';
+            hideDropdown();
             return;
         }
         debounceTimer = setTimeout(function() {
@@ -556,13 +573,13 @@
                     activeIndex = -1;
                     if (!items.length) {
                         dropdown.innerHTML = '<div class="nc-search-empty">No results</div>';
-                        dropdown.style.display = 'block';
+                        showDropdown();
                         return;
                     }
                     dropdown.innerHTML = items.map(function(item) {
                         return '<div class="nc-search-item" data-id="' + item.type_id + '">' + item.name + '</div>';
                     }).join('');
-                    dropdown.style.display = 'block';
+                    showDropdown();
                 });
         }, 250);
     });
@@ -593,7 +610,7 @@
     function selectItem(el) {
         hidden.value = el.getAttribute('data-id');
         input.value = el.textContent;
-        dropdown.style.display = 'none';
+        hideDropdown();
     }
 
     dropdown.addEventListener('click', function(e) {
@@ -601,79 +618,6 @@
         if (item) selectItem(item);
     });
 
-    // System search autocomplete
-    var sysInput = document.getElementById('systemSearch');
-    var sysDropdown = document.getElementById('systemDropdown');
-    var sysHidden = document.getElementById('systemId');
-    var sysDebounce = null;
-    var sysActiveIndex = -1;
-
-    sysInput.addEventListener('input', function() {
-        clearTimeout(sysDebounce);
-        var q = sysInput.value.trim();
-        if (q.length < 2) {
-            sysDropdown.style.display = 'none';
-            return;
-        }
-        sysDebounce = setTimeout(function() {
-            fetch('{{ url_for("industry.calculator_search_systems") }}?q=' + encodeURIComponent(q))
-                .then(function(r) { return r.json(); })
-                .then(function(items) {
-                    sysActiveIndex = -1;
-                    if (!items.length) {
-                        sysDropdown.innerHTML = '<div class="nc-search-empty">No results</div>';
-                        sysDropdown.style.display = 'block';
-                        return;
-                    }
-                    sysDropdown.innerHTML = items.map(function(item) {
-                        return '<div class="nc-search-item" data-id="' + item.system_id + '">' + item.name + '</div>';
-                    }).join('');
-                    sysDropdown.style.display = 'block';
-                });
-        }, 250);
-    });
-
-    sysInput.addEventListener('keydown', function(e) {
-        var items = sysDropdown.querySelectorAll('.nc-search-item');
-        if (!items.length) return;
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            sysActiveIndex = Math.min(sysActiveIndex + 1, items.length - 1);
-            sysUpdateActive(items);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            sysActiveIndex = Math.max(sysActiveIndex - 1, 0);
-            sysUpdateActive(items);
-        } else if (e.key === 'Enter' && sysActiveIndex >= 0) {
-            e.preventDefault();
-            sysSelectItem(items[sysActiveIndex]);
-        }
-    });
-
-    function sysUpdateActive(items) {
-        items.forEach(function(el, i) {
-            el.classList.toggle('nc-active', i === sysActiveIndex);
-        });
-    }
-
-    function sysSelectItem(el) {
-        sysHidden.value = el.getAttribute('data-id');
-        sysInput.value = el.textContent;
-        sysDropdown.style.display = 'none';
-    }
-
-    sysDropdown.addEventListener('click', function(e) {
-        var item = e.target.closest('.nc-search-item');
-        if (item) sysSelectItem(item);
-    });
-
-    // Close dropdowns on outside click
-    document.addEventListener('click', function(e) {
-        if (!e.target.closest('.nc-search-wrap')) {
-            dropdown.style.display = 'none';
-            sysDropdown.style.display = 'none';
-        }
-    });
 })();
 
 function copyMultibuy(btn) {

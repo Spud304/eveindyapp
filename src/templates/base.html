@@ -76,7 +76,10 @@
             text-shadow: 0 0 8px rgba(0, 200, 255, 0.3);
         }
         .hero.is-primary .navbar-item.is-active {
-            color: var(--nc-teal) !important;
+            background: transparent !important;
+            color: var(--nc-text-bright) !important;
+            border-bottom: 2px solid var(--nc-teal);
+            text-shadow: 0 0 6px rgba(0, 200, 255, 0.2);
         }
 
         /* === HEADER BLOCK === */
@@ -423,23 +426,26 @@
                 <div class="container">
                     <div id="navbarMenuHeroA" class="navbar-menu">
                         <div class="navbar-end">
-                            <a href="{{ url_for('index') }}" class="navbar-item">
+                            <a href="{{ url_for('index') }}" class="navbar-item {{ 'is-active' if request.endpoint == 'index' }}">
                                 Home
                             </a>
                             {% if current_user.is_authenticated %}
-                            <a href="{{ url_for('user.user') }}" class="navbar-item">
+                            <a href="{{ url_for('user.user') }}" class="navbar-item {{ 'is-active' if request.endpoint == 'user.user' }}">
                                 Profile
                             </a>
-                            <a href="{{ url_for('industry.industry') }}" class="navbar-item">
+                            <a href="{{ url_for('industry.industry') }}" class="navbar-item {{ 'is-active' if request.endpoint == 'industry.industry' }}">
                                 Industry
                             </a>
-                            <a href="{{ url_for('industry.blueprints') }}" class="navbar-item">
+                            <a href="{{ url_for('industry.blueprints') }}" class="navbar-item {{ 'is-active' if request.endpoint == 'industry.blueprints' }}">
                                 Blueprints
                             </a>
-                            <a href="{{ url_for('industry.calculator') }}" class="navbar-item">
+                            <a href="{{ url_for('industry.calculator') }}" class="navbar-item {{ 'is-active' if request.endpoint and request.endpoint.startswith('industry.calculator') }}">
                                 Calculator
                             </a>
-                            <a href="{{ url_for('industry.jobs') }}" class="navbar-item">
+                            <a href="{{ url_for('config.config') }}" class="navbar-item {{ 'is-active' if request.endpoint and request.endpoint.startswith('config.') }}">
+                                Config
+                            </a>
+                            <a href="{{ url_for('industry.jobs') }}" class="navbar-item {{ 'is-active' if request.endpoint == 'industry.jobs' }}">
                                 Jobs
                             </a>
 

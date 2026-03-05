@@ -12,6 +12,7 @@ from src.application import Application
 from src.auth import AuthBlueprint
 from src.user import UserBlueprint
 from src.industry import IndustryBlueprint
+from src.config import ConfigBlueprint
 
 load_dotenv()
 
@@ -75,6 +76,9 @@ app.register_blueprint(user_blueprint)
 
 industry_blueprint = IndustryBlueprint('industry', __name__)
 app.register_blueprint(industry_blueprint)
+
+config_blueprint = ConfigBlueprint('config', __name__)
+app.register_blueprint(config_blueprint)
 
 if __name__ == '__main__':
     app.run(debug=False, host="localhost", port=5050)
