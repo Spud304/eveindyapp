@@ -74,6 +74,14 @@ uv run python src/main.py
 
 The app starts on `http://localhost:5050`.
 
+### Tests
+
+```
+uv run pytest tests/unit/ -v          # unit only
+uv run pytest tests/integration/ -v   # integration only
+uv run pytest -v                      # all 108 tests
+```
+
 ### Docker
 
 ```
@@ -107,7 +115,6 @@ src/
 - Job notifications -- alert when industry jobs complete
 - Search improvements -- support partial matching and category filtering on the calculator search
 - Test suite -- add unit and integration tests for the DFS logic and ESI helpers
-- Station support -- get location names for blueprints in stations, not just in hangars
 - Project planner -- allow users to save and share build plans with specific items, quantities, and ME levels, and track progress as they acquire materials and complete jobs
 - Reactions support -- add a section for chemical reactions in refineries, with similar DFS material breakdowns and job planning
 - Corporation support -- allow users to link corporation accounts and view corporation-owned blueprints and jobs, with appropriate permission checks
