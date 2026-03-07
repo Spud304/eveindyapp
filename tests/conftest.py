@@ -1,5 +1,4 @@
 import os
-import json
 import tempfile
 
 # Set env vars BEFORE any src imports
@@ -18,9 +17,14 @@ from sqlalchemy import text
 
 from src.application import Application
 from src.models.models import (
-    db, User, UserConfig, InvTypes, InvGroups, IndustryActivityMaterials,
-    IndustryActivityProducts, IndustryBlueprints, MapSolarSystems,
-    CachedBlueprint, CachedToonInfo, CachedMarketData, CachedLocations,
+    db,
+    User,
+    InvTypes,
+    InvGroups,
+    IndustryActivityMaterials,
+    IndustryActivityProducts,
+    IndustryBlueprints,
+    MapSolarSystems,
 )
 from src.auth import AuthBlueprint
 from src.user import UserBlueprint
@@ -33,7 +37,8 @@ def _seed_static_data():
     # Create dgmTypeAttributes table (no ORM model)
     engine = db.engines["static"]
     with engine.connect() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS dgmTypeAttributes (
                 typeID INTEGER,
                 attributeID INTEGER,
@@ -41,7 +46,8 @@ def _seed_static_data():
                 valueFloat REAL,
                 PRIMARY KEY (typeID, attributeID)
             )
-        """))
+        """)
+        )
         conn.commit()
 
     # Groups
@@ -52,7 +58,9 @@ def _seed_static_data():
         InvGroups(groupID=85, categoryID=8, groupName="Projectile Ammo"),
         InvGroups(groupID=100, categoryID=18, groupName="Combat Drone"),
         InvGroups(groupID=334, categoryID=17, groupName="Construction Components"),
-        InvGroups(groupID=873, categoryID=17, groupName="Capital Construction Components"),
+        InvGroups(
+            groupID=873, categoryID=17, groupName="Capital Construction Components"
+        ),
         InvGroups(groupID=536, categoryID=17, groupName="Structure Components"),
         InvGroups(groupID=1816, categoryID=66, groupName="Rig Equipment M-Set"),
     ]
@@ -74,29 +82,53 @@ def _seed_static_data():
         InvTypes(typeID=688, groupID=105, typeName="Rifter Blueprint", published=True),
         # A sub-component that has its own blueprint
         InvTypes(typeID=9001, groupID=334, typeName="Test Component", published=True),
-        InvTypes(typeID=9002, groupID=105, typeName="Test Component Blueprint", published=True),
+        InvTypes(
+            typeID=9002,
+            groupID=105,
+            typeName="Test Component Blueprint",
+            published=True,
+        ),
         # A rig type for ME tests
-        InvTypes(typeID=37178, groupID=1816, typeName="Standup M-Set Equipment Manufacturing Material Efficiency II", published=True),
+        InvTypes(
+            typeID=37178,
+            groupID=1816,
+            typeName="Standup M-Set Equipment Manufacturing Material Efficiency II",
+            published=True,
+        ),
     ]
     for t in product_types:
         db.session.merge(t)
 
     # Manufacturing activities: Rifter Blueprint produces Rifter
     activities_products = [
-        IndustryActivityProducts(typeID=688, activityID=1, productTypeID=587, quantity=1),
-        IndustryActivityProducts(typeID=9002, activityID=1, productTypeID=9001, quantity=1),
+        IndustryActivityProducts(
+            typeID=688, activityID=1, productTypeID=587, quantity=1
+        ),
+        IndustryActivityProducts(
+            typeID=9002, activityID=1, productTypeID=9001, quantity=1
+        ),
     ]
     for a in activities_products:
         db.session.merge(a)
 
     # Manufacturing materials: Rifter needs Tritanium, Pyerite, and Test Component
     activities_materials = [
-        IndustryActivityMaterials(typeID=688, activityID=1, materialTypeID=34, quantity=2000),
-        IndustryActivityMaterials(typeID=688, activityID=1, materialTypeID=35, quantity=1000),
-        IndustryActivityMaterials(typeID=688, activityID=1, materialTypeID=9001, quantity=5),
+        IndustryActivityMaterials(
+            typeID=688, activityID=1, materialTypeID=34, quantity=2000
+        ),
+        IndustryActivityMaterials(
+            typeID=688, activityID=1, materialTypeID=35, quantity=1000
+        ),
+        IndustryActivityMaterials(
+            typeID=688, activityID=1, materialTypeID=9001, quantity=5
+        ),
         # Test Component needs raw mats only
-        IndustryActivityMaterials(typeID=9002, activityID=1, materialTypeID=34, quantity=100),
-        IndustryActivityMaterials(typeID=9002, activityID=1, materialTypeID=36, quantity=50),
+        IndustryActivityMaterials(
+            typeID=9002, activityID=1, materialTypeID=34, quantity=100
+        ),
+        IndustryActivityMaterials(
+            typeID=9002, activityID=1, materialTypeID=36, quantity=50
+        ),
     ]
     for m in activities_materials:
         db.session.merge(m)
@@ -120,14 +152,16 @@ def _seed_static_data():
 
     # Rig dogma attributes (for ME rig testing)
     with engine.connect() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT OR REPLACE INTO dgmTypeAttributes (typeID, attributeID, valueInt, valueFloat)
             VALUES
                 (37178, 2594, NULL, -2.0),
                 (37178, 2355, NULL, 1.0),
                 (37178, 2356, NULL, 1.9),
                 (37178, 2357, NULL, 2.1)
-        """))
+        """)
+        )
         conn.commit()
 
     db.session.commit()
@@ -136,7 +170,9 @@ def _seed_static_data():
 def create_test_app():
     """Build a Flask app configured for testing with in-memory SQLite."""
     tmp = tempfile.mkdtemp()
-    src_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+    src_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"
+    )
     app = Application("src.main", instance_path=tmp, root_path=src_dir)
     app.config["TESTING"] = True
     app.config["SECRET_KEY"] = "test-secret-key"
@@ -160,8 +196,9 @@ def create_test_app():
     def load_user(user_id):
         return db.session.get(User, int(user_id))
 
-    auth_bp = AuthBlueprint("auth", "src", "test-client-id",
-                            "test-client-secret", scopes="publicData")
+    auth_bp = AuthBlueprint(
+        "auth", "src", "test-client-id", "test-client-secret", scopes="publicData"
+    )
     app.register_blueprint(auth_bp)
     app.register_blueprint(UserBlueprint("user", "src"))
     app.register_blueprint(IndustryBlueprint("industry", "src"))

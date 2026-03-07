@@ -6,8 +6,14 @@ from flask import jsonify, render_template, request, Blueprint
 from flask_login import login_required, current_user
 from sqlalchemy import select
 
-from src.models.models import db, UserConfig, InvTypes, MapSolarSystems, IndustryActivityMaterials
-from src.industry_constants import STRUCTURE_RIG_SIZE, ALL_ME_RIG_GROUPS
+from src.models.models import (
+    db,
+    UserConfig,
+    InvTypes,
+    MapSolarSystems,
+    IndustryActivityMaterials,
+)
+from src.industry_constants import ALL_ME_RIG_GROUPS
 
 
 DEFAULT_CONFIG = {
@@ -45,15 +51,57 @@ class ConfigBlueprint(Blueprint):
         self._add_routes()
 
     def _add_routes(self):
-        self.add_url_rule('/config', 'config', login_required(self.get_config), methods=['GET'])
-        self.add_url_rule('/config/search_systems', 'config_search_systems', login_required(self.search_systems), methods=['GET'])
-        self.add_url_rule('/config/search_items', 'config_search_items', login_required(self.search_items), methods=['GET'])
-        self.add_url_rule('/config/search_rigs', 'config_search_rigs', login_required(self.search_rigs), methods=['GET'])
-        self.add_url_rule('/config/stations/add', 'station_add', login_required(self.station_add), methods=['POST'])
-        self.add_url_rule('/config/stations/update', 'station_update', login_required(self.station_update), methods=['POST'])
-        self.add_url_rule('/config/stations/remove', 'station_remove', login_required(self.station_remove), methods=['POST'])
-        self.add_url_rule('/config/blacklist/add', 'blacklist_add', login_required(self.blacklist_add), methods=['POST'])
-        self.add_url_rule('/config/blacklist/remove', 'blacklist_remove', login_required(self.blacklist_remove), methods=['POST'])
+        self.add_url_rule(
+            "/config", "config", login_required(self.get_config), methods=["GET"]
+        )
+        self.add_url_rule(
+            "/config/search_systems",
+            "config_search_systems",
+            login_required(self.search_systems),
+            methods=["GET"],
+        )
+        self.add_url_rule(
+            "/config/search_items",
+            "config_search_items",
+            login_required(self.search_items),
+            methods=["GET"],
+        )
+        self.add_url_rule(
+            "/config/search_rigs",
+            "config_search_rigs",
+            login_required(self.search_rigs),
+            methods=["GET"],
+        )
+        self.add_url_rule(
+            "/config/stations/add",
+            "station_add",
+            login_required(self.station_add),
+            methods=["POST"],
+        )
+        self.add_url_rule(
+            "/config/stations/update",
+            "station_update",
+            login_required(self.station_update),
+            methods=["POST"],
+        )
+        self.add_url_rule(
+            "/config/stations/remove",
+            "station_remove",
+            login_required(self.station_remove),
+            methods=["POST"],
+        )
+        self.add_url_rule(
+            "/config/blacklist/add",
+            "blacklist_add",
+            login_required(self.blacklist_add),
+            methods=["POST"],
+        )
+        self.add_url_rule(
+            "/config/blacklist/remove",
+            "blacklist_remove",
+            login_required(self.blacklist_remove),
+            methods=["POST"],
+        )
 
     def get_config(self):
         config = load_user_config(current_user.character_id)
@@ -63,11 +111,15 @@ class ConfigBlueprint(Blueprint):
         blacklist_items = []
         if blacklist_ids:
             rows = db.session.execute(
-                select(InvTypes.typeID, InvTypes.typeName)
-                .where(InvTypes.typeID.in_(blacklist_ids))
+                select(InvTypes.typeID, InvTypes.typeName).where(
+                    InvTypes.typeID.in_(blacklist_ids)
+                )
             ).all()
             name_map = {r.typeID: r.typeName for r in rows}
-            blacklist_items = [{"type_id": tid, "name": name_map.get(tid, f"Unknown ({tid})")} for tid in blacklist_ids]
+            blacklist_items = [
+                {"type_id": tid, "name": name_map.get(tid, f"Unknown ({tid})")}
+                for tid in blacklist_ids
+            ]
 
         # Resolve rig names for display
         all_rig_ids = set()
@@ -78,37 +130,44 @@ class ConfigBlueprint(Blueprint):
         rig_names = {}
         if all_rig_ids:
             rows = db.session.execute(
-                select(InvTypes.typeID, InvTypes.typeName)
-                .where(InvTypes.typeID.in_(all_rig_ids))
+                select(InvTypes.typeID, InvTypes.typeName).where(
+                    InvTypes.typeID.in_(all_rig_ids)
+                )
             ).all()
             rig_names = {r.typeID: r.typeName for r in rows}
 
-        return render_template('config.html',
+        return render_template(
+            "config.html",
             config=config,
             blacklist_items=blacklist_items,
             rig_names=rig_names,
         )
 
     def search_systems(self):
-        q = request.args.get('q', '', type=str).strip()
+        q = request.args.get("q", "", type=str).strip()
         if len(q) < 2:
             return jsonify([])
         results = db.session.execute(
             select(MapSolarSystems.solarSystemID, MapSolarSystems.solarSystemName)
-            .where(MapSolarSystems.solarSystemName.ilike(f'%{q}%'))
+            .where(MapSolarSystems.solarSystemName.ilike(f"%{q}%"))
             .limit(15)
         ).all()
-        return jsonify([{"system_id": r.solarSystemID, "name": r.solarSystemName} for r in results])
+        return jsonify(
+            [{"system_id": r.solarSystemID, "name": r.solarSystemName} for r in results]
+        )
 
     def search_items(self):
-        q = request.args.get('q', '', type=str).strip()
+        q = request.args.get("q", "", type=str).strip()
         if len(q) < 2:
             return jsonify([])
         results = db.session.execute(
             select(InvTypes.typeID, InvTypes.typeName)
-            .join(IndustryActivityMaterials, IndustryActivityMaterials.materialTypeID == InvTypes.typeID)
+            .join(
+                IndustryActivityMaterials,
+                IndustryActivityMaterials.materialTypeID == InvTypes.typeID,
+            )
             .where(IndustryActivityMaterials.activityID == 1)
-            .where(InvTypes.typeName.ilike(f'%{q}%'))
+            .where(InvTypes.typeName.ilike(f"%{q}%"))
             .where(InvTypes.published == True)
             .distinct()
             .limit(15)
@@ -117,8 +176,8 @@ class ConfigBlueprint(Blueprint):
 
     def search_rigs(self):
         """Autocomplete for engineering complex rigs, filtered by rig size."""
-        q = request.args.get('q', '', type=str).strip()
-        rig_size = request.args.get('rig_size', 0, type=int)
+        q = request.args.get("q", "", type=str).strip()
+        rig_size = request.args.get("rig_size", 0, type=int)
         if len(q) < 2:
             return jsonify([])
 
@@ -142,7 +201,7 @@ class ConfigBlueprint(Blueprint):
         results = db.session.execute(
             select(InvTypes.typeID, InvTypes.typeName)
             .where(InvTypes.groupID.in_(allowed_groups))
-            .where(InvTypes.typeName.ilike(f'%{q}%'))
+            .where(InvTypes.typeName.ilike(f"%{q}%"))
             .where(InvTypes.published == True)
             .limit(15)
         ).all()
@@ -151,23 +210,23 @@ class ConfigBlueprint(Blueprint):
     def station_add(self):
         char_id = current_user.character_id
         data = request.json
-        if not data or not data.get('name'):
+        if not data or not data.get("name"):
             return jsonify({"error": "station name required"}), 400
 
         config = load_user_config(char_id)
         stations = config.get("stations", [])
 
         # Generate next ID
-        next_id = max((s.get('id', 0) for s in stations), default=0) + 1
+        next_id = max((s.get("id", 0) for s in stations), default=0) + 1
 
         station = {
             "id": next_id,
-            "name": data['name'],
-            "system_id": data.get('system_id'),
-            "system_name": data.get('system_name'),
-            "structure_type": data.get('structure_type', 'raitaru'),
-            "facility_tax": data.get('facility_tax', 10.0),
-            "rigs": data.get('rigs', [None, None, None]),
+            "name": data["name"],
+            "system_id": data.get("system_id"),
+            "system_name": data.get("system_name"),
+            "structure_type": data.get("structure_type", "raitaru"),
+            "facility_tax": data.get("facility_tax", 10.0),
+            "rigs": data.get("rigs", [None, None, None]),
         }
         stations.append(station)
         config["stations"] = stations
@@ -178,7 +237,7 @@ class ConfigBlueprint(Blueprint):
     def station_update(self):
         char_id = current_user.character_id
         data = request.json
-        station_id = data.get('id') if data else None
+        station_id = data.get("id") if data else None
         if station_id is None:
             return jsonify({"error": "station id required"}), 400
 
@@ -186,13 +245,15 @@ class ConfigBlueprint(Blueprint):
         stations = config.get("stations", [])
 
         for s in stations:
-            if s.get('id') == station_id:
-                s['name'] = data.get('name', s['name'])
-                s['system_id'] = data.get('system_id', s.get('system_id'))
-                s['system_name'] = data.get('system_name', s.get('system_name'))
-                s['structure_type'] = data.get('structure_type', s.get('structure_type'))
-                s['facility_tax'] = data.get('facility_tax', s.get('facility_tax'))
-                s['rigs'] = data.get('rigs', s.get('rigs'))
+            if s.get("id") == station_id:
+                s["name"] = data.get("name", s["name"])
+                s["system_id"] = data.get("system_id", s.get("system_id"))
+                s["system_name"] = data.get("system_name", s.get("system_name"))
+                s["structure_type"] = data.get(
+                    "structure_type", s.get("structure_type")
+                )
+                s["facility_tax"] = data.get("facility_tax", s.get("facility_tax"))
+                s["rigs"] = data.get("rigs", s.get("rigs"))
                 break
         else:
             return jsonify({"error": "station not found"}), 404
@@ -204,19 +265,25 @@ class ConfigBlueprint(Blueprint):
     def station_remove(self):
         char_id = current_user.character_id
         data = request.json
-        station_id = data.get('id') if data else None
+        station_id = data.get("id") if data else None
         if station_id is None:
             return jsonify({"error": "station id required"}), 400
 
         config = load_user_config(char_id)
-        config["stations"] = [s for s in config.get("stations", []) if s.get('id') != station_id]
+        config["stations"] = [
+            s for s in config.get("stations", []) if s.get("id") != station_id
+        ]
 
         self._save_config_json(char_id, config)
         return jsonify(self._stations_response(config["stations"]))
 
     def blacklist_add(self):
         char_id = current_user.character_id
-        type_id = request.json.get("type_id") if request.is_json else request.form.get("type_id", type=int)
+        type_id = (
+            request.json.get("type_id")
+            if request.is_json
+            else request.form.get("type_id", type=int)
+        )
         if not type_id:
             return jsonify({"error": "type_id required"}), 400
 
@@ -230,7 +297,11 @@ class ConfigBlueprint(Blueprint):
 
     def blacklist_remove(self):
         char_id = current_user.character_id
-        type_id = request.json.get("type_id") if request.is_json else request.form.get("type_id", type=int)
+        type_id = (
+            request.json.get("type_id")
+            if request.is_json
+            else request.form.get("type_id", type=int)
+        )
         if not type_id:
             return jsonify({"error": "type_id required"}), 400
 
@@ -263,14 +334,15 @@ class ConfigBlueprint(Blueprint):
         """Build response with resolved rig names."""
         all_rig_ids = set()
         for s in stations:
-            for rig_id in s.get('rigs', []):
+            for rig_id in s.get("rigs", []):
                 if rig_id is not None:
                     all_rig_ids.add(rig_id)
         rig_names = {}
         if all_rig_ids:
             rows = db.session.execute(
-                select(InvTypes.typeID, InvTypes.typeName)
-                .where(InvTypes.typeID.in_(all_rig_ids))
+                select(InvTypes.typeID, InvTypes.typeName).where(
+                    InvTypes.typeID.in_(all_rig_ids)
+                )
             ).all()
             rig_names = {r.typeID: r.typeName for r in rows}
 
@@ -280,9 +352,13 @@ class ConfigBlueprint(Blueprint):
         items = []
         if blacklist_ids:
             rows = db.session.execute(
-                select(InvTypes.typeID, InvTypes.typeName)
-                .where(InvTypes.typeID.in_(blacklist_ids))
+                select(InvTypes.typeID, InvTypes.typeName).where(
+                    InvTypes.typeID.in_(blacklist_ids)
+                )
             ).all()
             name_map = {r.typeID: r.typeName for r in rows}
-            items = [{"type_id": tid, "name": name_map.get(tid, f"Unknown ({tid})")} for tid in blacklist_ids]
+            items = [
+                {"type_id": tid, "name": name_map.get(tid, f"Unknown ({tid})")}
+                for tid in blacklist_ids
+            ]
         return {"blacklist": items}

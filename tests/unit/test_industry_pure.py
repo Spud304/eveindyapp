@@ -1,4 +1,5 @@
 """Tests for pure functions in src/industry.py — no DB or mocking needed."""
+
 import math
 from unittest.mock import MagicMock
 
@@ -20,11 +21,11 @@ from src.industry_constants import (
     ADV_MEDIUM_SHIP_GROUPS,
     ADV_LARGE_SHIP_GROUPS,
     CAPITAL_SHIP_GROUPS,
-    RIG_GROUP_TO_CATEGORIES,
 )
 
 
 # --- _get_security_class ---
+
 
 class TestGetSecurityClass:
     def test_highsec_above_threshold(self):
@@ -47,6 +48,7 @@ class TestGetSecurityClass:
 
 
 # --- _classify_product_for_rig ---
+
 
 class TestClassifyProductForRig:
     def test_equipment(self):
@@ -94,8 +96,14 @@ class TestClassifyProductForRig:
         assert _classify_product_for_rig(1, {1: 964}, {964: 17}) == "adv_component"
 
     def test_basic_capital_component(self):
-        assert _classify_product_for_rig(1, {1: 873}, {873: 17}) == "basic_capital_component"
-        assert _classify_product_for_rig(1, {1: 913}, {913: 17}) == "basic_capital_component"
+        assert (
+            _classify_product_for_rig(1, {1: 873}, {873: 17})
+            == "basic_capital_component"
+        )
+        assert (
+            _classify_product_for_rig(1, {1: 913}, {913: 17})
+            == "basic_capital_component"
+        )
 
     def test_structure_cat17(self):
         assert _classify_product_for_rig(1, {1: 536}, {536: 17}) == "structure"
@@ -117,6 +125,7 @@ class TestClassifyProductForRig:
 
 
 # --- _compute_station_me ---
+
 
 class TestComputeStationMe:
     def test_raitaru_no_rigs(self):
@@ -181,6 +190,7 @@ class TestComputeStationMe:
 
 # --- _pick_best_station ---
 
+
 class TestPickBestStation:
     def test_empty_list(self):
         station, me = _pick_best_station([], "equipment", {}, {})
@@ -196,8 +206,18 @@ class TestPickBestStation:
             }
         }
         stations = [
-            {"id": 1, "structure_type": "raitaru", "rigs": [None, None, None], "system_id": 1},
-            {"id": 2, "structure_type": "raitaru", "rigs": [100, None, None], "system_id": 2},
+            {
+                "id": 1,
+                "structure_type": "raitaru",
+                "rigs": [None, None, None],
+                "system_id": 1,
+            },
+            {
+                "id": 2,
+                "structure_type": "raitaru",
+                "rigs": [100, None, None],
+                "system_id": 2,
+            },
         ]
         sec = {1: 0.9, 2: 0.9}
         best, me = _pick_best_station(stations, "equipment", sec, rig_data)
@@ -206,6 +226,7 @@ class TestPickBestStation:
 
 
 # --- _discover_blueprints ---
+
 
 class TestDiscoverBlueprints:
     def test_single_blueprint(self):
@@ -239,6 +260,7 @@ class TestDiscoverBlueprints:
 
 # --- _resolve_material_tree ---
 
+
 class TestResolveMaterialTree:
     def test_flat_tree_me0(self):
         mats = {100: [(34, 2000), (35, 1000)]}
@@ -269,9 +291,7 @@ class TestResolveMaterialTree:
     def test_blacklist_stops_recursion(self):
         mats = {100: [(200, 10), (34, 500)], 201: [(34, 100)]}
         prods = {200: (201, 1)}
-        result = _resolve_material_tree(
-            100, {}, {100: 0}, mats, prods, blacklist={200}
-        )
+        result = _resolve_material_tree(100, {}, {100: 0}, mats, prods, blacklist={200})
         # 200 treated as raw material, not recursed
         assert result == {200: 10, 34: 500}
 
@@ -283,6 +303,7 @@ class TestResolveMaterialTree:
 
 
 # --- _compute_runs_needed ---
+
 
 class TestComputeRunsNeeded:
     def test_single_level(self):
@@ -309,13 +330,12 @@ class TestComputeRunsNeeded:
     def test_blacklist_skips(self):
         mats = {100: [(200, 10), (34, 500)], 201: [(34, 100)]}
         prods = {200: (201, 1)}
-        result = _compute_runs_needed(
-            100, {100: 0}, 1, mats, prods, blacklist={200}
-        )
+        result = _compute_runs_needed(100, {100: 0}, 1, mats, prods, blacklist={200})
         assert result == {100: 1}
 
 
 # --- _describe_ownership ---
+
 
 class TestDescribeOwnership:
     def test_bpo_only(self):

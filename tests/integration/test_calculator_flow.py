@@ -1,4 +1,5 @@
 """Integration tests: calculator search and calculation flow."""
+
 import pytest
 
 pytestmark = pytest.mark.integration

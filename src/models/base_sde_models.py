@@ -1,8 +1,21 @@
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, CHAR, Column, DECIMAL, Float, Index, Integer, String, Table, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CHAR,
+    Column,
+    DECIMAL,
+    Float,
+    Index,
+    Integer,
+    String,
+    Table,
+    Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 import decimal
+
 
 class Base(DeclarativeBase):
     pass
@@ -10,7 +23,7 @@ class Base(DeclarativeBase):
 
 class AgtAgentTypes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'agtAgentTypes'
+    __tablename__ = "agtAgentTypes"
 
     agentTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     agentType: Mapped[Optional[str]] = mapped_column(String(50))
@@ -18,10 +31,10 @@ class AgtAgentTypes(Base):
 
 class AgtAgents(Base):
     __bind_key__ = "static"
-    __tablename__ = 'agtAgents'
+    __tablename__ = "agtAgents"
     __table_args__ = (
-        Index('ix_agtAgents_corporationID', 'corporationID'),
-        Index('ix_agtAgents_locationID', 'locationID')
+        Index("ix_agtAgents_corporationID", "corporationID"),
+        Index("ix_agtAgents_locationID", "locationID"),
     )
 
     agentID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -36,10 +49,8 @@ class AgtAgents(Base):
 
 class AgtAgentsInSpace(Base):
     __bind_key__ = "static"
-    __tablename__ = 'agtAgentsInSpace'
-    __table_args__ = (
-        Index('ix_agtAgentsInSpace_solarSystemID', 'solarSystemID'),
-    )
+    __tablename__ = "agtAgentsInSpace"
+    __table_args__ = (Index("ix_agtAgentsInSpace_solarSystemID", "solarSystemID"),)
 
     agentID: Mapped[int] = mapped_column(Integer, primary_key=True)
     dungeonID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -50,10 +61,8 @@ class AgtAgentsInSpace(Base):
 
 class AgtResearchAgents(Base):
     __bind_key__ = "static"
-    __tablename__ = 'agtResearchAgents'
-    __table_args__ = (
-        Index('ix_agtResearchAgents_typeID', 'typeID'),
-    )
+    __tablename__ = "agtResearchAgents"
+    __table_args__ = (Index("ix_agtResearchAgents_typeID", "typeID"),)
 
     agentID: Mapped[int] = mapped_column(Integer, primary_key=True)
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -61,7 +70,7 @@ class AgtResearchAgents(Base):
 
 class CertCerts(Base):
     __bind_key__ = "static"
-    __tablename__ = 'certCerts'
+    __tablename__ = "certCerts"
 
     certID: Mapped[int] = mapped_column(Integer, primary_key=True)
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -70,27 +79,29 @@ class CertCerts(Base):
 
 
 t_certMasteries = Table(
-    'certMasteries', Base.metadata,
-    Column('typeID', Integer),
-    Column('masteryLevel', Integer),
-    Column('certID', Integer)
+    "certMasteries",
+    Base.metadata,
+    Column("typeID", Integer),
+    Column("masteryLevel", Integer),
+    Column("certID", Integer),
 )
 
 
 t_certSkills = Table(
-    'certSkills', Base.metadata,
-    Column('certID', Integer),
-    Column('skillID', Integer),
-    Column('certLevelInt', Integer),
-    Column('skillLevel', Integer),
-    Column('certLevelText', String(8)),
-    Index('ix_certSkills_skillID', 'skillID')
+    "certSkills",
+    Base.metadata,
+    Column("certID", Integer),
+    Column("skillID", Integer),
+    Column("certLevelInt", Integer),
+    Column("skillLevel", Integer),
+    Column("certLevelText", String(8)),
+    Index("ix_certSkills_skillID", "skillID"),
 )
 
 
 class ChrAncestries(Base):
     __bind_key__ = "static"
-    __tablename__ = 'chrAncestries'
+    __tablename__ = "chrAncestries"
 
     ancestryID: Mapped[int] = mapped_column(Integer, primary_key=True)
     ancestryName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -107,7 +118,7 @@ class ChrAncestries(Base):
 
 class ChrAttributes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'chrAttributes'
+    __tablename__ = "chrAttributes"
 
     attributeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     attributeName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -119,7 +130,7 @@ class ChrAttributes(Base):
 
 class ChrBloodlines(Base):
     __bind_key__ = "static"
-    __tablename__ = 'chrBloodlines'
+    __tablename__ = "chrBloodlines"
 
     bloodlineID: Mapped[int] = mapped_column(Integer, primary_key=True)
     bloodlineName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -142,7 +153,7 @@ class ChrBloodlines(Base):
 
 class ChrFactions(Base):
     __bind_key__ = "static"
-    __tablename__ = 'chrFactions'
+    __tablename__ = "chrFactions"
 
     factionID: Mapped[int] = mapped_column(Integer, primary_key=True)
     factionName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -159,7 +170,7 @@ class ChrFactions(Base):
 
 class ChrRaces(Base):
     __bind_key__ = "static"
-    __tablename__ = 'chrRaces'
+    __tablename__ = "chrRaces"
 
     raceID: Mapped[int] = mapped_column(Integer, primary_key=True)
     raceName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -170,7 +181,7 @@ class ChrRaces(Base):
 
 class CrpActivities(Base):
     __bind_key__ = "static"
-    __tablename__ = 'crpActivities'
+    __tablename__ = "crpActivities"
 
     activityID: Mapped[int] = mapped_column(Integer, primary_key=True)
     activityName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -179,7 +190,7 @@ class CrpActivities(Base):
 
 class CrpNPCCorporationDivisions(Base):
     __bind_key__ = "static"
-    __tablename__ = 'crpNPCCorporationDivisions'
+    __tablename__ = "crpNPCCorporationDivisions"
 
     corporationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     divisionID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -188,7 +199,7 @@ class CrpNPCCorporationDivisions(Base):
 
 class CrpNPCCorporationResearchFields(Base):
     __bind_key__ = "static"
-    __tablename__ = 'crpNPCCorporationResearchFields'
+    __tablename__ = "crpNPCCorporationResearchFields"
 
     skillID: Mapped[int] = mapped_column(Integer, primary_key=True)
     corporationID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -196,7 +207,7 @@ class CrpNPCCorporationResearchFields(Base):
 
 class CrpNPCCorporationTrades(Base):
     __bind_key__ = "static"
-    __tablename__ = 'crpNPCCorporationTrades'
+    __tablename__ = "crpNPCCorporationTrades"
 
     corporationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -204,7 +215,7 @@ class CrpNPCCorporationTrades(Base):
 
 class CrpNPCCorporations(Base):
     __bind_key__ = "static"
-    __tablename__ = 'crpNPCCorporations'
+    __tablename__ = "crpNPCCorporations"
 
     corporationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     size: Mapped[Optional[str]] = mapped_column(CHAR(1))
@@ -238,7 +249,7 @@ class CrpNPCCorporations(Base):
 
 class CrpNPCDivisions(Base):
     __bind_key__ = "static"
-    __tablename__ = 'crpNPCDivisions'
+    __tablename__ = "crpNPCDivisions"
 
     divisionID: Mapped[int] = mapped_column(Integer, primary_key=True)
     divisionName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -248,7 +259,7 @@ class CrpNPCDivisions(Base):
 
 class DgmAttributeCategories(Base):
     __bind_key__ = "static"
-    __tablename__ = 'dgmAttributeCategories'
+    __tablename__ = "dgmAttributeCategories"
 
     categoryID: Mapped[int] = mapped_column(Integer, primary_key=True)
     categoryName: Mapped[Optional[str]] = mapped_column(String(50))
@@ -257,7 +268,7 @@ class DgmAttributeCategories(Base):
 
 class DgmAttributeTypes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'dgmAttributeTypes'
+    __tablename__ = "dgmAttributeTypes"
 
     attributeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     attributeName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -274,7 +285,7 @@ class DgmAttributeTypes(Base):
 
 class DgmEffects(Base):
     __bind_key__ = "static"
-    __tablename__ = 'dgmEffects'
+    __tablename__ = "dgmEffects"
 
     effectID: Mapped[int] = mapped_column(Integer, primary_key=True)
     effectName: Mapped[Optional[str]] = mapped_column(String(400))
@@ -308,7 +319,7 @@ class DgmEffects(Base):
 
 class DgmExpressions(Base):
     __bind_key__ = "static"
-    __tablename__ = 'dgmExpressions'
+    __tablename__ = "dgmExpressions"
 
     expressionID: Mapped[int] = mapped_column(Integer, primary_key=True)
     operandID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -324,10 +335,8 @@ class DgmExpressions(Base):
 
 class DgmTypeAttributes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'dgmTypeAttributes'
-    __table_args__ = (
-        Index('ix_dgmTypeAttributes_attributeID', 'attributeID'),
-    )
+    __tablename__ = "dgmTypeAttributes"
+    __table_args__ = (Index("ix_dgmTypeAttributes_attributeID", "attributeID"),)
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     attributeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -337,7 +346,7 @@ class DgmTypeAttributes(Base):
 
 class DgmTypeEffects(Base):
     __bind_key__ = "static"
-    __tablename__ = 'dgmTypeEffects'
+    __tablename__ = "dgmTypeEffects"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     effectID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -346,7 +355,7 @@ class DgmTypeEffects(Base):
 
 class EveGraphics(Base):
     __bind_key__ = "static"
-    __tablename__ = 'eveGraphics'
+    __tablename__ = "eveGraphics"
 
     graphicID: Mapped[int] = mapped_column(Integer, primary_key=True)
     sofFactionName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -358,7 +367,7 @@ class EveGraphics(Base):
 
 class EveIcons(Base):
     __bind_key__ = "static"
-    __tablename__ = 'eveIcons'
+    __tablename__ = "eveIcons"
 
     iconID: Mapped[int] = mapped_column(Integer, primary_key=True)
     iconFile: Mapped[Optional[str]] = mapped_column(String(500))
@@ -367,7 +376,7 @@ class EveIcons(Base):
 
 class EveUnits(Base):
     __bind_key__ = "static"
-    __tablename__ = 'eveUnits'
+    __tablename__ = "eveUnits"
 
     unitID: Mapped[int] = mapped_column(Integer, primary_key=True)
     unitName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -377,10 +386,8 @@ class EveUnits(Base):
 
 class IndustryActivity(Base):
     __bind_key__ = "static"
-    __tablename__ = 'industryActivity'
-    __table_args__ = (
-        Index('ix_industryActivity_activityID', 'activityID'),
-    )
+    __tablename__ = "industryActivity"
+    __table_args__ = (Index("ix_industryActivity_activityID", "activityID"),)
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     activityID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -388,64 +395,69 @@ class IndustryActivity(Base):
 
 
 t_industryActivityMaterials = Table(
-    'industryActivityMaterials', Base.metadata,
-    Column('typeID', Integer),
-    Column('activityID', Integer),
-    Column('materialTypeID', Integer),
-    Column('quantity', Integer),
-    Index('industryActivityMaterials_idx1', 'typeID', 'activityID'),
-    Index('ix_industryActivityMaterials_typeID', 'typeID')
+    "industryActivityMaterials",
+    Base.metadata,
+    Column("typeID", Integer),
+    Column("activityID", Integer),
+    Column("materialTypeID", Integer),
+    Column("quantity", Integer),
+    Index("industryActivityMaterials_idx1", "typeID", "activityID"),
+    Index("ix_industryActivityMaterials_typeID", "typeID"),
 )
 
 
 t_industryActivityProbabilities = Table(
-    'industryActivityProbabilities', Base.metadata,
-    Column('typeID', Integer),
-    Column('activityID', Integer),
-    Column('productTypeID', Integer),
-    Column('probability', DECIMAL(3, 2)),
-    Index('ix_industryActivityProbabilities_productTypeID', 'productTypeID'),
-    Index('ix_industryActivityProbabilities_typeID', 'typeID')
+    "industryActivityProbabilities",
+    Base.metadata,
+    Column("typeID", Integer),
+    Column("activityID", Integer),
+    Column("productTypeID", Integer),
+    Column("probability", DECIMAL(3, 2)),
+    Index("ix_industryActivityProbabilities_productTypeID", "productTypeID"),
+    Index("ix_industryActivityProbabilities_typeID", "typeID"),
 )
 
 
 t_industryActivityProducts = Table(
-    'industryActivityProducts', Base.metadata,
-    Column('typeID', Integer),
-    Column('activityID', Integer),
-    Column('productTypeID', Integer),
-    Column('quantity', Integer),
-    Index('ix_industryActivityProducts_productTypeID', 'productTypeID'),
-    Index('ix_industryActivityProducts_typeID', 'typeID')
+    "industryActivityProducts",
+    Base.metadata,
+    Column("typeID", Integer),
+    Column("activityID", Integer),
+    Column("productTypeID", Integer),
+    Column("quantity", Integer),
+    Index("ix_industryActivityProducts_productTypeID", "productTypeID"),
+    Index("ix_industryActivityProducts_typeID", "typeID"),
 )
 
 
 t_industryActivityRaces = Table(
-    'industryActivityRaces', Base.metadata,
-    Column('typeID', Integer),
-    Column('activityID', Integer),
-    Column('productTypeID', Integer),
-    Column('raceID', Integer),
-    Index('ix_industryActivityRaces_productTypeID', 'productTypeID'),
-    Index('ix_industryActivityRaces_typeID', 'typeID')
+    "industryActivityRaces",
+    Base.metadata,
+    Column("typeID", Integer),
+    Column("activityID", Integer),
+    Column("productTypeID", Integer),
+    Column("raceID", Integer),
+    Index("ix_industryActivityRaces_productTypeID", "productTypeID"),
+    Index("ix_industryActivityRaces_typeID", "typeID"),
 )
 
 
 t_industryActivitySkills = Table(
-    'industryActivitySkills', Base.metadata,
-    Column('typeID', Integer),
-    Column('activityID', Integer),
-    Column('skillID', Integer),
-    Column('level', Integer),
-    Index('industryActivitySkills_idx1', 'typeID', 'activityID'),
-    Index('ix_industryActivitySkills_skillID', 'skillID'),
-    Index('ix_industryActivitySkills_typeID', 'typeID')
+    "industryActivitySkills",
+    Base.metadata,
+    Column("typeID", Integer),
+    Column("activityID", Integer),
+    Column("skillID", Integer),
+    Column("level", Integer),
+    Index("industryActivitySkills_idx1", "typeID", "activityID"),
+    Index("ix_industryActivitySkills_skillID", "skillID"),
+    Index("ix_industryActivitySkills_typeID", "typeID"),
 )
 
 
 class IndustryBlueprints(Base):
     __bind_key__ = "static"
-    __tablename__ = 'industryBlueprints'
+    __tablename__ = "industryBlueprints"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     maxProductionLimit: Mapped[Optional[int]] = mapped_column(Integer)
@@ -453,7 +465,7 @@ class IndustryBlueprints(Base):
 
 class InvCategories(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invCategories'
+    __tablename__ = "invCategories"
 
     categoryID: Mapped[int] = mapped_column(Integer, primary_key=True)
     categoryName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -463,10 +475,8 @@ class InvCategories(Base):
 
 class InvContrabandTypes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invContrabandTypes'
-    __table_args__ = (
-        Index('ix_invContrabandTypes_typeID', 'typeID'),
-    )
+    __tablename__ = "invContrabandTypes"
+    __table_args__ = (Index("ix_invContrabandTypes_typeID", "typeID"),)
 
     factionID: Mapped[int] = mapped_column(Integer, primary_key=True)
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -478,7 +488,7 @@ class InvContrabandTypes(Base):
 
 class InvControlTowerResourcePurposes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invControlTowerResourcePurposes'
+    __tablename__ = "invControlTowerResourcePurposes"
 
     purpose: Mapped[int] = mapped_column(Integer, primary_key=True)
     purposeText: Mapped[Optional[str]] = mapped_column(String(100))
@@ -486,7 +496,7 @@ class InvControlTowerResourcePurposes(Base):
 
 class InvControlTowerResources(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invControlTowerResources'
+    __tablename__ = "invControlTowerResources"
 
     controlTowerTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     resourceTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -498,7 +508,7 @@ class InvControlTowerResources(Base):
 
 class InvFlags(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invFlags'
+    __tablename__ = "invFlags"
 
     flagID: Mapped[int] = mapped_column(Integer, primary_key=True)
     flagName: Mapped[Optional[str]] = mapped_column(String(200))
@@ -508,10 +518,8 @@ class InvFlags(Base):
 
 class InvGroups(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invGroups'
-    __table_args__ = (
-        Index('ix_invGroups_categoryID', 'categoryID'),
-    )
+    __tablename__ = "invGroups"
+    __table_args__ = (Index("ix_invGroups_categoryID", "categoryID"),)
 
     groupID: Mapped[int] = mapped_column(Integer, primary_key=True)
     categoryID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -526,10 +534,10 @@ class InvGroups(Base):
 
 class InvItems(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invItems'
+    __tablename__ = "invItems"
     __table_args__ = (
-        Index('items_IX_OwnerLocation', 'ownerID', 'locationID'),
-        Index('ix_invItems_locationID', 'locationID')
+        Index("items_IX_OwnerLocation", "ownerID", "locationID"),
+        Index("ix_invItems_locationID", "locationID"),
     )
 
     itemID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -542,7 +550,7 @@ class InvItems(Base):
 
 class InvMarketGroups(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invMarketGroups'
+    __tablename__ = "invMarketGroups"
 
     marketGroupID: Mapped[int] = mapped_column(Integer, primary_key=True)
     parentGroupID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -554,7 +562,7 @@ class InvMarketGroups(Base):
 
 class InvMetaGroups(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invMetaGroups'
+    __tablename__ = "invMetaGroups"
 
     metaGroupID: Mapped[int] = mapped_column(Integer, primary_key=True)
     metaGroupName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -564,7 +572,7 @@ class InvMetaGroups(Base):
 
 class InvMetaTypes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invMetaTypes'
+    __tablename__ = "invMetaTypes"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     parentTypeID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -573,7 +581,7 @@ class InvMetaTypes(Base):
 
 class InvNames(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invNames'
+    __tablename__ = "invNames"
 
     itemID: Mapped[int] = mapped_column(Integer, primary_key=True)
     itemName: Mapped[str] = mapped_column(String(200))
@@ -581,7 +589,7 @@ class InvNames(Base):
 
 class InvPositions(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invPositions'
+    __tablename__ = "invPositions"
 
     itemID: Mapped[int] = mapped_column(Integer, primary_key=True)
     x: Mapped[float] = mapped_column(Float)
@@ -594,7 +602,7 @@ class InvPositions(Base):
 
 class InvTraits(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invTraits'
+    __tablename__ = "invTraits"
 
     traitID: Mapped[int] = mapped_column(Integer, primary_key=True)
     typeID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -606,7 +614,7 @@ class InvTraits(Base):
 
 class InvTypeMaterials(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invTypeMaterials'
+    __tablename__ = "invTypeMaterials"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     materialTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -615,7 +623,7 @@ class InvTypeMaterials(Base):
 
 class InvTypeReactions(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invTypeReactions'
+    __tablename__ = "invTypeReactions"
 
     reactionTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     input: Mapped[bool] = mapped_column(Boolean, primary_key=True)
@@ -625,10 +633,8 @@ class InvTypeReactions(Base):
 
 class InvTypes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invTypes'
-    __table_args__ = (
-        Index('ix_invTypes_groupID', 'groupID'),
-    )
+    __tablename__ = "invTypes"
+    __table_args__ = (Index("ix_invTypes_groupID", "groupID"),)
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     groupID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -649,10 +655,10 @@ class InvTypes(Base):
 
 class InvUniqueNames(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invUniqueNames'
+    __tablename__ = "invUniqueNames"
     __table_args__ = (
-        Index('invUniqueNames_IX_GroupName', 'groupID', 'itemName'),
-        Index('ix_invUniqueNames_itemName', 'itemName', unique=True)
+        Index("invUniqueNames_IX_GroupName", "groupID", "itemName"),
+        Index("ix_invUniqueNames_itemName", "itemName", unique=True),
     )
 
     itemID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -662,7 +668,7 @@ class InvUniqueNames(Base):
 
 class InvVolumes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'invVolumes'
+    __tablename__ = "invVolumes"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     volume: Mapped[Optional[int]] = mapped_column(Integer)
@@ -670,7 +676,7 @@ class InvVolumes(Base):
 
 class MapCelestialGraphics(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapCelestialGraphics'
+    __tablename__ = "mapCelestialGraphics"
 
     celestialID: Mapped[int] = mapped_column(Integer, primary_key=True)
     heightMap1: Mapped[Optional[int]] = mapped_column(Integer)
@@ -681,7 +687,7 @@ class MapCelestialGraphics(Base):
 
 class MapCelestialStatistics(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapCelestialStatistics'
+    __tablename__ = "mapCelestialStatistics"
 
     celestialID: Mapped[int] = mapped_column(Integer, primary_key=True)
     temperature: Mapped[Optional[float]] = mapped_column(Float)
@@ -707,7 +713,7 @@ class MapCelestialStatistics(Base):
 
 class MapConstellationJumps(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapConstellationJumps'
+    __tablename__ = "mapConstellationJumps"
 
     fromConstellationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     toConstellationID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -717,7 +723,7 @@ class MapConstellationJumps(Base):
 
 class MapConstellations(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapConstellations'
+    __tablename__ = "mapConstellations"
 
     constellationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     regionID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -737,16 +743,16 @@ class MapConstellations(Base):
 
 class MapDenormalize(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapDenormalize'
+    __tablename__ = "mapDenormalize"
     __table_args__ = (
-        Index('ix_mapDenormalize_constellationID', 'constellationID'),
-        Index('ix_mapDenormalize_orbitID', 'orbitID'),
-        Index('ix_mapDenormalize_regionID', 'regionID'),
-        Index('ix_mapDenormalize_solarSystemID', 'solarSystemID'),
-        Index('ix_mapDenormalize_typeID', 'typeID'),
-        Index('mapDenormalize_IX_groupConstellation', 'groupID', 'constellationID'),
-        Index('mapDenormalize_IX_groupRegion', 'groupID', 'regionID'),
-        Index('mapDenormalize_IX_groupSystem', 'groupID', 'solarSystemID')
+        Index("ix_mapDenormalize_constellationID", "constellationID"),
+        Index("ix_mapDenormalize_orbitID", "orbitID"),
+        Index("ix_mapDenormalize_regionID", "regionID"),
+        Index("ix_mapDenormalize_solarSystemID", "solarSystemID"),
+        Index("ix_mapDenormalize_typeID", "typeID"),
+        Index("mapDenormalize_IX_groupConstellation", "groupID", "constellationID"),
+        Index("mapDenormalize_IX_groupRegion", "groupID", "regionID"),
+        Index("mapDenormalize_IX_groupSystem", "groupID", "solarSystemID"),
     )
 
     itemID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -768,7 +774,7 @@ class MapDenormalize(Base):
 
 class MapJumps(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapJumps'
+    __tablename__ = "mapJumps"
 
     stargateID: Mapped[int] = mapped_column(Integer, primary_key=True)
     destinationID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -776,7 +782,7 @@ class MapJumps(Base):
 
 class MapLandmarks(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapLandmarks'
+    __tablename__ = "mapLandmarks"
 
     landmarkID: Mapped[int] = mapped_column(Integer, primary_key=True)
     landmarkName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -790,7 +796,7 @@ class MapLandmarks(Base):
 
 class MapLocationScenes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapLocationScenes'
+    __tablename__ = "mapLocationScenes"
 
     locationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     graphicID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -798,7 +804,7 @@ class MapLocationScenes(Base):
 
 class MapLocationWormholeClasses(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapLocationWormholeClasses'
+    __tablename__ = "mapLocationWormholeClasses"
 
     locationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     wormholeClassID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -806,7 +812,7 @@ class MapLocationWormholeClasses(Base):
 
 class MapRegionJumps(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapRegionJumps'
+    __tablename__ = "mapRegionJumps"
 
     fromRegionID: Mapped[int] = mapped_column(Integer, primary_key=True)
     toRegionID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -814,7 +820,7 @@ class MapRegionJumps(Base):
 
 class MapRegions(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapRegions'
+    __tablename__ = "mapRegions"
 
     regionID: Mapped[int] = mapped_column(Integer, primary_key=True)
     regionName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -834,7 +840,7 @@ class MapRegions(Base):
 
 class MapSolarSystemJumps(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapSolarSystemJumps'
+    __tablename__ = "mapSolarSystemJumps"
 
     fromSolarSystemID: Mapped[int] = mapped_column(Integer, primary_key=True)
     toSolarSystemID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -846,11 +852,11 @@ class MapSolarSystemJumps(Base):
 
 class MapSolarSystems(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapSolarSystems'
+    __tablename__ = "mapSolarSystems"
     __table_args__ = (
-        Index('ix_mapSolarSystems_constellationID', 'constellationID'),
-        Index('ix_mapSolarSystems_regionID', 'regionID'),
-        Index('ix_mapSolarSystems_security', 'security')
+        Index("ix_mapSolarSystems_constellationID", "constellationID"),
+        Index("ix_mapSolarSystems_regionID", "regionID"),
+        Index("ix_mapSolarSystems_security", "security"),
     )
 
     solarSystemID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -883,7 +889,7 @@ class MapSolarSystems(Base):
 
 class MapUniverse(Base):
     __bind_key__ = "static"
-    __tablename__ = 'mapUniverse'
+    __tablename__ = "mapUniverse"
 
     universeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     universeName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -901,7 +907,7 @@ class MapUniverse(Base):
 
 class PlanetSchematics(Base):
     __bind_key__ = "static"
-    __tablename__ = 'planetSchematics'
+    __tablename__ = "planetSchematics"
 
     schematicID: Mapped[int] = mapped_column(Integer, primary_key=True)
     schematicName: Mapped[Optional[str]] = mapped_column(String(255))
@@ -910,7 +916,7 @@ class PlanetSchematics(Base):
 
 class PlanetSchematicsPinMap(Base):
     __bind_key__ = "static"
-    __tablename__ = 'planetSchematicsPinMap'
+    __tablename__ = "planetSchematicsPinMap"
 
     schematicID: Mapped[int] = mapped_column(Integer, primary_key=True)
     pinTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -918,7 +924,7 @@ class PlanetSchematicsPinMap(Base):
 
 class PlanetSchematicsTypeMap(Base):
     __bind_key__ = "static"
-    __tablename__ = 'planetSchematicsTypeMap'
+    __tablename__ = "planetSchematicsTypeMap"
 
     schematicID: Mapped[int] = mapped_column(Integer, primary_key=True)
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -928,7 +934,7 @@ class PlanetSchematicsTypeMap(Base):
 
 class RamActivities(Base):
     __bind_key__ = "static"
-    __tablename__ = 'ramActivities'
+    __tablename__ = "ramActivities"
 
     activityID: Mapped[int] = mapped_column(Integer, primary_key=True)
     activityName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -939,11 +945,11 @@ class RamActivities(Base):
 
 class RamAssemblyLineStations(Base):
     __bind_key__ = "static"
-    __tablename__ = 'ramAssemblyLineStations'
+    __tablename__ = "ramAssemblyLineStations"
     __table_args__ = (
-        Index('ix_ramAssemblyLineStations_ownerID', 'ownerID'),
-        Index('ix_ramAssemblyLineStations_regionID', 'regionID'),
-        Index('ix_ramAssemblyLineStations_solarSystemID', 'solarSystemID')
+        Index("ix_ramAssemblyLineStations_ownerID", "ownerID"),
+        Index("ix_ramAssemblyLineStations_regionID", "regionID"),
+        Index("ix_ramAssemblyLineStations_solarSystemID", "solarSystemID"),
     )
 
     stationID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -957,7 +963,7 @@ class RamAssemblyLineStations(Base):
 
 class RamAssemblyLineTypeDetailPerCategory(Base):
     __bind_key__ = "static"
-    __tablename__ = 'ramAssemblyLineTypeDetailPerCategory'
+    __tablename__ = "ramAssemblyLineTypeDetailPerCategory"
 
     assemblyLineTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     categoryID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -968,7 +974,7 @@ class RamAssemblyLineTypeDetailPerCategory(Base):
 
 class RamAssemblyLineTypeDetailPerGroup(Base):
     __bind_key__ = "static"
-    __tablename__ = 'ramAssemblyLineTypeDetailPerGroup'
+    __tablename__ = "ramAssemblyLineTypeDetailPerGroup"
 
     assemblyLineTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     groupID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -979,7 +985,7 @@ class RamAssemblyLineTypeDetailPerGroup(Base):
 
 class RamAssemblyLineTypes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'ramAssemblyLineTypes'
+    __tablename__ = "ramAssemblyLineTypes"
 
     assemblyLineTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     assemblyLineTypeName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -994,7 +1000,7 @@ class RamAssemblyLineTypes(Base):
 
 class RamInstallationTypeContents(Base):
     __bind_key__ = "static"
-    __tablename__ = 'ramInstallationTypeContents'
+    __tablename__ = "ramInstallationTypeContents"
 
     installationTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     assemblyLineTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1003,7 +1009,7 @@ class RamInstallationTypeContents(Base):
 
 class SkinLicense(Base):
     __bind_key__ = "static"
-    __tablename__ = 'skinLicense'
+    __tablename__ = "skinLicense"
 
     licenseTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     duration: Mapped[Optional[int]] = mapped_column(Integer)
@@ -1012,7 +1018,7 @@ class SkinLicense(Base):
 
 class SkinMaterials(Base):
     __bind_key__ = "static"
-    __tablename__ = 'skinMaterials'
+    __tablename__ = "skinMaterials"
 
     skinMaterialID: Mapped[int] = mapped_column(Integer, primary_key=True)
     displayNameID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -1020,17 +1026,18 @@ class SkinMaterials(Base):
 
 
 t_skinShip = Table(
-    'skinShip', Base.metadata,
-    Column('skinID', Integer),
-    Column('typeID', Integer),
-    Index('ix_skinShip_skinID', 'skinID'),
-    Index('ix_skinShip_typeID', 'typeID')
+    "skinShip",
+    Base.metadata,
+    Column("skinID", Integer),
+    Column("typeID", Integer),
+    Index("ix_skinShip_skinID", "skinID"),
+    Index("ix_skinShip_typeID", "typeID"),
 )
 
 
 class Skins(Base):
     __bind_key__ = "static"
-    __tablename__ = 'skins'
+    __tablename__ = "skins"
 
     skinID: Mapped[int] = mapped_column(Integer, primary_key=True)
     internalName: Mapped[Optional[str]] = mapped_column(String(70))
@@ -1039,7 +1046,7 @@ class Skins(Base):
 
 class StaOperationServices(Base):
     __bind_key__ = "static"
-    __tablename__ = 'staOperationServices'
+    __tablename__ = "staOperationServices"
 
     operationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     serviceID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1047,7 +1054,7 @@ class StaOperationServices(Base):
 
 class StaOperations(Base):
     __bind_key__ = "static"
-    __tablename__ = 'staOperations'
+    __tablename__ = "staOperations"
 
     operationID: Mapped[int] = mapped_column(Integer, primary_key=True)
     activityID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -1067,7 +1074,7 @@ class StaOperations(Base):
 
 class StaServices(Base):
     __bind_key__ = "static"
-    __tablename__ = 'staServices'
+    __tablename__ = "staServices"
 
     serviceID: Mapped[int] = mapped_column(Integer, primary_key=True)
     serviceName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -1076,7 +1083,7 @@ class StaServices(Base):
 
 class StaStationTypes(Base):
     __bind_key__ = "static"
-    __tablename__ = 'staStationTypes'
+    __tablename__ = "staStationTypes"
 
     stationTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     dockEntryX: Mapped[Optional[float]] = mapped_column(Float)
@@ -1093,14 +1100,14 @@ class StaStationTypes(Base):
 
 class StaStations(Base):
     __bind_key__ = "static"
-    __tablename__ = 'staStations'
+    __tablename__ = "staStations"
     __table_args__ = (
-        Index('ix_staStations_constellationID', 'constellationID'),
-        Index('ix_staStations_corporationID', 'corporationID'),
-        Index('ix_staStations_operationID', 'operationID'),
-        Index('ix_staStations_regionID', 'regionID'),
-        Index('ix_staStations_solarSystemID', 'solarSystemID'),
-        Index('ix_staStations_stationTypeID', 'stationTypeID')
+        Index("ix_staStations_constellationID", "constellationID"),
+        Index("ix_staStations_corporationID", "corporationID"),
+        Index("ix_staStations_operationID", "operationID"),
+        Index("ix_staStations_regionID", "regionID"),
+        Index("ix_staStations_solarSystemID", "solarSystemID"),
+        Index("ix_staStations_stationTypeID", "stationTypeID"),
     )
 
     stationID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -1125,7 +1132,7 @@ class StaStations(Base):
 
 class TranslationTables(Base):
     __bind_key__ = "static"
-    __tablename__ = 'translationTables'
+    __tablename__ = "translationTables"
 
     sourceTable: Mapped[str] = mapped_column(String(200), primary_key=True)
     translatedKey: Mapped[str] = mapped_column(String(200), primary_key=True)
@@ -1136,7 +1143,7 @@ class TranslationTables(Base):
 
 class TrnTranslationColumns(Base):
     __bind_key__ = "static"
-    __tablename__ = 'trnTranslationColumns'
+    __tablename__ = "trnTranslationColumns"
 
     tcID: Mapped[int] = mapped_column(Integer, primary_key=True)
     tableName: Mapped[str] = mapped_column(String(256))
@@ -1147,7 +1154,7 @@ class TrnTranslationColumns(Base):
 
 class TrnTranslationLanguages(Base):
     __bind_key__ = "static"
-    __tablename__ = 'trnTranslationLanguages'
+    __tablename__ = "trnTranslationLanguages"
 
     numericLanguageID: Mapped[int] = mapped_column(Integer, primary_key=True)
     languageID: Mapped[Optional[str]] = mapped_column(String(50))
@@ -1156,7 +1163,7 @@ class TrnTranslationLanguages(Base):
 
 class TrnTranslations(Base):
     __bind_key__ = "static"
-    __tablename__ = 'trnTranslations'
+    __tablename__ = "trnTranslations"
 
     tcID: Mapped[int] = mapped_column(Integer, primary_key=True)
     keyID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1166,7 +1173,7 @@ class TrnTranslations(Base):
 
 class WarCombatZoneSystems(Base):
     __bind_key__ = "static"
-    __tablename__ = 'warCombatZoneSystems'
+    __tablename__ = "warCombatZoneSystems"
 
     solarSystemID: Mapped[int] = mapped_column(Integer, primary_key=True)
     combatZoneID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -1174,7 +1181,7 @@ class WarCombatZoneSystems(Base):
 
 class WarCombatZones(Base):
     __bind_key__ = "static"
-    __tablename__ = 'warCombatZones'
+    __tablename__ = "warCombatZones"
 
     combatZoneID: Mapped[int] = mapped_column(Integer, primary_key=True)
     combatZoneName: Mapped[Optional[str]] = mapped_column(String(100))

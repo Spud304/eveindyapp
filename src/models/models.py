@@ -12,7 +12,9 @@ db = flask_sqlalchemy.SQLAlchemy()
 
 
 class User(db.Model, UserMixin):
-    character_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    character_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
     character_name: Mapped[str] = mapped_column(String(255), nullable=False)
     character_owner_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     main_character_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -27,36 +29,42 @@ class User(db.Model, UserMixin):
 
     def get_sso_data(self):
         return {
-            'access_token': self.access_token,
-            'refresh_token': self.refresh_token,
-            'expires_in': (
-                self.access_token_expires.astimezone(timezone.utc) - datetime.now(timezone.utc)
-            ).total_seconds()
+            "access_token": self.access_token,
+            "refresh_token": self.refresh_token,
+            "expires_in": (
+                self.access_token_expires.astimezone(timezone.utc)
+                - datetime.now(timezone.utc)
+            ).total_seconds(),
         }
 
     def update_token(self, token_response):
-        self.access_token = token_response['access_token']
-        self.refresh_token = token_response['refresh_token']
-        self.access_token_expires = datetime.now(timezone.utc) + \
-            timedelta(seconds=token_response['expires_in'])
+        self.access_token = token_response["access_token"]
+        self.refresh_token = token_response["refresh_token"]
+        self.access_token_expires = datetime.now(timezone.utc) + timedelta(
+            seconds=token_response["expires_in"]
+        )
 
         db.session.commit()
 
+
 class CachedLocations(db.Model):
     __bind_key__ = "base"
-    __tablename__ = 'CachedLocations'
+    __tablename__ = "CachedLocations"
 
     location_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     location_name: Mapped[str] = mapped_column(String(255), nullable=False)
     location_cost_index: Mapped[float] = mapped_column(Float, nullable=True)
-    location_cost_index_last_updated: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    location_cost_index_last_updated: Mapped[datetime] = mapped_column(
+        DateTime, nullable=True
+    )
 
     def __repr__(self):
         return f"CachedLocations('{self.location_id}', '{self.location_name}')"
 
+
 class CachedToonInfo(db.Model):
     __bind_key__ = "base"
-    __tablename__ = 'CachedToonInfo'
+    __tablename__ = "CachedToonInfo"
 
     character_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     character_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -69,18 +77,20 @@ class CachedToonInfo(db.Model):
     def __repr__(self):
         return f"CachedToonInfo('{self.character_id}', '{self.character_name}', '{self.corporation_id}', '{self.corporation_name}', '{self.alliance_id}', '{self.alliance_name}', '{self.wallet_balance}')"
 
+
 class CachedMarketData(db.Model):
     __bind_key__ = "base"
-    __tablename__ = 'cached_market_data'
+    __tablename__ = "cached_market_data"
 
     type_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     price: Mapped[float] = mapped_column(Float, nullable=False)
     adjusted_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cached_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
+
 class CachedBlueprint(db.Model):
     __bind_key__ = "base"
-    __tablename__ = 'cached_blueprints'
+    __tablename__ = "cached_blueprints"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     character_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
@@ -97,7 +107,7 @@ class CachedBlueprint(db.Model):
 
 class InvTypes(db.Model):
     __bind_key__ = "static"
-    __tablename__ = 'InvTypes'
+    __tablename__ = "InvTypes"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     groupID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -121,7 +131,7 @@ class InvTypes(db.Model):
 
 class InvTypeMaterials(db.Model):
     __bind_key__ = "static"
-    __tablename__ = 'InvTypeMaterials'
+    __tablename__ = "InvTypeMaterials"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     materialTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -133,7 +143,7 @@ class InvTypeMaterials(db.Model):
 
 class IndustryActivityMaterials(db.Model):
     __bind_key__ = "static"
-    __tablename__ = 'industryActivityMaterials'
+    __tablename__ = "industryActivityMaterials"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     activityID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -143,7 +153,7 @@ class IndustryActivityMaterials(db.Model):
 
 class IndustryActivityProducts(db.Model):
     __bind_key__ = "static"
-    __tablename__ = 'industryActivityProducts'
+    __tablename__ = "industryActivityProducts"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     activityID: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -153,7 +163,7 @@ class IndustryActivityProducts(db.Model):
 
 class IndustryBlueprints(db.Model):
     __bind_key__ = "static"
-    __tablename__ = 'industryBlueprints'
+    __tablename__ = "industryBlueprints"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     maxProductionLimit: Mapped[Optional[int]] = mapped_column(Integer)
@@ -161,7 +171,7 @@ class IndustryBlueprints(db.Model):
 
 class MapSolarSystems(db.Model):
     __bind_key__ = "static"
-    __tablename__ = 'mapSolarSystems'
+    __tablename__ = "mapSolarSystems"
 
     solarSystemID: Mapped[int] = mapped_column(Integer, primary_key=True)
     solarSystemName: Mapped[Optional[str]] = mapped_column(String(100))
@@ -170,7 +180,7 @@ class MapSolarSystems(db.Model):
 
 class InvGroups(db.Model):
     __bind_key__ = "static"
-    __tablename__ = 'invGroups'
+    __tablename__ = "invGroups"
 
     groupID: Mapped[int] = mapped_column(Integer, primary_key=True)
     categoryID: Mapped[Optional[int]] = mapped_column(Integer)
@@ -179,8 +189,10 @@ class InvGroups(db.Model):
 
 class UserConfig(db.Model):
     __bind_key__ = "base"
-    __tablename__ = 'user_config'
+    __tablename__ = "user_config"
 
-    character_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
-    config_json: Mapped[str] = mapped_column(Text, nullable=False, default='{}')
+    character_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

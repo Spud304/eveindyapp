@@ -1,4 +1,5 @@
 """Integration tests: page loads, navigation, and auth redirects."""
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -25,8 +26,16 @@ class TestAuthenticatedNav:
         auth_page.goto(base_url + "/")
         nav = auth_page.locator(".navbar-menu")
         # Authenticated users see these nav items
-        for label in ["Home", "Profile", "Industry", "Blueprints",
-                      "Calculator", "Config", "Jobs", "Logout"]:
+        for label in [
+            "Home",
+            "Profile",
+            "Industry",
+            "Blueprints",
+            "Calculator",
+            "Config",
+            "Jobs",
+            "Logout",
+        ]:
             assert nav.locator(f"text={label}").is_visible()
         # Should NOT see Login
         assert nav.locator("text=Login").count() == 0

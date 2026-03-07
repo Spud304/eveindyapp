@@ -1,4 +1,5 @@
 """Fixtures for Playwright integration tests: live server + authenticated browser."""
+
 import threading
 import pytest
 from werkzeug.serving import make_server
@@ -65,12 +66,16 @@ def auth_page(live_app, browser, base_url, _integration_cleanup):
     cookie = serializer.dumps({"_user_id": "12345678"})
 
     ctx = browser.new_context()
-    ctx.add_cookies([{
-        "name": "session",
-        "value": cookie,
-        "domain": "127.0.0.1",
-        "path": "/",
-    }])
+    ctx.add_cookies(
+        [
+            {
+                "name": "session",
+                "value": cookie,
+                "domain": "127.0.0.1",
+                "path": "/",
+            }
+        ]
+    )
     p = ctx.new_page()
     yield p
     ctx.close()

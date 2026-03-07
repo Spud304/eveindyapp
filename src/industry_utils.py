@@ -4,13 +4,28 @@ logger = logging.getLogger(__name__)
 
 from sqlalchemy import select, text
 
-from src.models.models import db, InvTypes, InvGroups, IndustryActivityMaterials, IndustryActivityProducts
+from src.models.models import (
+    db,
+    InvTypes,
+    InvGroups,
+    IndustryActivityMaterials,
+    IndustryActivityProducts,
+)
 from src.industry_constants import (
     STRUCTURE_BASE_ME,
-    BASIC_SMALL_SHIP_GROUPS, BASIC_MEDIUM_SHIP_GROUPS, BASIC_LARGE_SHIP_GROUPS,
-    ADV_SMALL_SHIP_GROUPS, ADV_MEDIUM_SHIP_GROUPS, ADV_LARGE_SHIP_GROUPS,
-    CAPITAL_SHIP_GROUPS, RIG_GROUP_TO_CATEGORIES, ALL_ME_RIG_GROUPS,
-    ATTR_ME_BONUS, ATTR_HIGHSEC_MODIFIER, ATTR_LOWSEC_MODIFIER, ATTR_NULLSEC_MODIFIER,
+    BASIC_SMALL_SHIP_GROUPS,
+    BASIC_MEDIUM_SHIP_GROUPS,
+    BASIC_LARGE_SHIP_GROUPS,
+    ADV_SMALL_SHIP_GROUPS,
+    ADV_MEDIUM_SHIP_GROUPS,
+    ADV_LARGE_SHIP_GROUPS,
+    CAPITAL_SHIP_GROUPS,
+    RIG_GROUP_TO_CATEGORIES,
+    ALL_ME_RIG_GROUPS,
+    ATTR_ME_BONUS,
+    ATTR_HIGHSEC_MODIFIER,
+    ATTR_LOWSEC_MODIFIER,
+    ATTR_NULLSEC_MODIFIER,
 )
 
 
@@ -22,7 +37,9 @@ def load_type_group_category_maps():
             type_to_group[row.typeID] = row.groupID
 
     group_to_category = {}
-    for row in db.session.execute(select(InvGroups.groupID, InvGroups.categoryID)).all():
+    for row in db.session.execute(
+        select(InvGroups.groupID, InvGroups.categoryID)
+    ).all():
         if row.categoryID is not None:
             group_to_category[row.groupID] = row.categoryID
 
@@ -46,37 +63,37 @@ def classify_product_for_rig(product_type_id, type_to_group, group_to_category):
         return None
 
     if category_id == 7:
-        return 'equipment'
+        return "equipment"
     if category_id == 8:
-        return 'ammunition'
+        return "ammunition"
     if category_id in (18, 87):
-        return 'drone_fighter'
+        return "drone_fighter"
     if category_id == 6:
         if group_id in BASIC_SMALL_SHIP_GROUPS:
-            return 'basic_small_ship'
+            return "basic_small_ship"
         if group_id in BASIC_MEDIUM_SHIP_GROUPS:
-            return 'basic_medium_ship'
+            return "basic_medium_ship"
         if group_id in BASIC_LARGE_SHIP_GROUPS:
-            return 'basic_large_ship'
+            return "basic_large_ship"
         if group_id in ADV_SMALL_SHIP_GROUPS:
-            return 'adv_small_ship'
+            return "adv_small_ship"
         if group_id in ADV_MEDIUM_SHIP_GROUPS:
-            return 'adv_medium_ship'
+            return "adv_medium_ship"
         if group_id in ADV_LARGE_SHIP_GROUPS:
-            return 'adv_large_ship'
+            return "adv_large_ship"
         if group_id in CAPITAL_SHIP_GROUPS:
-            return 'capital_ship'
+            return "capital_ship"
         return None
     if category_id == 17:
         if group_id in (334, 964):
-            return 'adv_component'
+            return "adv_component"
         if group_id in (873, 913):
-            return 'basic_capital_component'
+            return "basic_capital_component"
         if group_id == 536:
-            return 'structure'
+            return "structure"
         return None
     if category_id == 65:
-        return 'structure'
+        return "structure"
 
     return None
 
@@ -99,14 +116,14 @@ def load_rig_data():
     type_to_rig_group = {r.typeID: r.groupID for r in rig_rows}
 
     # Fetch dogma attributes from static DB via engine
-    type_list = ','.join(str(t) for t in rig_type_ids)
+    type_list = ",".join(str(t) for t in rig_type_ids)
     attr_ids = f"{ATTR_ME_BONUS},{ATTR_HIGHSEC_MODIFIER},{ATTR_LOWSEC_MODIFIER},{ATTR_NULLSEC_MODIFIER}"
     attrs_sql = text(f"""
         SELECT typeID, attributeID, COALESCE(valueFloat, valueInt) as value
         FROM dgmTypeAttributes
         WHERE typeID IN ({type_list}) AND attributeID IN ({attr_ids})
     """)
-    engine = db.engines['static']
+    engine = db.engines["static"]
     with engine.connect() as conn:
         attr_rows = conn.execute(attrs_sql).all()
 
@@ -120,13 +137,13 @@ def load_rig_data():
         attrs = type_attrs.get(type_id, {})
         me_bonus = abs(attrs.get(ATTR_ME_BONUS, 0.0))
         rig_data[type_id] = {
-            'me_bonus': me_bonus,
-            'sec_mult': {
-                'hs': attrs.get(ATTR_HIGHSEC_MODIFIER, 1.0),
-                'ls': attrs.get(ATTR_LOWSEC_MODIFIER, 1.9),
-                'ns': attrs.get(ATTR_NULLSEC_MODIFIER, 2.1),
+            "me_bonus": me_bonus,
+            "sec_mult": {
+                "hs": attrs.get(ATTR_HIGHSEC_MODIFIER, 1.0),
+                "ls": attrs.get(ATTR_LOWSEC_MODIFIER, 1.9),
+                "ns": attrs.get(ATTR_NULLSEC_MODIFIER, 2.1),
             },
-            'group_id': type_to_rig_group[type_id],
+            "group_id": type_to_rig_group[type_id],
         }
 
     return rig_data
@@ -135,12 +152,12 @@ def load_rig_data():
 def _get_security_class(security_status):
     """Determine security class from system security status."""
     if security_status is None:
-        return 'hs'
+        return "hs"
     if security_status >= 0.45:
-        return 'hs'
+        return "hs"
     if security_status > 0.0:
-        return 'ls'
-    return 'ns'
+        return "ls"
+    return "ns"
 
 
 def _compute_station_me(station, product_rig_category, system_security, rig_data):
@@ -148,25 +165,25 @@ def _compute_station_me(station, product_rig_category, system_security, rig_data
 
     Returns the total ME% (0-100 scale) or 0 if no matching rig.
     """
-    structure_type = station.get('structure_type', '')
+    structure_type = station.get("structure_type", "")
     base_me = STRUCTURE_BASE_ME.get(structure_type, 0.0)
 
     # Find best matching rig in this station's rig slots
     best_rig_effective = 0.0
     sec_class = _get_security_class(system_security)
 
-    for rig_id in station.get('rigs', []):
+    for rig_id in station.get("rigs", []):
         if rig_id is None:
             continue
         rig = rig_data.get(rig_id)
         if not rig:
             continue
         # Check if this rig covers the product category
-        categories_covered = RIG_GROUP_TO_CATEGORIES.get(rig['group_id'], set())
+        categories_covered = RIG_GROUP_TO_CATEGORIES.get(rig["group_id"], set())
         if product_rig_category not in categories_covered:
             continue
         # Compute effective ME for this rig
-        rig_effective = rig['me_bonus'] * rig['sec_mult'].get(sec_class, 1.0) / 100
+        rig_effective = rig["me_bonus"] * rig["sec_mult"].get(sec_class, 1.0) / 100
         best_rig_effective = max(best_rig_effective, rig_effective)
 
     # structure_total_me = 1 - (1 - base_me/100) * (1 - rig_effective_me)
@@ -183,7 +200,7 @@ def pick_best_station(stations, product_rig_category, system_securities, rig_dat
     best_me = 0.0
 
     for station in stations:
-        sec = system_securities.get(station.get('system_id'))
+        sec = system_securities.get(station.get("system_id"))
         me = _compute_station_me(station, product_rig_category, sec, rig_data)
         if me > best_me:
             best_me = me
@@ -202,16 +219,18 @@ def load_sde_manufacturing_data():
     """
     materials_by_bp = {}
     for row in db.session.execute(
-        select(IndustryActivityMaterials)
-        .where(IndustryActivityMaterials.activityID == 1)
+        select(IndustryActivityMaterials).where(
+            IndustryActivityMaterials.activityID == 1
+        )
     ).scalars():
-        materials_by_bp.setdefault(row.typeID, []).append((row.materialTypeID, row.quantity))
+        materials_by_bp.setdefault(row.typeID, []).append(
+            (row.materialTypeID, row.quantity)
+        )
 
     products_by_product = {}
     bp_to_product = {}
     for row in db.session.execute(
-        select(IndustryActivityProducts)
-        .where(IndustryActivityProducts.activityID == 1)
+        select(IndustryActivityProducts).where(IndustryActivityProducts.activityID == 1)
     ).scalars():
         products_by_product[row.productTypeID] = (row.typeID, row.quantity)
         bp_to_product[row.typeID] = row.productTypeID

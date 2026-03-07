@@ -1,4 +1,5 @@
 """Integration tests: station add/delete and blacklist management."""
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -18,7 +19,9 @@ class TestStationManagement:
         # Save
         auth_page.locator("#modalSaveBtn").click()
         # Wait for modal to close
-        auth_page.locator(".nc-modal-overlay.nc-show").wait_for(state="hidden", timeout=2000)
+        auth_page.locator(".nc-modal-overlay.nc-show").wait_for(
+            state="hidden", timeout=2000
+        )
         # Station should appear in the list
         assert auth_page.locator(".nc-station-name:text('Test Raitaru')").is_visible()
 
@@ -26,15 +29,21 @@ class TestStationManagement:
         auth_page.goto(base_url + "/config")
         # First add a station
         auth_page.locator("#addStationBtn").click()
-        auth_page.locator(".nc-modal-overlay.nc-show").wait_for(state="visible", timeout=2000)
+        auth_page.locator(".nc-modal-overlay.nc-show").wait_for(
+            state="visible", timeout=2000
+        )
         auth_page.locator("#modalName").fill("Delete Me")
         auth_page.locator("#modalSaveBtn").click()
-        auth_page.locator(".nc-modal-overlay.nc-show").wait_for(state="hidden", timeout=2000)
+        auth_page.locator(".nc-modal-overlay.nc-show").wait_for(
+            state="hidden", timeout=2000
+        )
         # Now delete it
         card = auth_page.locator(".nc-station-card", has_text="Delete Me")
         card.locator(".nc-station-delete").click()
         # Station should be removed
-        auth_page.locator(".nc-station-name:text('Delete Me')").wait_for(state="hidden", timeout=2000)
+        auth_page.locator(".nc-station-name:text('Delete Me')").wait_for(
+            state="hidden", timeout=2000
+        )
 
 
 class TestBlacklistManagement:
