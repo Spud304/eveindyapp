@@ -331,7 +331,7 @@ class IndustryBlueprint(Blueprint):
             )
             .where(IndustryActivityProducts.activityID == 1)
             .where(InvTypes.typeName.ilike(f"%{q}%"))
-            .where(InvTypes.published == True)
+            .where(InvTypes.published)
             .limit(15)
         ).all()
         return jsonify([{"type_id": r.typeID, "name": r.typeName} for r in results])

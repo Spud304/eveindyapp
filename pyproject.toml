@@ -27,3 +27,7 @@ test = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["integration: Playwright browser tests"]
+
+[tool.ruff.lint]
+# Add E402 to the list of ignored rules
+ignore = ["E402"]

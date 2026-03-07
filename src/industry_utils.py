@@ -107,7 +107,7 @@ def load_rig_data():
     rig_rows = db.session.execute(
         select(InvTypes.typeID, InvTypes.groupID)
         .where(InvTypes.groupID.in_(ALL_ME_RIG_GROUPS))
-        .where(InvTypes.published == True)
+        .where(InvTypes.published)
     ).all()
     if not rig_rows:
         return {}
