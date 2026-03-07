@@ -4,6 +4,7 @@ import logging
 
 from flask_login import LoginManager
 from dotenv import load_dotenv
+from celery import Celery, Task
 
 from flask_migrate import Migrate
 

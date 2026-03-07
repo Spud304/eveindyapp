@@ -4,25 +4,60 @@
 
 {% if current_user.is_authenticated %}
 <div class="nc-header nc-animate">
-    <h1 class="nc-title">{{ current_user.username }}</h1>
+    <h1 class="nc-title">{{ current_user.character_name }}</h1>
     <p class="nc-subtitle">Capsuleer Profile</p>
 </div>
 
 <div class="nc-panel nc-animate nc-animate-d1" style="max-width: 500px;">
     <div class="nc-panel-title"><span class="nc-icon"></span>Character Info</div>
-    <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
-        <span class="nc-text-dim">Corporation: </span><span class="nc-text-bright">{{ user_info.corporation_name }}</span>
-    </div>
-    <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
-        <span class="nc-text-dim">Alliance: </span><span class="nc-text-bright">{{ user_info.alliance_name or "None" }}</span>
-    </div>
-    <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
-        <span class="nc-text-dim">Wallet Balance: </span><span class="nc-text-bright">{{ "{:,.2f} ISK".format(user_info.wallet_balance) }}</span>
+    <div style="display: flex; gap: 1.2rem; align-items: flex-start;">
+        <img src="https://images.evetech.net/characters/{{ user_info.character_id }}/portrait?size=128"
+             alt="{{ user_info.character_name }}"
+             style="width: 64px; height: 64px; border: 1px solid var(--nc-border);">
+        <div>
+            <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
+                <span class="nc-text-dim">Corporation: </span><span class="nc-text-bright">{{ user_info.corporation_name }}</span>
+            </div>
+            <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
+                <span class="nc-text-dim">Alliance: </span><span class="nc-text-bright">{{ user_info.alliance_name or "None" }}</span>
+            </div>
+            <div class="nc-mono nc-text" style="font-size: 0.8rem; line-height: 2;">
+                <span class="nc-text-dim">Wallet Balance: </span><span class="nc-text-bright">{{ "{:,.2f} ISK".format(user_info.wallet_balance) }}</span>
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="nc-btn-group nc-animate nc-animate-d2">
+{% if linked_characters %}
+<div class="nc-panel nc-animate nc-animate-d2" style="max-width: 800px;">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Linked Characters</div>
+    <div class="nc-card-grid">
+        {% for char in linked_characters %}
+        <div class="nc-card">
+            <div style="display: flex; gap: 0.8rem; align-items: flex-start;">
+                <img src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=128"
+                     alt="{{ char.character_name }}"
+                     style="width: 48px; height: 48px; border: 1px solid var(--nc-border);">
+                <div>
+                    <div class="nc-card-title" style="font-size: 0.85rem;">{{ char.character_name }}</div>
+                    <div class="nc-card-body">
+                        <span class="nc-text-dim">Corp:</span> <strong>{{ char.corporation_name }}</strong><br>
+                        {% if char.alliance_name %}
+                        <span class="nc-text-dim">Alliance:</span> <strong>{{ char.alliance_name }}</strong><br>
+                        {% endif %}
+                        <span class="nc-text-dim">Wallet:</span> <strong>{{ "{:,.2f} ISK".format(char.wallet_balance) }}</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="nc-btn-group nc-animate nc-animate-d3">
     <a href="{{ url_for('industry.industry') }}" class="nc-btn">Industry</a>
+    <a href="{{ url_for('auth.link_character') }}" class="nc-btn nc-btn-gold">Link Character</a>
     <a href="{{ url_for('auth.logout') }}" class="nc-btn nc-btn-dim">Logout</a>
 </div>
 

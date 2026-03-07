@@ -109,18 +109,22 @@ class AuthBlueprint(Blueprint):
         user_info = user_info_response.json()
 
         if current_user.is_authenticated:
-            # link to current user instead
-            # logout_user()
-            # session.pop('user_id', None)
             existing_user = db.session.execute(
                 select(User).where(User.character_id == user_info['CharacterID'])
             ).scalar_one_or_none()
 
             if existing_user:
                 existing_user.update_token(token_response)
+                old_main_id = existing_user.main_character_id
+                new_main_id = current_user.main_character_id
+                if old_main_id != new_main_id:
+                    old_group = db.session.execute(
+                        select(User).where(User.main_character_id == old_main_id)
+                    ).scalars().all()
+                    for user in old_group:
+                        user.main_character_id = new_main_id
                 db.session.commit()
-                session['user_id'] = existing_user.character_id
-                login_user(existing_user)
+                session['user_id'] = current_user.character_id
                 return redirect(url_for('user.user'))
 
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=token_response['expires_in'])
