@@ -15,6 +15,7 @@ class User(db.Model, UserMixin):
     character_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     character_name: Mapped[str] = mapped_column(String(255), nullable=False)
     character_owner_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    main_character_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     # SSO
     access_token: Mapped[str] = mapped_column(String(4096), nullable=False)

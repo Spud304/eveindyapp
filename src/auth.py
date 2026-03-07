@@ -8,7 +8,7 @@ from flask import session
 from flask import url_for
 from flask import jsonify
 from flask import Blueprint
-from flask_login import login_user, logout_user, current_user
+from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import select
 
 from src.models.models import db, User
@@ -26,13 +26,14 @@ class AuthBlueprint(Blueprint):
         self.scopes = scopes
         # self.scope = self.scopes.split(',') if self.scopes else 'publicData'
         super().__init__(name, import_name)
-        
+
         self._add_routes()
 
     def _add_routes(self):
         self.add_url_rule('/login', 'login', self.login, methods=['GET'])
         self.add_url_rule('/callback', 'callback', self.callback, methods=['GET'])
         self.add_url_rule('/logout', 'logout', self.logout, methods=['GET'])
+        self.add_url_rule('/link', 'link_character', login_required(self.link_character), methods=['GET'])
 
     def _get_user_info(self, token):
         headers = {
@@ -57,7 +58,18 @@ class AuthBlueprint(Blueprint):
             f"client_id={self.client_id}&scope={self.scopes}&state={token}"
         )
         return redirect(sso_url)
-    
+
+    def link_character(self):
+        """ Redirect to the SSO login page """
+        token = generate_token()
+        session['state'] = token
+        sso_url = (
+            f"https://login.eveonline.com/v2/oauth/authorize?response_type=code&"
+            f"redirect_uri={url_for('auth.callback', _external=True)}&"
+            f"client_id={self.client_id}&scope={self.scopes}&state={token}"
+        )
+        return redirect(sso_url)
+
     def callback(self):
         """ Handle the SSO callback """
         code = request.args.get('code')
@@ -88,57 +100,87 @@ class AuthBlueprint(Blueprint):
         user_info_headers = {
             'Authorization': f"Bearer {token_response['access_token']}"
         }
-        
+
         user_info_response = requests.get(user_info_url, headers=user_info_headers, timeout=10)
-        
+
         if user_info_response.status_code != 200:
             return jsonify(user_info_response.json()), user_info_response.status_code
-        
+
         user_info = user_info_response.json()
 
         if current_user.is_authenticated:
-            logout_user()
-            session.pop('user_id', None)
-
-        try:
-            # Check if the user already exists
+            # link to current user instead
+            # logout_user()
+            # session.pop('user_id', None)
             existing_user = db.session.execute(
                 select(User).where(User.character_id == user_info['CharacterID'])
             ).scalar_one_or_none()
-            
+
             if existing_user:
                 existing_user.update_token(token_response)
                 db.session.commit()
                 session['user_id'] = existing_user.character_id
                 login_user(existing_user)
                 return redirect(url_for('user.user'))
-            
+
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=token_response['expires_in'])
-            
+
+            new_user = User(
+                character_id=user_info['CharacterID'],
+                character_name=user_info['CharacterName'],
+                character_owner_hash=user_info['CharacterOwnerHash'],
+                main_character_id=current_user.character_id,
+                access_token=token_response['access_token'],
+                access_token_expires=expires_at,
+                refresh_token=token_response['refresh_token']
+            )
+
+            db.session.add(new_user)
+            db.session.commit()
+
+            session['user_id'] = current_user.character_id
+            return redirect(url_for('user.user'))
+
+        try:
+            # Check if the user already exists
+            existing_user = db.session.execute(
+                select(User).where(User.character_id == user_info['CharacterID'])
+            ).scalar_one_or_none()
+
+            if existing_user:
+                existing_user.update_token(token_response)
+                db.session.commit()
+                session['user_id'] = existing_user.character_id
+                login_user(existing_user)
+                return redirect(url_for('user.user'))
+
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=token_response['expires_in'])
+
             # Create a new user
             new_user = User(
                 character_id=user_info['CharacterID'],
                 character_name=user_info['CharacterName'],
                 character_owner_hash=user_info['CharacterOwnerHash'],
+                main_character_id=user_info['CharacterID'],
                 access_token=token_response['access_token'],
                 access_token_expires=expires_at,
                 refresh_token=token_response['refresh_token']
             )
-            
+
             db.session.add(new_user)
             db.session.commit()
-            
+
             session['user_id'] = new_user.character_id
             login_user(new_user)
-        
+
         except Exception as e:
             logout_user()
             db.session.rollback()
             return jsonify({"error": str(e)}), 500
-        
-        
+
+
         return redirect(url_for('user.user'))
-    
+
     def logout(self):
         """ Log the user out and clear the session """
         session.pop('user_id', None)

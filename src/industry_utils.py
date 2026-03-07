@@ -5,7 +5,6 @@ logger = logging.getLogger(__name__)
 from sqlalchemy import select, text
 
 from src.models.models import db, InvTypes, InvGroups, IndustryActivityMaterials, IndustryActivityProducts
-
 from src.industry_constants import (
     STRUCTURE_BASE_ME,
     BASIC_SMALL_SHIP_GROUPS, BASIC_MEDIUM_SHIP_GROUPS, BASIC_LARGE_SHIP_GROUPS,
@@ -13,6 +12,7 @@ from src.industry_constants import (
     CAPITAL_SHIP_GROUPS, RIG_GROUP_TO_CATEGORIES, ALL_ME_RIG_GROUPS,
     ATTR_ME_BONUS, ATTR_HIGHSEC_MODIFIER, ATTR_LOWSEC_MODIFIER, ATTR_NULLSEC_MODIFIER,
 )
+
 
 def load_type_group_category_maps():
     """Load {typeID: groupID} and {groupID: categoryID} from SDE."""
