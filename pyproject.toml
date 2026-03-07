@@ -31,3 +31,7 @@ markers = ["integration: Playwright browser tests"]
 [tool.ruff.lint]
 # Add E402 to the list of ignored rules
 ignore = ["E402"]
+
+[format]
+quote-style = "single"
+indent-style = "tab"
