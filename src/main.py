@@ -9,6 +9,7 @@ from flask_migrate import Migrate
 
 from src.models.models import db, User
 from src.application import Application
+from src.celery_app import celery_init_app
 from src.auth import AuthBlueprint
 from src.user import UserBlueprint
 from src.industry import IndustryBlueprint
@@ -53,9 +54,17 @@ app.config["SQLALCHEMY_BINDS"] = {
     "static": f"sqlite:///{STATIC_DB}.sqlite",
     "base": f"sqlite:///{DB_NAME}.sqlite",
 }
+app.config.from_mapping(
+    CELERY={
+        "broker_url": os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+        "result_backend": os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
+        "task_ignore_result": False,
+    },
+)
 
 db.init_app(app)
 migrate = Migrate(app, db)
+celery_app = celery_init_app(app)
 
 
 login_manager = LoginManager()

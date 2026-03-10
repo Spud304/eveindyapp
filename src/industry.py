@@ -23,6 +23,7 @@ from src.models.models import (
     MapSolarSystems,
 )
 from src.constants import ESI_BASE_URL
+from celery.result import AsyncResult
 from src.utils import (
     esi_get,
     esi_headers,
@@ -30,6 +31,7 @@ from src.utils import (
     batch_market_info,
     get_manufacturing_cost_index,
 )
+from src.tasks import fetch_blueprints_task
 from src.config import load_user_config
 from src.industry_utils import (
     load_rig_data,
@@ -71,6 +73,12 @@ class IndustryBlueprint(Blueprint):
             methods=["POST"],
         )
         self.add_url_rule(
+            "/industry/blueprints/status",
+            "blueprints_status",
+            login_required(self.blueprints_status),
+            methods=["GET"],
+        )
+        self.add_url_rule(
             "/industry/jobs", "jobs", login_required(self.get_jobs), methods=["GET"]
         )
         self.add_url_rule(
@@ -96,8 +104,9 @@ class IndustryBlueprint(Blueprint):
         return render_template("industry.html")
 
     def get_blueprints(self):
-        headers = esi_headers()
         char_id = current_user.character_id
+        now = datetime.now(timezone.utc)
+        refreshing = False
 
         # Check cache
         cached_row = db.session.execute(
@@ -106,30 +115,41 @@ class IndustryBlueprint(Blueprint):
             .limit(1)
         ).scalar_one_or_none()
 
-        now = datetime.now(timezone.utc)
-
-        if (
-            cached_row
+        has_cache = cached_row is not None
+        cache_fresh = (
+            has_cache
             and (now - cached_row.replace(tzinfo=timezone.utc))
             < BLUEPRINT_CACHE_MAX_AGE
-        ):
-            # Serve from cache
-            cached_at = cached_row.replace(tzinfo=timezone.utc)
-            j = self._load_cached_blueprints(char_id)
-        else:
-            # Fetch from ESI and cache
-            result = self._fetch_and_cache_blueprints(headers)
-            if result is None:
-                return jsonify({"error": "Failed to fetch blueprints info"}), 500
-            j, cached_at = result
+        )
+
+        if not cache_fresh:
+            # Kick off background fetch
+            task = self._start_blueprint_task(char_id)
+            refreshing = task is not None
+
+        if not has_cache:
+            # No cache at all — show loading page
+            task_id = request.args.get("task_id") or (task.id if refreshing else None)
+            return render_template(
+                "blueprints.html",
+                blueprints=[],
+                cached_at=None,
+                now_utc=now,
+                loading=True,
+                task_id=task_id,
+            )
+
+        # Serve from cache (possibly stale while refreshing)
+        cached_at = cached_row.replace(tzinfo=timezone.utc)
+        j = self._load_cached_blueprints(char_id)
 
         # Batch resolve type names
         type_ids = {i["type_id"] for i in j if i.get("type_id")}
         type_names = batch_type_names(type_ids)
 
-        # Batch resolve location names
+        # Resolve location names from cache only (locations resolved by task)
         location_ids = {i["location_id"] for i in j if i.get("location_id")}
-        location_names = self._resolve_location_names(location_ids, headers)
+        location_names = self._resolve_cached_location_names(location_ids)
 
         for i in j:
             i["type_name"] = type_names.get(i["type_id"])
@@ -137,58 +157,25 @@ class IndustryBlueprint(Blueprint):
                 i["location_id"], "Unknown Location"
             )
 
+        task_id = request.args.get("task_id") or (task.id if refreshing else None)
         return render_template(
-            "blueprints.html", blueprints=j, cached_at=cached_at, now_utc=now
+            "blueprints.html",
+            blueprints=j,
+            cached_at=cached_at,
+            now_utc=now,
+            refreshing=refreshing,
+            task_id=task_id,
         )
 
-    def _fetch_and_cache_blueprints(self, headers):
-        """Fetch blueprints from ESI (with pagination), cache them, return (list_of_dicts, cached_at) or None on failure."""
-        char_id = current_user.character_id
-        url = f"{ESI_BASE_URL}/characters/{char_id}/blueprints"
-
-        all_bps = []
-        page = 1
-        while True:
-            status, data = esi_get(url, headers=headers, params={"page": page})
-            if status != 200 or data is None:
-                if page == 1:
-                    return None
-                break
-            all_bps.extend(data)
-            if len(data) < 1000:
-                break
-            page += 1
-
-        now = datetime.now(timezone.utc)
-
-        # Delete old cached rows for this character
-        db.session.execute(
-            CachedBlueprint.__table__.delete().where(
-                CachedBlueprint.character_id == char_id
-            )
-        )
-
-        # Bulk insert new rows
-        new_rows = [
-            CachedBlueprint(
-                character_id=char_id,
-                item_id=bp["item_id"],
-                type_id=bp["type_id"],
-                location_id=bp["location_id"],
-                location_flag=bp["location_flag"],
-                quantity=bp["quantity"],
-                runs=bp["runs"],
-                material_efficiency=bp["material_efficiency"],
-                time_efficiency=bp["time_efficiency"],
-                cached_at=now,
-            )
-            for bp in all_bps
-        ]
-        if new_rows:
-            db.session.add_all(new_rows)
-        db.session.commit()
-
-        return all_bps, now
+    def _start_blueprint_task(self, char_id):
+        """Dispatch a Celery task to fetch blueprints in the background."""
+        try:
+            token = current_user.get_sso_data()["access_token"]
+            task = fetch_blueprints_task.delay(char_id, token)
+            return task
+        except Exception:
+            logger.exception("Failed to dispatch blueprint fetch task")
+            return None
 
     def _load_cached_blueprints(self, character_id):
         """Load cached blueprints from DB and return as list of dicts."""
@@ -216,11 +203,22 @@ class IndustryBlueprint(Blueprint):
         ]
 
     def refresh_blueprints(self):
-        headers = esi_headers()
-        result = self._fetch_and_cache_blueprints(headers)
-        if result is None:
-            return jsonify({"error": "Failed to refresh blueprints from ESI"}), 500
-        return redirect(url_for("industry.blueprints"))
+        char_id = current_user.character_id
+        task = self._start_blueprint_task(char_id)
+        if task is None:
+            return jsonify({"error": "Failed to start blueprint refresh"}), 500
+        return redirect(url_for("industry.blueprints", task_id=task.id))
+
+    def blueprints_status(self):
+        """Poll endpoint: returns task state as JSON."""
+        task_id = request.args.get("task_id")
+        if not task_id:
+            return jsonify({"state": "UNKNOWN"})
+        result = AsyncResult(task_id)
+        response = {"state": result.state}
+        if result.state == "FAILURE":
+            response["error"] = str(result.result)
+        return jsonify(response)
 
     def get_blueprint_materials(self, type_id: int):
         blueprint = db.session.execute(
@@ -669,6 +667,21 @@ class IndustryBlueprint(Blueprint):
         if status == 200:
             return render_template("jobs.html", jobs_info=data)
         return jsonify({"error": "Failed to fetch jobs info"}), status or 500
+
+    def _resolve_cached_location_names(self, location_ids: set) -> dict:
+        """Return {location_id: name} from the DB cache only (no ESI calls)."""
+        if not location_ids:
+            return {}
+        cached = (
+            db.session.execute(
+                select(CachedLocations).where(
+                    CachedLocations.location_id.in_(location_ids)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {row.location_id: row.location_name for row in cached}
 
     def _resolve_location_names(self, location_ids: set, headers: dict) -> dict:
         """Return a {location_id: name} map for all given IDs, using cache then ESI."""

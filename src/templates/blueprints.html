@@ -5,24 +5,39 @@
 <div class="nc-header nc-animate">
     <h1 class="nc-title">Blueprints</h1>
     <p class="nc-subtitle">
-        {{ blueprints|length }} blueprint{{ "s" if blueprints|length != 1 else "" }} found
-        {% if cached_at %}
-            {% set age_seconds = (now_utc - cached_at).total_seconds() | int %}
-            {% if age_seconds < 60 %}
-                &middot; Cached just now
-            {% elif age_seconds < 3600 %}
-                &middot; Cached {{ (age_seconds // 60) | int }}m ago
-            {% else %}
-                &middot; Cached {{ (age_seconds // 3600) | int }}h ago
+        {% if loading %}
+            Fetching blueprints from ESI...
+        {% else %}
+            {{ blueprints|length }} blueprint{{ "s" if blueprints|length != 1 else "" }} found
+            {% if cached_at %}
+                {% set age_seconds = (now_utc - cached_at).total_seconds() | int %}
+                {% if age_seconds < 60 %}
+                    &middot; Cached just now
+                {% elif age_seconds < 3600 %}
+                    &middot; Cached {{ (age_seconds // 60) | int }}m ago
+                {% else %}
+                    &middot; Cached {{ (age_seconds // 3600) | int }}h ago
+                {% endif %}
+            {% endif %}
+            {% if refreshing %}
+                &middot; <span id="refresh-status">Updating from ESI...</span>
             {% endif %}
         {% endif %}
     </p>
+    {% if not loading %}
     <form method="POST" action="{{ url_for('industry.blueprints_refresh') }}" style="margin-top: 0.5rem;">
-        <button type="submit" class="nc-btn nc-btn-sm nc-btn-dim">Refresh from ESI</button>
+        <button type="submit" class="nc-btn nc-btn-sm nc-btn-dim" {% if refreshing %}disabled{% endif %}>
+            {% if refreshing %}Refreshing...{% else %}Refresh from ESI{% endif %}
+        </button>
     </form>
+    {% endif %}
 </div>
 
-{% if blueprints %}
+{% if loading %}
+<div class="nc-empty nc-animate nc-animate-d1">
+    <p>Loading blueprints for the first time. This may take a moment...</p>
+</div>
+{% elif blueprints %}
 <div class="nc-card-grid nc-animate nc-animate-d1">
     {% for blueprint in blueprints %}
     <div class="nc-card">
@@ -47,5 +62,29 @@
     <a href="{{ url_for('auth.login') }}" class="nc-btn">Login</a>
     {% endif %}
 </div>
+
+{% if task_id %}
+<script>
+(function() {
+    var taskId = {{ task_id|tojson }};
+    var statusUrl = {{ url_for('industry.blueprints_status')|tojson }};
+    var interval = setInterval(function() {
+        fetch(statusUrl + '?task_id=' + encodeURIComponent(taskId))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.state === 'SUCCESS') {
+                    clearInterval(interval);
+                    window.location.href = {{ url_for('industry.blueprints')|tojson }};
+                } else if (data.state === 'FAILURE') {
+                    clearInterval(interval);
+                    var el = document.getElementById('refresh-status');
+                    if (el) el.textContent = 'Refresh failed: ' + (data.error || 'unknown error');
+                }
+            })
+            .catch(function() {});
+    }, 3000);
+})();
+</script>
+{% endif %}
 
 {% endblock %}

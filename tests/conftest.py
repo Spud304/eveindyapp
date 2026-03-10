@@ -16,6 +16,7 @@ from flask_login import LoginManager
 from sqlalchemy import text
 
 from src.application import Application
+from src.celery_app import celery_init_app
 from src.models.models import (
     db,
     User,
@@ -186,7 +187,15 @@ def create_test_app():
         "base": shared_uri,
     }
 
+    app.config["CELERY"] = {
+        "broker_url": "memory://",
+        "result_backend": "cache+memory://",
+        "task_always_eager": True,
+        "task_eager_propagates": True,
+    }
+
     db.init_app(app)
+    celery_init_app(app)
 
     login_manager = LoginManager()
     login_manager.init_app(app)
