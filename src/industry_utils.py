@@ -28,6 +28,14 @@ from src.industry_constants import (
     ATTR_HIGHSEC_MODIFIER,
     ATTR_LOWSEC_MODIFIER,
     ATTR_NULLSEC_MODIFIER,
+    SKILL_INDUSTRY,
+    SKILL_ADV_INDUSTRY,
+    SKILL_MASS_PRODUCTION,
+    SKILL_ADV_MASS_PRODUCTION,
+    SKILL_LAB_OPERATION,
+    SKILL_ADV_LAB_OPERATION,
+    SKILL_MASS_REACTIONS,
+    SKILL_ADV_MASS_REACTIONS,
 )
 
 
@@ -290,3 +298,159 @@ def load_sde_manufacturing_data():
         bp_to_product[row.typeID] = row.productTypeID
 
     return materials_by_bp, products_by_product, bp_to_product
+
+
+def load_blueprint_skill_requirements():
+    """Load skill requirements for manufacturing (activityID=1) and copying (activityID=5) from SDE.
+
+    Returns (mfg_skill_reqs, copy_skill_reqs) where each is
+    {bp_type_id: [(skill_id, min_level), ...]}.
+    """
+    engine = db.engines["static"]
+    sql = text(
+        "SELECT typeID, activityID, skillID, level FROM industryActivitySkills WHERE activityID IN (1, 5)"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql).all()
+
+    mfg_skill_reqs = {}
+    copy_skill_reqs = {}
+    for type_id, activity_id, skill_id, level in rows:
+        if activity_id == 1:
+            mfg_skill_reqs.setdefault(type_id, []).append((skill_id, level))
+        else:
+            copy_skill_reqs.setdefault(type_id, []).append((skill_id, level))
+
+    return mfg_skill_reqs, copy_skill_reqs
+
+
+def load_character_skills(character_ids):
+    """Load cached skills for given character IDs.
+
+    Returns {character_id: {skill_id: active_skill_level}}.
+    """
+    from src.models.models import CachedSkill
+
+    if not character_ids:
+        return {}
+
+    rows = db.session.execute(
+        select(CachedSkill.character_id, CachedSkill.skill_id, CachedSkill.active_skill_level)
+        .where(CachedSkill.character_id.in_(character_ids))
+    ).all()
+
+    result = {}
+    for char_id, skill_id, level in rows:
+        result.setdefault(char_id, {})[skill_id] = level
+    return result
+
+
+def compute_character_capabilities(char_skills):
+    """Pure function: compute slot counts and skill levels from a character's skill map.
+
+    Returns dict with mfg_slots, copy_slots, reaction_slots, industry_level, adv_industry_level.
+    """
+    industry_level = char_skills.get(SKILL_INDUSTRY, 0)
+    adv_industry_level = char_skills.get(SKILL_ADV_INDUSTRY, 0)
+    mass_prod = char_skills.get(SKILL_MASS_PRODUCTION, 0)
+    adv_mass_prod = char_skills.get(SKILL_ADV_MASS_PRODUCTION, 0)
+    lab_op = char_skills.get(SKILL_LAB_OPERATION, 0)
+    adv_lab_op = char_skills.get(SKILL_ADV_LAB_OPERATION, 0)
+    mass_react = char_skills.get(SKILL_MASS_REACTIONS, 0)
+    adv_mass_react = char_skills.get(SKILL_ADV_MASS_REACTIONS, 0)
+
+    return {
+        "mfg_slots": 1 + mass_prod + adv_mass_prod,
+        "copy_slots": 1 + lab_op + adv_lab_op,
+        "reaction_slots": 1 + mass_react + adv_mass_react,
+        "industry_level": industry_level,
+        "adv_industry_level": adv_industry_level,
+    }
+
+
+def can_character_build(bp_type_id, char_skills, skill_reqs):
+    """Check if a character meets all skill requirements for a blueprint. Returns bool."""
+    reqs = skill_reqs.get(bp_type_id, [])
+    for skill_id, min_level in reqs:
+        if char_skills.get(skill_id, 0) < min_level:
+            return False
+    return True
+
+
+def get_character_names(character_ids):
+    """Query User model for character names. Returns {char_id: name}."""
+    from src.models.models import User
+
+    if not character_ids:
+        return {}
+
+    rows = db.session.execute(
+        select(User.character_id, User.character_name)
+        .where(User.character_id.in_(character_ids))
+    ).all()
+    return {r.character_id: r.character_name for r in rows}
+
+
+def assign_jobs_to_characters(phase_bps, characters, skill_reqs, job_type="mfg"):
+    """Greedy LPT scheduler: assign jobs to characters based on skill eligibility and slots.
+
+    Args:
+        phase_bps: list of bp_status dicts for a single phase
+        characters: list of character capability dicts (with 'char_id', 'char_name', 'skills', 'mfg_slots', 'copy_slots')
+        skill_reqs: {bp_type_id: [(skill_id, min_level), ...]}
+        job_type: "mfg" or "copy"
+
+    Returns list of unassignable bp_status dicts.
+    """
+    slot_key = "mfg_slots" if job_type == "mfg" else "copy_slots"
+    remaining_slots = {c["char_id"]: c[slot_key] for c in characters}
+
+    # Sort jobs by estimated time descending (longest first)
+    def get_time(bp):
+        s = bp["build_strategy"]
+        if s["recommended"] == "bpc" and s.get("bpc_time"):
+            return s["bpc_time"]
+        return s.get("bpo_time", 0)
+
+    sorted_bps = sorted(phase_bps, key=get_time, reverse=True)
+
+    unassignable = []
+    for bp in sorted_bps:
+        bp_id = bp["type_id"]
+        # Each job consumes 1 slot on the assigned character.
+        # The build_strategy.slots_used reflects parallel BPC splitting across
+        # aggregate slots, but assignment is per-character — one job per slot.
+        slots_needed = 1
+
+        # Find eligible characters
+        eligible = []
+        for c in characters:
+            cid = c["char_id"]
+            if remaining_slots[cid] >= slots_needed and can_character_build(bp_id, c["skills"], skill_reqs):
+                eligible.append(c)
+
+        if eligible:
+            # Pick character with most remaining slots (tie-break: best industry skill)
+            best = max(eligible, key=lambda c: (remaining_slots[c["char_id"]], c.get("industry_level", 0)))
+            remaining_slots[best["char_id"]] -= slots_needed
+            bp["assigned_character"] = {
+                "char_id": best["char_id"],
+                "char_name": best["char_name"],
+            }
+        else:
+            # Check if it's a skill issue vs a slot issue
+            skill_eligible = [c for c in characters if can_character_build(bp_id, c["skills"], skill_reqs)]
+            if not skill_eligible:
+                # Find which skills are missing
+                reqs = skill_reqs.get(bp_id, [])
+                missing_skills = []
+                for skill_id, min_level in reqs:
+                    if all(c["skills"].get(skill_id, 0) < min_level for c in characters):
+                        missing_skills.append((skill_id, min_level))
+                bp["unassignable_reason"] = "No character has required skills"
+                bp["missing_skill_reqs"] = missing_skills
+            else:
+                bp["unassignable_reason"] = "All eligible characters out of slots"
+            unassignable.append(bp)
+
+    return unassignable

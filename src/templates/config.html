@@ -98,6 +98,16 @@
 {# Section 0: General Settings #}
 <div class="nc-panel nc-animate nc-animate-d1">
     <div class="nc-panel-title"><span class="nc-icon"></span>General Settings</div>
+    <div style="margin-bottom: 1rem;">
+        <label style="font-family: var(--nc-font-mono); font-size: 0.8rem; color: var(--nc-text); cursor: pointer;">
+            <input type="checkbox" id="settingUseCharSkills" {{ 'checked' if config.use_character_skills else '' }}>
+            Use Character Skills
+        </label>
+        <div style="font-family: var(--nc-font-mono); font-size: 0.65rem; color: var(--nc-text-dim); margin-top: 0.2rem; margin-left: 1.5rem;">
+            When enabled, slot counts and skill levels are pulled from cached character data. The calculator assigns jobs to specific characters based on skill requirements.
+        </div>
+    </div>
+    <div id="manualSkillFields" style="{{ 'display: none;' if config.use_character_skills else '' }}">
     <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-end;">
         <div class="nc-field">
             <label class="nc-field-label">Build Slots</label>
@@ -131,10 +141,55 @@
                 {% endfor %}
             </select>
         </div>
-        <div class="nc-field">
-            <button type="button" class="nc-btn nc-btn-sm" id="saveSettingsBtn">Save</button>
-            <span id="settingsSaved" style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-teal); margin-left: 0.5rem; opacity: 0; transition: opacity 0.3s;">Saved</span>
+    </div>
+    </div>
+    <div id="charSkillsSummary" style="{{ '' if config.use_character_skills else 'display: none;' }}">
+        <div style="font-family: var(--nc-font-mono); font-size: 0.65rem; color: var(--nc-text-dim); margin-top: 0.2rem; margin-bottom: 0.5rem;">
+            Default Timeframe (hours):
+            <input class="nc-input" type="number" id="settingTimeframeChar" min="0" step="1"
+                   value="{{ config.default_timeframe_hours or '' }}" placeholder="None"
+                   style="width: 120px;">
         </div>
+        {% if character_summaries %}
+        <table class="nc-table" style="margin-top: 0.5rem;">
+            <thead>
+                <tr>
+                    <th>Character</th>
+                    <th class="nc-qty-header">Mfg Slots</th>
+                    <th class="nc-qty-header">Copy Slots</th>
+                    <th class="nc-qty-header">Reaction Slots</th>
+                    <th class="nc-qty-header">Industry</th>
+                    <th class="nc-qty-header">Adv. Industry</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in character_summaries %}
+                <tr>
+                    <td>{{ c.name }}</td>
+                    <td class="nc-qty">{{ c.mfg_slots }}</td>
+                    <td class="nc-qty">{{ c.copy_slots }}</td>
+                    <td class="nc-qty">{{ c.reaction_slots }}</td>
+                    <td class="nc-qty">{{ c.industry_level }}</td>
+                    <td class="nc-qty">{{ c.adv_industry_level }}</td>
+                    <td>
+                        {% if c.has_skills %}
+                        <span style="color: var(--nc-teal); font-family: var(--nc-font-mono); font-size: 0.7rem;">Cached</span>
+                        {% else %}
+                        <span style="color: var(--nc-gold); font-family: var(--nc-font-mono); font-size: 0.7rem;">Refresh needed</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="nc-empty">No character skill data available. Toggle will use base values (1 slot, 0 skill levels).</div>
+        {% endif %}
+    </div>
+    <div style="margin-top: 0.8rem;">
+        <button type="button" class="nc-btn nc-btn-sm" id="saveSettingsBtn">Save</button>
+        <span id="settingsSaved" style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-teal); margin-left: 0.5rem; opacity: 0; transition: opacity 0.3s;">Saved</span>
     </div>
 </div>
 
@@ -280,18 +335,41 @@
 <script>
 (function() {
     // ===== General Settings =====
-    document.getElementById('saveSettingsBtn').addEventListener('click', function() {
-        var tf = document.getElementById('settingTimeframe').value;
+    var useCharSkills = document.getElementById('settingUseCharSkills');
+    var manualFields = document.getElementById('manualSkillFields');
+    var charSummary = document.getElementById('charSkillsSummary');
+
+    useCharSkills.addEventListener('change', function() {
+        // Immediately save toggle and reload to show/hide character summaries
         fetch('{{ url_for("config.settings_update") }}', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                build_slots: parseInt(document.getElementById('settingBuildSlots').value) || 10,
-                copy_slots: parseInt(document.getElementById('settingCopySlots').value) || 10,
-                default_timeframe_hours: tf ? parseFloat(tf) : null,
-                industry_level: parseInt(document.getElementById('settingIndustryLevel').value) || 0,
-                adv_industry_level: parseInt(document.getElementById('settingAdvIndustryLevel').value) || 0
-            })
+            body: JSON.stringify({use_character_skills: useCharSkills.checked})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function() {
+            window.location.reload();
+        });
+    });
+
+    document.getElementById('saveSettingsBtn').addEventListener('click', function() {
+        var isCharMode = useCharSkills.checked;
+        var tfEl = isCharMode ? document.getElementById('settingTimeframeChar') : document.getElementById('settingTimeframe');
+        var tf = tfEl ? tfEl.value : '';
+        var payload = {
+            use_character_skills: isCharMode,
+            default_timeframe_hours: tf ? parseFloat(tf) : null
+        };
+        if (!isCharMode) {
+            payload.build_slots = parseInt(document.getElementById('settingBuildSlots').value) || 10;
+            payload.copy_slots = parseInt(document.getElementById('settingCopySlots').value) || 10;
+            payload.industry_level = parseInt(document.getElementById('settingIndustryLevel').value) || 0;
+            payload.adv_industry_level = parseInt(document.getElementById('settingAdvIndustryLevel').value) || 0;
+        }
+        fetch('{{ url_for("config.settings_update") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {

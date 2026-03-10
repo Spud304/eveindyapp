@@ -9,6 +9,14 @@ from src.models.models import db, CachedToonInfo, User
 from src.utils import esi_get
 
 
+def get_linked_character_ids(user):
+    """Return list of all character_ids sharing the same main_character_id (including the user)."""
+    rows = db.session.execute(
+        select(User.character_id).where(User.main_character_id == user.main_character_id)
+    ).scalars().all()
+    return rows
+
+
 class UserBlueprint(Blueprint):
     def __init__(self, name, import_name):
         super().__init__(name, import_name)

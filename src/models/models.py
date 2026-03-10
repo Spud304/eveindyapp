@@ -106,6 +106,19 @@ class CachedBlueprint(db.Model):
     cached_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class CachedSkill(db.Model):
+    __bind_key__ = "base"
+    __tablename__ = "cached_skills"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    character_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    skill_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    trained_skill_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    active_skill_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    skillpoints_in_skill: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    cached_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class InvTypes(db.Model):
     __bind_key__ = "static"
     __tablename__ = "InvTypes"

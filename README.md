@@ -110,8 +110,6 @@ src/
 ## TODO
 
 - Invention support -- handle T2 blueprint invention chains (datacores, decryptors, probability)
-- Multi-character support -- allow users to link multiple characters and aggregate blueprint ownership
-  - partially done, need to add tracking of blueprint ownership and jobs across linked characters, should also add character suggesstion for jobs based on skills (will need to adjust scopes to pull skill data)
 - Job notifications -- alert when industry jobs complete
 - Search improvements -- support partial matching and category filtering on the calculator search
 - Project planner -- allow users to save and share build plans with specific items, quantities, and ME levels, and track progress as they acquire materials and complete jobs

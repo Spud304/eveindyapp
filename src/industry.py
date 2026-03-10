@@ -40,6 +40,11 @@ from src.industry_utils import (
     load_type_group_category_maps,
     pick_best_station,
     classify_product_for_rig,
+    load_blueprint_skill_requirements,
+    load_character_skills,
+    compute_character_capabilities,
+    get_character_names,
+    assign_jobs_to_characters,
 )
 
 
@@ -369,11 +374,36 @@ class IndustryBlueprint(Blueprint):
         )
 
         # Read build settings from config
-        build_slots = config.get("build_slots", 10)
-        copy_slots = config.get("copy_slots", 10)
+        use_char_skills = config.get("use_character_skills", False)
+        characters = []
+        mfg_skill_reqs = {}
+        copy_skill_reqs = {}
+        if use_char_skills:
+            from src.user import get_linked_character_ids
+            char_ids = get_linked_character_ids(current_user)
+            char_skills_map = load_character_skills(char_ids)
+            char_names = get_character_names(char_ids)
+            mfg_skill_reqs, copy_skill_reqs = load_blueprint_skill_requirements()
+            for cid in char_ids:
+                skills = char_skills_map.get(cid, {})
+                caps = compute_character_capabilities(skills)
+                characters.append({
+                    "char_id": cid,
+                    "char_name": char_names.get(cid, f"Character {cid}"),
+                    "skills": skills,
+                    **caps,
+                })
+            build_slots = sum(c["mfg_slots"] for c in characters)
+            copy_slots = sum(c["copy_slots"] for c in characters)
+            industry_level = max((c["industry_level"] for c in characters), default=5)
+            adv_industry_level = max((c["adv_industry_level"] for c in characters), default=5)
+        else:
+            build_slots = config.get("build_slots", 10)
+            copy_slots = config.get("copy_slots", 10)
+            industry_level = config.get("industry_level", 5)
+            adv_industry_level = config.get("adv_industry_level", 5)
+
         default_timeframe = config.get("default_timeframe_hours")
-        industry_level = config.get("industry_level", 5)
-        adv_industry_level = config.get("adv_industry_level", 5)
 
         # Read timeframe from query params (overrides config default)
         timeframe_hours = request.args.get("timeframe_hours", None, type=float)
@@ -746,8 +776,56 @@ class IndustryBlueprint(Blueprint):
                             adv_industry_level=adv_industry_level,
                         )
 
+        # Character-aware job assignment
+        unassignable_warnings = []
+        if use_char_skills and characters:
+            # Group bps by depth for per-phase assignment
+            phases_by_depth = {}
+            for bp in bp_statuses:
+                d = bp.get("depth", 0)
+                phases_by_depth.setdefault(d, []).append(bp)
+
+            max_depth = max(phases_by_depth.keys()) if phases_by_depth else 0
+            for depth in range(max_depth, -1, -1):
+                phase_bps = phases_by_depth.get(depth, [])
+                if not phase_bps:
+                    continue
+                # Assign manufacturing jobs
+                unassignable = assign_jobs_to_characters(phase_bps, characters, mfg_skill_reqs, job_type="mfg")
+                unassignable_warnings.extend(unassignable)
+
+                # Assign copy jobs for BPC-mode blueprints
+                copy_bps = [bp for bp in phase_bps if bp["build_strategy"]["recommended"] == "bpc" and bp["build_strategy"].get("copies_to_make", 0) > 0]
+                if copy_bps:
+                    assign_jobs_to_characters(copy_bps, characters, copy_skill_reqs, job_type="copy")
+
+            # Recompute strategy using assigned character's skill levels
+            for bp in bp_statuses:
+                ac = bp.get("assigned_character")
+                if ac:
+                    char = next((c for c in characters if c["char_id"] == ac["char_id"]), None)
+                    if char:
+                        bp_times = activity_times.get(bp["type_id"], (0, 0))
+                        bp["build_strategy"] = _compute_build_strategy(
+                            runs_needed=bp["runs_needed"],
+                            max_prod_limit=bp["max_prod_limit"],
+                            te=bp["te"],
+                            mfg_time_per_run=bp_times[0],
+                            copy_time_per_run=bp_times[1],
+                            mfg_slots=char["mfg_slots"],
+                            bp_materials=materials_by_bp.get(bp["type_id"], []),
+                            me=bp["me"],
+                            struct_me=bp["structure_me"],
+                            timeframe_seconds=timeframe_seconds,
+                            num_bpos=1 + extra_bpos.get(bp["type_id"], 0),
+                            bought_bpcs=bought_bpcs.get(bp["type_id"], 0),
+                            struct_te=structure_te_by_bp.get(bp["type_id"], 1.0),
+                            industry_level=char["industry_level"],
+                            adv_industry_level=char["adv_industry_level"],
+                        )
+
         # Phase-aware timeline (replaces flat time_summary)
-        phase_timeline = _compute_phase_timeline(bp_statuses)
+        phase_timeline = _compute_phase_timeline(bp_statuses, use_char_skills)
         phase_timeline["timeframe_seconds"] = timeframe_seconds
         phase_timeline["exceeds_timeframe"] = (
             timeframe_seconds is not None
@@ -776,6 +854,9 @@ class IndustryBlueprint(Blueprint):
             timeframe_hours=timeframe_hours,
             phase_timeline=phase_timeline,
             suggest_mode=suggest_mode,
+            use_character_skills=use_char_skills,
+            characters=characters,
+            unassignable_warnings=unassignable_warnings,
         )
 
     def get_jobs(self):
@@ -1119,7 +1200,7 @@ def _compute_blueprint_depths(top_bp_id, materials_by_bp, products_by_product, b
     return depths
 
 
-def _compute_phase_timeline(bp_statuses):
+def _compute_phase_timeline(bp_statuses, use_char_skills=False):
     """Group bp_statuses by depth, compute per-phase critical paths, sum phases sequentially."""
     phases_by_depth = {}
     for bp in bp_statuses:
@@ -1142,24 +1223,50 @@ def _compute_phase_timeline(bp_statuses):
         phase_copy_secs = 0
         phase_mfg_secs = 0
 
-        for bp in bps:
-            s = bp["build_strategy"]
-            rec_time = s["bpc_time"] if s["recommended"] == "bpc" and s["bpc_time"] else s["bpo_time"]
-            phase_wall = max(phase_wall, rec_time)
-            total_slot_hours += s["bpo_time"] / 3600
+        if use_char_skills:
+            # Multi-character: group by assigned character, per-character wall = max of that char's jobs
+            char_mfg_times = {}
+            char_copy_times = {}
+            for bp in bps:
+                s = bp["build_strategy"]
+                total_slot_hours += s["bpo_time"] / 3600
+                ac = bp.get("assigned_character")
+                char_id = ac["char_id"] if ac else "__unassigned__"
 
-            # Copy-only: what if bought_bpcs were 0?
-            if s["recommended"] == "bpc" and s.get("copy_only_time"):
-                phase_copy_only = max(phase_copy_only, s["copy_only_time"])
-            else:
-                phase_copy_only = max(phase_copy_only, rec_time)
+                if s["recommended"] == "bpc" and s.get("bpc_mfg_time"):
+                    char_mfg_times[char_id] = max(char_mfg_times.get(char_id, 0), s["bpc_mfg_time"])
+                    if s.get("bpc_copy_time"):
+                        char_copy_times[char_id] = max(char_copy_times.get(char_id, 0), s["bpc_copy_time"])
+                else:
+                    char_mfg_times[char_id] = max(char_mfg_times.get(char_id, 0), s["bpo_time"])
 
-            # Per-phase copy vs mfg breakdown
-            if s["recommended"] == "bpc" and s["bpc_copy_time"]:
-                phase_copy_secs = max(phase_copy_secs, s["bpc_copy_time"])
-                phase_mfg_secs = max(phase_mfg_secs, s["bpc_mfg_time"])
-            else:
-                phase_mfg_secs = max(phase_mfg_secs, s["bpo_time"])
+            phase_mfg_secs = max(char_mfg_times.values()) if char_mfg_times else 0
+            phase_copy_secs = max(char_copy_times.values()) if char_copy_times else 0
+            phase_wall = max(phase_mfg_secs, phase_copy_secs + phase_mfg_secs) if phase_copy_secs > 0 else phase_mfg_secs
+            # For copy+mfg pipeline: copy and mfg can overlap when different characters handle them
+            # but conservatively, wall = max(copy) + max(mfg) for the bottleneck character
+            if phase_copy_secs > 0:
+                phase_wall = phase_copy_secs + phase_mfg_secs
+            phase_copy_only = phase_wall
+        else:
+            for bp in bps:
+                s = bp["build_strategy"]
+                rec_time = s["bpc_time"] if s["recommended"] == "bpc" and s["bpc_time"] else s["bpo_time"]
+                phase_wall = max(phase_wall, rec_time)
+                total_slot_hours += s["bpo_time"] / 3600
+
+                # Copy-only: what if bought_bpcs were 0?
+                if s["recommended"] == "bpc" and s.get("copy_only_time"):
+                    phase_copy_only = max(phase_copy_only, s["copy_only_time"])
+                else:
+                    phase_copy_only = max(phase_copy_only, rec_time)
+
+                # Per-phase copy vs mfg breakdown
+                if s["recommended"] == "bpc" and s["bpc_copy_time"]:
+                    phase_copy_secs = max(phase_copy_secs, s["bpc_copy_time"])
+                    phase_mfg_secs = max(phase_mfg_secs, s["bpc_mfg_time"])
+                else:
+                    phase_mfg_secs = max(phase_mfg_secs, s["bpo_time"])
 
         phases.append({
             "depth": depth,

@@ -19,6 +19,7 @@ class TestLoadUserConfig:
                 "default_timeframe_hours": None,
                 "industry_level": 5,
                 "adv_industry_level": 5,
+                "use_character_skills": False,
             }
 
     def test_valid_json(self, app, test_user):
@@ -62,6 +63,7 @@ class TestLoadUserConfig:
                 "default_timeframe_hours": None,
                 "industry_level": 5,
                 "adv_industry_level": 5,
+                "use_character_skills": False,
             }
 
     def test_partial_config_gets_defaults(self, app, test_user):
