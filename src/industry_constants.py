@@ -71,8 +71,19 @@ RIG_GROUP_TO_CATEGORIES = {
 # All rig group IDs (for querying dgmTypeAttributes)
 ALL_ME_RIG_GROUPS = set(RIG_GROUP_TO_CATEGORIES.keys())
 
+# Structure base TE multipliers (from SDE attr 2602)
+# 0.7 = 30% time reduction, 1.0 = no reduction
+STRUCTURE_BASE_TE = {
+    "raitaru": 0.85,
+    "azbel": 0.80,
+    "sotiyo": 0.70,
+    "athanor": 1.0,
+    "tatara": 1.0,
+}
+
 # Dogma attribute IDs
 ATTR_ME_BONUS = 2594  # Material Reduction Bonus (e.g. -2.0)
+ATTR_TE_BONUS = 2593  # Time Reduction Bonus (e.g. -24.0)
 ATTR_HIGHSEC_MODIFIER = 2355  # highSecModifier
 ATTR_LOWSEC_MODIFIER = 2356  # lowSecModifier
 ATTR_NULLSEC_MODIFIER = 2357  # nullSecModifier / WH modifier

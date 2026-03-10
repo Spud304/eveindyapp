@@ -288,15 +288,25 @@
                 </div>
             </div>
             <div class="nc-field">
+                <label class="nc-field-label">Copy Strategy</label>
+                <div style="font-family: var(--nc-font-mono); font-size: 0.75rem;">
+                    <label><input type="radio" name="suggest_mode" value="none" {{ 'checked' if suggest_mode|default('none') == 'none' }}> None</label>
+                    <label style="margin-left: 0.75rem;"><input type="radio" name="suggest_mode" value="bpo" {{ 'checked' if suggest_mode|default('none') == 'bpo' }}> Extra BPOs</label>
+                    <label style="margin-left: 0.75rem;"><input type="radio" name="suggest_mode" value="bpc" {{ 'checked' if suggest_mode|default('none') == 'bpc' }}> Buy BPCs</label>
+                </div>
+            </div>
+            <div class="nc-field">
                 <button type="submit" class="nc-btn">Calculate</button>
             </div>
         </div>
     </div>
 
 {% if product %}
-    {# Carry ME overrides as hidden fields #}
+    {# Carry ME and extra BPO overrides as hidden fields #}
     {% for bp in bp_statuses %}
     <input type="hidden" name="me_{{ bp.type_id }}" value="{{ bp.me }}" class="me-hidden" data-bpid="{{ bp.type_id }}">
+    {% if bp.extra_bpos %}<input type="hidden" name="extra_bpos_{{ bp.type_id }}" value="{{ bp.extra_bpos }}">{% endif %}
+    {% if bp.bought_bpcs %}<input type="hidden" name="bought_bpcs_{{ bp.type_id }}" value="{{ bp.bought_bpcs }}">{% endif %}
     {% endfor %}
 </form>
 
@@ -338,23 +348,42 @@
 </div>
 
 {# Build Time Summary #}
-{% if time_summary is defined and time_summary %}
+{% if phase_timeline is defined and phase_timeline %}
 <div class="nc-panel nc-animate nc-animate-d2">
     <div class="nc-panel-title"><span class="nc-icon"></span>Build Time Estimate</div>
     <div class="nc-time-summary">
-        Wall-clock time: <strong>{{ time_summary.critical_path_fmt }}</strong>
-        ({{ build_slots }} build slot{{ "s" if build_slots != 1 else "" }})
-        {% if time_summary.timeframe_seconds %}
+        Wall-clock time: <strong>{{ phase_timeline.total_wall_fmt }}</strong>
+        ({{ phase_timeline.phases|length }} phase{{ "s" if phase_timeline.phases|length != 1 else "" }},
+         {{ build_slots }} build slot{{ "s" if build_slots != 1 else "" }})
+        {% if phase_timeline.timeframe_seconds %}
         &mdash;
-        {% if time_summary.exceeds_timeframe %}
+        {% if phase_timeline.exceeds_timeframe %}
         <span class="nc-exceeds">exceeds {{ "%.0f"|format(timeframe_hours) }}h timeframe</span>
         {% else %}
         <span class="nc-on-track">within {{ "%.0f"|format(timeframe_hours) }}h timeframe</span>
         {% endif %}
         {% endif %}
     </div>
+    {# Strategy comparison: copy-only vs with bought BPCs #}
+    {% if phase_timeline.copy_only_seconds != phase_timeline.total_wall_seconds %}
     <div class="nc-time-detail">
-        Total slot-hours: {{ "{:,.1f}".format(time_summary.total_slot_hours) }}h
+        Copy only: {{ phase_timeline.copy_only_fmt }}
+        &middot; With bought BPCs: {{ phase_timeline.total_wall_fmt }}
+    </div>
+    {% endif %}
+    {# Per-phase breakdown (only show if multi-phase) #}
+    {% if phase_timeline.phases|length > 1 %}
+    {% for phase in phase_timeline.phases %}
+    <div class="nc-time-detail">
+        Phase {{ phase.phase_num }}
+        ({{ phase.blueprints|length }} bp{{ "s" if phase.blueprints|length != 1 else "" }}):
+        {% if phase.copy_seconds > 0 %}Copy: {{ phase.copy_fmt }} &middot; {% endif %}
+        Mfg: {{ phase.mfg_fmt }} &middot; Wall: {{ phase.wall_fmt }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    <div class="nc-time-detail">
+        Total slot-hours: {{ "{:,.1f}".format(phase_timeline.total_slot_hours) }}h
         &middot;
         {% set bpc_count = bp_statuses|selectattr('build_strategy.recommended', 'eq', 'bpc')|list|length %}
         {{ bpc_count }} blueprint{{ "s" if bpc_count != 1 else "" }} using BPC mode
@@ -423,6 +452,11 @@
     <input type="hidden" name="product_type_id" value="{{ product.type_id }}">
     <input type="hidden" name="quantity" value="{{ desired_qty }}">
     {% if timeframe_hours %}<input type="hidden" name="timeframe_hours" value="{{ timeframe_hours }}">{% endif %}
+    {% for bp in bp_statuses %}
+    {% if bp.extra_bpos %}<input type="hidden" name="extra_bpos_{{ bp.type_id }}" value="{{ bp.extra_bpos }}">{% endif %}
+    {% if bp.bought_bpcs %}<input type="hidden" name="bought_bpcs_{{ bp.type_id }}" value="{{ bp.bought_bpcs }}">{% endif %}
+    {% endfor %}
+    {% if suggest_mode|default('none') != 'none' %}<input type="hidden" name="suggest_mode" value="{{ suggest_mode }}">{% endif %}
     <div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
         <div class="nc-panel-title"><span class="nc-icon"></span>ME Overrides<span class="nc-chevron">&#9662;</span></div>
         <div class="nc-panel-body">
@@ -517,15 +551,22 @@
             </tr>
         </thead>
         <tbody>
-            {% for bp in bp_statuses %}
+            {% if phase_timeline is defined and phase_timeline and phase_timeline.phases|length > 1 %}
+            {% for phase in phase_timeline.phases %}
+            <tr><td colspan="9" style="font-family: var(--nc-font-display); font-weight: 600; font-size: 0.75rem; color: var(--nc-text-bright); background: rgba(0, 200, 255, 0.04); padding: 0.5em 0.8em; border-bottom: 1px solid var(--nc-border-bright);">Phase {{ phase.phase_num }} &mdash; {{ phase.wall_fmt }}</td></tr>
+            {% for bp in phase.blueprints %}
             {% set s = bp.build_strategy %}
             <tr>
                 <td>
                     {{ bp.name }}
+                    {% if s.te_warning %}<span style="color: var(--nc-gold); font-size: 0.65rem; opacity: 0.8;"> TE {{ bp.te }} (not max)</span>{% endif %}
                     {% if s.bpo_time and s.bpc_time %}
                     <div class="nc-strategy-sub">
-                        BPO: {{ s.bpo_time_fmt }}
-                        {% if s.bpc_time_fmt %} / BPC: {{ s.bpc_time_fmt }}{% endif %}
+                        {% if s.recommended == 'bpc' %}
+                        Copy: {{ s.bpc_copy_time_fmt }} + Mfg: {{ s.bpc_mfg_time_fmt }}
+                        {% else %}
+                        BPO: {{ s.bpo_time_fmt }} / BPC: {{ s.bpc_time_fmt }}
+                        {% endif %}
                     </div>
                     {% endif %}
                 </td>
@@ -547,6 +588,43 @@
                 <td class="nc-qty">{{ "{:,.2f}".format(bp.job_cost) }} ISK</td>
             </tr>
             {% endfor %}
+            {% endfor %}
+            {% else %}
+            {% for bp in bp_statuses %}
+            {% set s = bp.build_strategy %}
+            <tr>
+                <td>
+                    {{ bp.name }}
+                    {% if s.te_warning %}<span style="color: var(--nc-gold); font-size: 0.65rem; opacity: 0.8;"> TE {{ bp.te }} (not max)</span>{% endif %}
+                    {% if s.bpo_time and s.bpc_time %}
+                    <div class="nc-strategy-sub">
+                        {% if s.recommended == 'bpc' %}
+                        Copy: {{ s.bpc_copy_time_fmt }} + Mfg: {{ s.bpc_mfg_time_fmt }}
+                        {% else %}
+                        BPO: {{ s.bpo_time_fmt }} / BPC: {{ s.bpc_time_fmt }}
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if s.recommended == 'bpc' %}
+                    <span class="nc-mode-tag nc-mode-bpc">BPC</span>
+                    {% else %}
+                    <span class="nc-mode-tag nc-mode-bpo">BPO</span>
+                    {% endif %}
+                </td>
+                <td class="nc-qty{% if timeframe_hours and s.recommended == 'bpc' and s.bpc_time and s.bpc_time > timeframe_hours * 3600 %} nc-time-exceed{% elif timeframe_hours and s.recommended == 'bpo' and s.bpo_time > timeframe_hours * 3600 %} nc-time-exceed{% endif %}">
+                    {% if s.recommended == 'bpc' and s.bpc_time_fmt %}{{ s.bpc_time_fmt }}{% else %}{{ s.bpo_time_fmt }}{% endif %}
+                </td>
+                <td class="nc-qty">{{ s.slots_used }}</td>
+                <td style="font-size: 0.7rem; color: var(--nc-text-dim);">{{ bp.station_name or '—' }}</td>
+                <td class="nc-qty">{{ "{:.2f}".format(bp.structure_me) }}%</td>
+                <td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td>
+                <td class="nc-qty">{{ "{:,.2f}".format(bp.eiv_per_run) }} ISK</td>
+                <td class="nc-qty">{{ "{:,.2f}".format(bp.job_cost) }} ISK</td>
+            </tr>
+            {% endfor %}
+            {% endif %}
             <tr>
                 <td><strong>Total</strong></td>
                 <td></td>
@@ -567,17 +645,33 @@
 {# BPC Copy Plan — only for BPC-recommended blueprints #}
 {% set bpc_bps = bp_statuses|selectattr('build_strategy.recommended', 'eq', 'bpc')|list %}
 {% if bpc_bps %}
+<form method="GET" action="{{ url_for('industry.calculator') }}" id="bpcForm">
+    <input type="hidden" name="product_type_id" value="{{ product.type_id }}">
+    <input type="hidden" name="quantity" value="{{ desired_qty }}">
+    {% if timeframe_hours %}<input type="hidden" name="timeframe_hours" value="{{ timeframe_hours }}">{% endif %}
+    {% for bp in bp_statuses %}
+    <input type="hidden" name="me_{{ bp.type_id }}" value="{{ bp.me }}">
+    {% endfor %}
+    {# Carry extra_bpos and bought_bpcs for non-BPC blueprints as hidden fields #}
+    {% for bp in bp_statuses if bp not in bpc_bps %}
+    {% if bp.extra_bpos %}<input type="hidden" name="extra_bpos_{{ bp.type_id }}" value="{{ bp.extra_bpos }}">{% endif %}
+    {% if bp.bought_bpcs %}<input type="hidden" name="bought_bpcs_{{ bp.type_id }}" value="{{ bp.bought_bpcs }}">{% endif %}
+    {% endfor %}
 <div class="nc-panel nc-bpc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d4">
     <div class="nc-panel-title"><span class="nc-icon"></span>BPC Copy Plan<span class="nc-chevron">&#9662;</span></div>
     <div class="nc-panel-body">
+    <input type="hidden" name="suggest_mode" value="{{ suggest_mode|default('none') }}">
     <table class="nc-table">
         <thead>
             <tr>
                 <th>Blueprint</th>
                 <th class="nc-qty-header">Runs Needed</th>
                 <th class="nc-qty-header">Runs / Copy</th>
-                <th class="nc-qty-header">Num Copies</th>
-                <th class="nc-qty-header">Copy Time</th>
+                <th class="nc-qty-header">Copies</th>
+                <th class="nc-qty-header">Extra BPOs</th>
+                <th class="nc-qty-header">Bought BPCs</th>
+                <th class="nc-qty-header">Wall Time</th>
+                <th>Suggestion</th>
             </tr>
         </thead>
         <tbody>
@@ -588,14 +682,98 @@
                 <td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td>
                 <td class="nc-qty">{{ "{:,}".format(s.runs_per_bpc) }}</td>
                 <td class="nc-qty" style="color: var(--nc-gold); font-weight: bold;">{{ "{:,}".format(s.num_bpcs) }}</td>
-                <td class="nc-qty">{% if s.bpc_copy_time %}{{ "{:,.0f}".format(s.bpc_copy_time / 3600) }}h{% else %}—{% endif %}</td>
+                <td class="nc-qty"><input type="number" name="extra_bpos_{{ bp.type_id }}" min="0" value="{{ bp.extra_bpos }}" style="width: 60px;" class="nc-input"></td>
+                <td class="nc-qty"><input type="number" name="bought_bpcs_{{ bp.type_id }}" min="0" value="{{ bp.bought_bpcs }}" style="width: 60px;" class="nc-input"></td>
+                <td class="nc-qty">{% if s.bpc_time_fmt %}{{ s.bpc_time_fmt }}{% else %}—{% endif %}</td>
+                <td>
+                    {% if s.suggested_total_bpos is defined and s.suggested_total_bpos > s.num_bpos %}
+                    <span class="suggest-bpo" style="{{ '' if suggest_mode|default('none') == 'bpo' else 'display: none;' }} color: var(--nc-gold); font-family: var(--nc-font-mono); font-size: 0.75rem;">+{{ s.suggested_total_bpos - s.num_bpos }} BPO{{ 's' if s.suggested_total_bpos - s.num_bpos > 1 else '' }} to fit timeframe</span>
+                    {% endif %}
+                    {% if s.suggested_buy_bpcs is defined and s.suggested_buy_bpcs > 0 %}
+                    <span class="suggest-bpc" style="{{ '' if suggest_mode|default('none') == 'bpc' else 'display: none;' }} color: var(--nc-gold); font-family: var(--nc-font-mono); font-size: 0.75rem;">Buy {{ s.suggested_buy_bpcs }} BPC{{ 's' if s.suggested_buy_bpcs > 1 else '' }} to fit timeframe</span>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    <div style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim); margin-top: 0.5rem;">
-        Copy jobs run serially per BPO (BPO is locked during copy). Manufacturing starts as each BPC becomes available.
+    <div style="margin-top: 0.75rem;">
+        <button type="submit" class="nc-btn">Recalculate</button>
     </div>
+    <div style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim); margin-top: 0.5rem;">
+        Copy jobs run serially per BPO (BPO is locked during copy). Extra BPOs copy in parallel, reducing wall-clock time.
+    </div>
+    </div>
+</div>
+</form>
+{% endif %}
+
+{# Job Plan #}
+{% if phase_timeline is defined and phase_timeline and phase_timeline.phases|length > 0 %}
+<div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Job Plan<span class="nc-chevron">&#9662;</span></div>
+    <div class="nc-panel-body">
+    {% for phase in phase_timeline.phases %}
+    <div style="margin-bottom: 1rem;">
+        <div style="font-family: var(--nc-font-display); font-weight: 600; font-size: 0.8rem; color: var(--nc-text-bright); margin-bottom: 0.5rem;">
+            Phase {{ phase.phase_num }} &mdash; {{ phase.wall_fmt }}
+        </div>
+        {% for bp in phase.blueprints %}
+        {% set s = bp.build_strategy %}
+        {% if s.recommended == 'bpc' and s.copies_to_make > 0 %}
+        <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim); margin-left: 1rem; margin-bottom: 0.25rem;">
+            <span style="color: var(--nc-gold);">COPY</span> {{ bp.name }} &mdash; {{ s.copies_to_make }} copies ({{ s.bpc_copy_time_fmt }})
+            {% if s.te_warning %}<span style="color: var(--nc-gold); font-size: 0.65rem; opacity: 0.8;"> TE {{ bp.te }}</span>{% endif %}
+        </div>
+        {% endif %}
+        <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim); margin-left: 1rem; margin-bottom: 0.25rem;">
+            <span style="color: var(--nc-teal);">MFG</span> {{ bp.name }} &mdash;
+            {{ bp.runs_needed }} run{{ "s" if bp.runs_needed != 1 else "" }}
+            {% if s.slots_used > 1 %} across {{ s.slots_used }} slots{% endif %}
+            ({% if s.recommended == 'bpc' %}{{ s.bpc_mfg_time_fmt }}{% else %}{{ s.bpo_time_fmt }}{% endif %})
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# Shopping List #}
+{% set missing_bps_shop = bp_statuses|selectattr('status', 'eq', 'missing')|list %}
+{% set buy_bpc_bps = [] %}
+{% for bp in bp_statuses %}
+{% if bp.build_strategy.recommended == 'bpc' and bp.bought_bpcs > 0 %}
+{% if buy_bpc_bps.append(bp) %}{% endif %}
+{% endif %}
+{% endfor %}
+{% if missing_bps_shop or buy_bpc_bps %}
+<div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Shopping List<span class="nc-chevron">&#9662;</span></div>
+    <div class="nc-panel-body">
+    {% if missing_bps_shop %}
+    <div style="margin-bottom: 0.75rem; font-family: var(--nc-font-mono); font-size: 0.8rem; color: var(--nc-text-bright);">Blueprints to Acquire</div>
+    <table class="nc-table" style="margin-bottom: 1rem;">
+        <thead><tr><th>Blueprint</th><th class="nc-qty-header">Runs Needed</th></tr></thead>
+        <tbody>
+        {% for bp in missing_bps_shop %}
+        <tr><td>{{ bp.name }}</td><td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    {% if buy_bpc_bps %}
+    <div style="margin-bottom: 0.75rem; font-family: var(--nc-font-mono); font-size: 0.8rem; color: var(--nc-text-bright);">BPCs to Buy</div>
+    <table class="nc-table">
+        <thead><tr><th>Blueprint</th><th class="nc-qty-header">Runs / Copy</th><th class="nc-qty-header">BPCs to Buy</th></tr></thead>
+        <tbody>
+        {% for bp in buy_bpc_bps %}
+        {% set s = bp.build_strategy %}
+        <tr><td>{{ bp.name }}</td><td class="nc-qty">{{ "{:,}".format(s.runs_per_bpc) }}</td><td class="nc-qty">{{ bp.bought_bpcs }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
     </div>
 </div>
 {% endif %}

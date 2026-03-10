@@ -116,6 +116,22 @@
                    style="width: 120px;">
         </div>
         <div class="nc-field">
+            <label class="nc-field-label">Industry Level</label>
+            <select class="nc-input" id="settingIndustryLevel" style="width: 80px;">
+                {% for i in range(6) %}
+                <option value="{{ i }}" {{ 'selected' if config.industry_level == i else '' }}>{{ i }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="nc-field">
+            <label class="nc-field-label">Adv. Industry Level</label>
+            <select class="nc-input" id="settingAdvIndustryLevel" style="width: 80px;">
+                {% for i in range(6) %}
+                <option value="{{ i }}" {{ 'selected' if config.adv_industry_level == i else '' }}>{{ i }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="nc-field">
             <button type="button" class="nc-btn nc-btn-sm" id="saveSettingsBtn">Save</button>
             <span id="settingsSaved" style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-teal); margin-left: 0.5rem; opacity: 0; transition: opacity 0.3s;">Saved</span>
         </div>
@@ -272,7 +288,9 @@
             body: JSON.stringify({
                 build_slots: parseInt(document.getElementById('settingBuildSlots').value) || 10,
                 copy_slots: parseInt(document.getElementById('settingCopySlots').value) || 10,
-                default_timeframe_hours: tf ? parseFloat(tf) : null
+                default_timeframe_hours: tf ? parseFloat(tf) : null,
+                industry_level: parseInt(document.getElementById('settingIndustryLevel').value) || 0,
+                adv_industry_level: parseInt(document.getElementById('settingAdvIndustryLevel').value) || 0
             })
         })
         .then(function(r) { return r.json(); })

@@ -372,12 +372,15 @@ class IndustryBlueprint(Blueprint):
         build_slots = config.get("build_slots", 10)
         copy_slots = config.get("copy_slots", 10)
         default_timeframe = config.get("default_timeframe_hours")
+        industry_level = config.get("industry_level", 5)
+        adv_industry_level = config.get("adv_industry_level", 5)
 
         # Read timeframe from query params (overrides config default)
         timeframe_hours = request.args.get("timeframe_hours", None, type=float)
         if timeframe_hours is None and default_timeframe:
             timeframe_hours = default_timeframe
         timeframe_seconds = timeframe_hours * 3600 if timeframe_hours else None
+        suggest_mode = request.args.get("suggest_mode", "none")
 
         if not product_type_id:
             return render_template(
@@ -446,8 +449,9 @@ class IndustryBlueprint(Blueprint):
             top_bp_id, set(), materials_by_bp, products_by_product, blacklist
         )
 
-        # Build structure_me_by_bp: classify each blueprint's product, pick best station
+        # Build structure_me_by_bp and structure_te_by_bp: classify each blueprint's product, pick best station
         structure_me_by_bp = {}
+        structure_te_by_bp = {}
         bp_rig_categories = {}
         bp_station_assignments = {}
         for bp_id in tree_bp_ids:
@@ -461,13 +465,15 @@ class IndustryBlueprint(Blueprint):
             bp_rig_categories[bp_id] = rig_cat
 
             if rig_cat and stations:
-                best_station, best_me = pick_best_station(
+                best_station, best_me, best_te = pick_best_station(
                     stations, rig_cat, system_securities, rig_data
                 )
                 structure_me_by_bp[bp_id] = best_me
+                structure_te_by_bp[bp_id] = best_te
                 bp_station_assignments[bp_id] = best_station
             else:
                 structure_me_by_bp[bp_id] = 0
+                structure_te_by_bp[bp_id] = 1.0
                 bp_station_assignments[bp_id] = None
 
         # Query user's cached blueprints for these types
@@ -502,6 +508,18 @@ class IndustryBlueprint(Blueprint):
                     me_levels[bp_id] = max(b.material_efficiency for b in own["bpos"])
                 else:
                     me_levels[bp_id] = 0
+
+        # Parse extra BPOs per blueprint
+        extra_bpos = {}
+        for bp_id in tree_bp_ids:
+            val = request.args.get(f"extra_bpos_{bp_id}", 0, type=int)
+            extra_bpos[bp_id] = max(0, val)
+
+        # Parse bought BPCs per blueprint
+        bought_bpcs = {}
+        for bp_id in tree_bp_ids:
+            val = request.args.get(f"bought_bpcs_{bp_id}", 0, type=int)
+            bought_bpcs[bp_id] = max(0, val)
 
         # Compute runs needed per blueprint
         runs_needed = _compute_runs_needed(
@@ -585,6 +603,11 @@ class IndustryBlueprint(Blueprint):
                 me=me_levels.get(bp_id, 0),
                 struct_me=structure_me_by_bp.get(bp_id, 0),
                 timeframe_seconds=timeframe_seconds,
+                num_bpos=1 + extra_bpos.get(bp_id, 0),
+                bought_bpcs=bought_bpcs.get(bp_id, 0),
+                struct_te=structure_te_by_bp.get(bp_id, 1.0),
+                industry_level=industry_level,
+                adv_industry_level=adv_industry_level,
             )
 
             bp_statuses.append(
@@ -604,6 +627,8 @@ class IndustryBlueprint(Blueprint):
                     if assigned_station
                     else None,
                     "structure_me": structure_me_by_bp.get(bp_id, 0),
+                    "extra_bpos": extra_bpos.get(bp_id, 0),
+                    "bought_bpcs": bought_bpcs.get(bp_id, 0),
                     "build_strategy": strategy,
                 }
             )
@@ -678,25 +703,56 @@ class IndustryBlueprint(Blueprint):
         bpc_only_count = sum(1 for b in bp_statuses if b["status"] == "owned_bpc_only")
         missing_count = sum(1 for b in bp_statuses if b["status"] == "missing")
 
-        # Build time summary — critical path is the longest single blueprint
-        total_slot_hours = 0
-        critical_path_seconds = 0
+        # Compute blueprint depths for phase-aware timing
+        depths = _compute_blueprint_depths(
+            top_bp_id, materials_by_bp, products_by_product, blacklist
+        )
         for bp in bp_statuses:
-            s = bp["build_strategy"]
-            rec_time = s["bpc_time"] if s["recommended"] == "bpc" and s["bpc_time"] else s["bpo_time"]
-            total_slot_hours += s["bpo_time"] / 3600  # slot-hours = serial time
-            critical_path_seconds = max(critical_path_seconds, rec_time)
+            bp["depth"] = depths.get(bp["type_id"], 0)
 
-        time_summary = {
-            "total_slot_hours": total_slot_hours,
-            "critical_path_seconds": critical_path_seconds,
-            "critical_path_fmt": _format_duration(critical_path_seconds),
-            "timeframe_seconds": timeframe_seconds,
-            "exceeds_timeframe": (
-                timeframe_seconds is not None
-                and critical_path_seconds > timeframe_seconds
-            ),
-        }
+        # Auto-apply bought BPCs when suggest_mode == 'bpc'
+        if suggest_mode == "bpc" and timeframe_seconds:
+            for bp in bp_statuses:
+                s = bp["build_strategy"]
+                if s["recommended"] == "bpc" and not bought_bpcs.get(bp["type_id"]):
+                    suggested = _suggest_buy_bpcs(
+                        s["num_bpcs"],
+                        s["num_bpos"],
+                        s.get("bpc_copy_time", 0) / max(s.get("copies_to_make", 1), 1)
+                        if s.get("copies_to_make", 0) > 0
+                        else 0,
+                        s["bpc_mfg_time"],
+                        timeframe_seconds,
+                    )
+                    if suggested and suggested > 0:
+                        bp["bought_bpcs"] = suggested
+                        # Recompute strategy with new bought_bpcs
+                        bp_times = activity_times.get(bp["type_id"], (0, 0))
+                        bp["build_strategy"] = _compute_build_strategy(
+                            runs_needed=bp["runs_needed"],
+                            max_prod_limit=bp["max_prod_limit"],
+                            te=bp["te"],
+                            mfg_time_per_run=bp_times[0],
+                            copy_time_per_run=bp_times[1],
+                            mfg_slots=build_slots,
+                            bp_materials=materials_by_bp.get(bp["type_id"], []),
+                            me=bp["me"],
+                            struct_me=bp["structure_me"],
+                            timeframe_seconds=timeframe_seconds,
+                            num_bpos=1 + extra_bpos.get(bp["type_id"], 0),
+                            bought_bpcs=suggested,
+                            struct_te=structure_te_by_bp.get(bp["type_id"], 1.0),
+                            industry_level=industry_level,
+                            adv_industry_level=adv_industry_level,
+                        )
+
+        # Phase-aware timeline (replaces flat time_summary)
+        phase_timeline = _compute_phase_timeline(bp_statuses)
+        phase_timeline["timeframe_seconds"] = timeframe_seconds
+        phase_timeline["exceeds_timeframe"] = (
+            timeframe_seconds is not None
+            and phase_timeline["total_wall_seconds"] > timeframe_seconds
+        )
 
         return render_template(
             "calculator.html",
@@ -718,7 +774,8 @@ class IndustryBlueprint(Blueprint):
             build_slots=build_slots,
             copy_slots=copy_slots,
             timeframe_hours=timeframe_hours,
-            time_summary=time_summary,
+            phase_timeline=phase_timeline,
+            suggest_mode=suggest_mode,
         )
 
     def get_jobs(self):
@@ -867,6 +924,33 @@ def _format_duration(seconds):
     return " ".join(parts)
 
 
+def _suggest_extra_bpos(num_bpcs, single_bpc_copy_time, bpc_mfg_time, timeframe_seconds):
+    """Return minimum total BPOs needed to fit timeframe, or None if impossible."""
+    if timeframe_seconds is None or bpc_mfg_time >= timeframe_seconds:
+        return None
+    available_for_copy = timeframe_seconds - bpc_mfg_time
+    if single_bpc_copy_time <= 0:
+        return None
+    max_copies_per_bpo = int(available_for_copy / single_bpc_copy_time)
+    if max_copies_per_bpo < 1:
+        return None
+    return math.ceil(num_bpcs / max_copies_per_bpo)
+
+
+def _suggest_buy_bpcs(num_bpcs, num_bpos, single_bpc_copy_time, bpc_mfg_time, timeframe_seconds):
+    """Return number of BPCs to buy to fit timeframe, or None if impossible."""
+    if timeframe_seconds is None or bpc_mfg_time >= timeframe_seconds:
+        return None
+    available_for_copy = timeframe_seconds - bpc_mfg_time
+    if single_bpc_copy_time <= 0:
+        return None
+    max_copies_per_bpo = int(available_for_copy / single_bpc_copy_time)
+    total_copyable = max_copies_per_bpo * num_bpos
+    if total_copyable >= num_bpcs:
+        return None  # already fits
+    return num_bpcs - total_copyable
+
+
 def _compute_build_strategy(
     runs_needed,
     max_prod_limit,
@@ -878,15 +962,24 @@ def _compute_build_strategy(
     me,
     struct_me,
     timeframe_seconds=None,
+    num_bpos=1,
+    bought_bpcs=0,
+    struct_te=1.0,
+    industry_level=5,
+    adv_industry_level=5,
 ):
     """Compute BPO vs BPC build strategy for a blueprint.
 
     Returns dict with mode recommendation, times, and material waste info.
     """
     te_factor = 1 - te / 100
+    bought_te_factor = 1 - 20 / 100  # market BPCs are always TE 20
+    skill_factor = (1 - 0.04 * industry_level) * (1 - 0.03 * adv_industry_level)
+    time_mult = te_factor * struct_te * skill_factor
+    bought_time_mult = bought_te_factor * struct_te * skill_factor
 
     # BPO serial time
-    bpo_time = runs_needed * mfg_time_per_run * te_factor
+    bpo_time = runs_needed * mfg_time_per_run * time_mult
 
     # If no parallelism benefit possible, always BPO
     if max_prod_limit <= 1 or runs_needed <= 1 or copy_time_per_run <= 0:
@@ -903,6 +996,10 @@ def _compute_build_strategy(
             "material_waste": {},
             "bpo_time_fmt": _format_duration(bpo_time),
             "bpc_time_fmt": None,
+            "bought_bpcs": 0,
+            "copies_to_make": 0,
+            "copy_only_time": None,
+            "te_warning": te < 20,
         }
 
     # BPC strategy: use as few BPCs as needed to fill mfg slots
@@ -911,10 +1008,24 @@ def _compute_build_strategy(
     num_bpcs = math.ceil(runs_needed / runs_per_bpc)
 
     single_bpc_copy_time = copy_time_per_run * runs_per_bpc * te_factor
-    bpc_mfg_time = runs_per_bpc * mfg_time_per_run * te_factor
+    # Mfg time depends on whether BPCs are copied (user's TE) or bought (TE 20)
+    # Structure TE, rig TE, and skills apply to manufacturing only, not copying
+    copied_mfg_time = runs_per_bpc * mfg_time_per_run * time_mult
+    bought_mfg_time = runs_per_bpc * mfg_time_per_run * bought_time_mult
 
-    # Pipelined: last BPC finishes copying, then its mfg completes
-    bpc_total_time = (num_bpcs * single_bpc_copy_time) + bpc_mfg_time
+    # Reduce copies needed by bought BPCs
+    copies_to_make = max(0, num_bpcs - bought_bpcs)
+
+    # Critical path mfg: if any copied BPCs exist, bottleneck is the slower copied time
+    bpc_mfg_time = copied_mfg_time if copies_to_make > 0 else bought_mfg_time
+
+    # Pipelined: BPOs copy in parallel, then last BPC's mfg completes
+    copies_per_bpo = math.ceil(copies_to_make / num_bpos) if num_bpos > 0 else copies_to_make
+    bpc_total_time = (copies_per_bpo * single_bpc_copy_time) + bpc_mfg_time
+
+    # Copy-only time: what if bought_bpcs were 0?
+    copy_only_copies_per_bpo = math.ceil(num_bpcs / num_bpos) if num_bpos > 0 else num_bpcs
+    copy_only_time = (copy_only_copies_per_bpo * single_bpc_copy_time) + copied_mfg_time
 
     # Material waste: compare BPC split rounding vs single BPO job rounding
     material_waste = {}
@@ -949,11 +1060,11 @@ def _compute_build_strategy(
     else:
         recommended = "bpo" if bpo_time <= bpc_total_time else "bpc"
 
-    return {
+    result = {
         "mode": recommended,
         "bpo_time": bpo_time,
         "bpc_time": bpc_total_time,
-        "bpc_copy_time": num_bpcs * single_bpc_copy_time,
+        "bpc_copy_time": copies_per_bpo * single_bpc_copy_time,
         "bpc_mfg_time": bpc_mfg_time,
         "num_bpcs": num_bpcs,
         "runs_per_bpc": runs_per_bpc,
@@ -962,6 +1073,115 @@ def _compute_build_strategy(
         "material_waste": material_waste,
         "bpo_time_fmt": _format_duration(bpo_time),
         "bpc_time_fmt": _format_duration(bpc_total_time),
+        "bpc_copy_time_fmt": _format_duration(copies_per_bpo * single_bpc_copy_time),
+        "bpc_mfg_time_fmt": _format_duration(bpc_mfg_time),
+        "num_bpos": num_bpos,
+        "bought_bpcs": bought_bpcs,
+        "copies_to_make": copies_to_make,
+        "copy_only_time": copy_only_time,
+        "te_warning": te < 20,
+    }
+
+    # Suggest extra BPOs when BPC mode exceeds timeframe
+    if timeframe_seconds is not None and bpc_total_time > timeframe_seconds:
+        suggested = _suggest_extra_bpos(
+            num_bpcs, single_bpc_copy_time, bpc_mfg_time, timeframe_seconds
+        )
+        if suggested is not None and suggested > num_bpos:
+            result["suggested_total_bpos"] = suggested
+
+        buy_bpcs = _suggest_buy_bpcs(
+            num_bpcs, num_bpos, single_bpc_copy_time, bpc_mfg_time, timeframe_seconds
+        )
+        if buy_bpcs is not None and buy_bpcs > 0:
+            result["suggested_buy_bpcs"] = buy_bpcs
+
+    return result
+
+
+def _compute_blueprint_depths(top_bp_id, materials_by_bp, products_by_product, blacklist=None):
+    """BFS from top blueprint. Each child gets depth = parent_depth + 1.
+    Diamond dependencies take max depth."""
+    depths = {top_bp_id: 0}
+    queue = [(top_bp_id, 0)]
+    while queue:
+        bp_id, d = queue.pop(0)
+        for mat_id, _ in materials_by_bp.get(bp_id, []):
+            if blacklist and mat_id in blacklist:
+                continue
+            sub = products_by_product.get(mat_id)
+            if sub:
+                child_bp_id = sub[0]
+                new_depth = d + 1
+                if child_bp_id not in depths or new_depth > depths[child_bp_id]:
+                    depths[child_bp_id] = new_depth
+                    queue.append((child_bp_id, new_depth))
+    return depths
+
+
+def _compute_phase_timeline(bp_statuses):
+    """Group bp_statuses by depth, compute per-phase critical paths, sum phases sequentially."""
+    phases_by_depth = {}
+    for bp in bp_statuses:
+        d = bp.get("depth", 0)
+        phases_by_depth.setdefault(d, []).append(bp)
+
+    max_depth = max(phases_by_depth.keys()) if phases_by_depth else 0
+    phases = []
+    total_wall = 0
+    total_copy_only_wall = 0
+    total_slot_hours = 0
+
+    for phase_num, depth in enumerate(range(max_depth, -1, -1), 1):
+        bps = phases_by_depth.get(depth, [])
+        if not bps:
+            continue
+
+        phase_wall = 0
+        phase_copy_only = 0
+        phase_copy_secs = 0
+        phase_mfg_secs = 0
+
+        for bp in bps:
+            s = bp["build_strategy"]
+            rec_time = s["bpc_time"] if s["recommended"] == "bpc" and s["bpc_time"] else s["bpo_time"]
+            phase_wall = max(phase_wall, rec_time)
+            total_slot_hours += s["bpo_time"] / 3600
+
+            # Copy-only: what if bought_bpcs were 0?
+            if s["recommended"] == "bpc" and s.get("copy_only_time"):
+                phase_copy_only = max(phase_copy_only, s["copy_only_time"])
+            else:
+                phase_copy_only = max(phase_copy_only, rec_time)
+
+            # Per-phase copy vs mfg breakdown
+            if s["recommended"] == "bpc" and s["bpc_copy_time"]:
+                phase_copy_secs = max(phase_copy_secs, s["bpc_copy_time"])
+                phase_mfg_secs = max(phase_mfg_secs, s["bpc_mfg_time"])
+            else:
+                phase_mfg_secs = max(phase_mfg_secs, s["bpo_time"])
+
+        phases.append({
+            "depth": depth,
+            "phase_num": phase_num,
+            "blueprints": bps,
+            "wall_seconds": phase_wall,
+            "wall_fmt": _format_duration(phase_wall),
+            "copy_seconds": phase_copy_secs,
+            "copy_fmt": _format_duration(phase_copy_secs),
+            "mfg_seconds": phase_mfg_secs,
+            "mfg_fmt": _format_duration(phase_mfg_secs),
+        })
+        total_wall += phase_wall
+        total_copy_only_wall += phase_copy_only
+
+    return {
+        "phases": phases,
+        "total_wall_seconds": total_wall,
+        "total_wall_fmt": _format_duration(total_wall),
+        "copy_only_seconds": total_copy_only_wall,
+        "copy_only_fmt": _format_duration(total_copy_only_wall),
+        "total_slot_hours": total_slot_hours,
     }
 
 

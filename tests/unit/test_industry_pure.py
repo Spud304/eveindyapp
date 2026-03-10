@@ -4,14 +4,20 @@ import math
 from unittest.mock import MagicMock
 
 from src.industry import (
-    _get_security_class,
-    _classify_product_for_rig,
-    _compute_station_me,
-    _pick_best_station,
     _discover_blueprints,
     _resolve_material_tree,
     _compute_runs_needed,
     _describe_ownership,
+    _compute_blueprint_depths,
+    _compute_phase_timeline,
+    _compute_build_strategy,
+)
+from src.industry_utils import (
+    _get_security_class,
+    classify_product_for_rig as _classify_product_for_rig,
+    _compute_station_me,
+    _compute_station_te,
+    pick_best_station as _pick_best_station,
 )
 from src.industry_constants import (
     BASIC_SMALL_SHIP_GROUPS,
@@ -188,19 +194,82 @@ class TestComputeStationMe:
         assert result == 0.0
 
 
+# --- _compute_station_te ---
+
+
+class TestComputeStationTe:
+    def test_raitaru_no_rigs(self):
+        station = {"structure_type": "raitaru", "rigs": [None, None, None]}
+        result = _compute_station_te(station, "equipment", 0.9, {})
+        assert abs(result - 0.85) < 0.001
+
+    def test_sotiyo_no_rigs(self):
+        station = {"structure_type": "sotiyo", "rigs": []}
+        result = _compute_station_te(station, "equipment", 0.9, {})
+        assert abs(result - 0.70) < 0.001
+
+    def test_athanor_no_bonus(self):
+        station = {"structure_type": "athanor", "rigs": []}
+        result = _compute_station_te(station, "equipment", 0.9, {})
+        assert abs(result - 1.0) < 0.001
+
+    def test_with_matching_rig(self):
+        rig_data = {
+            12345: {
+                "me_bonus": 2.0,
+                "te_bonus": 24.0,
+                "sec_mult": {"hs": 1.0, "ls": 1.9, "ns": 2.1},
+                "group_id": 1816,
+            }
+        }
+        station = {"structure_type": "sotiyo", "rigs": [12345, None, None]}
+        result = _compute_station_te(station, "equipment", 0.9, rig_data)
+        # 0.70 * (1 - 24.0 * 1.0 / 100) = 0.70 * 0.76 = 0.532
+        assert abs(result - 0.70 * 0.76) < 0.001
+
+    def test_nullsec_rig_multiplier(self):
+        rig_data = {
+            12345: {
+                "me_bonus": 2.0,
+                "te_bonus": 24.0,
+                "sec_mult": {"hs": 1.0, "ls": 1.9, "ns": 2.1},
+                "group_id": 1816,
+            }
+        }
+        station = {"structure_type": "sotiyo", "rigs": [12345, None, None]}
+        result = _compute_station_te(station, "equipment", -0.5, rig_data)
+        # 0.70 * (1 - 24.0 * 2.1 / 100) = 0.70 * (1 - 0.504) = 0.70 * 0.496 = 0.3472
+        assert abs(result - 0.70 * 0.496) < 0.001
+
+    def test_non_matching_rig(self):
+        rig_data = {
+            12345: {
+                "me_bonus": 2.0,
+                "te_bonus": 24.0,
+                "sec_mult": {"hs": 1.0, "ls": 1.9, "ns": 2.1},
+                "group_id": 1816,
+            }
+        }
+        station = {"structure_type": "sotiyo", "rigs": [12345, None, None]}
+        result = _compute_station_te(station, "ammunition", 0.9, rig_data)
+        assert abs(result - 0.70) < 0.001
+
+
 # --- _pick_best_station ---
 
 
 class TestPickBestStation:
     def test_empty_list(self):
-        station, me = _pick_best_station([], "equipment", {}, {})
+        station, me, te = _pick_best_station([], "equipment", {}, {})
         assert station is None
         assert me == 0.0
+        assert te == 1.0
 
     def test_picks_higher_me(self):
         rig_data = {
             100: {
                 "me_bonus": 2.0,
+                "te_bonus": 24.0,
                 "sec_mult": {"hs": 1.0, "ls": 1.9, "ns": 2.1},
                 "group_id": 1816,
             }
@@ -220,9 +289,10 @@ class TestPickBestStation:
             },
         ]
         sec = {1: 0.9, 2: 0.9}
-        best, me = _pick_best_station(stations, "equipment", sec, rig_data)
+        best, me, te = _pick_best_station(stations, "equipment", sec, rig_data)
         assert best["id"] == 2
         assert me > 1.0
+        assert te < 1.0
 
 
 # --- _discover_blueprints ---
@@ -373,3 +443,192 @@ class TestDescribeOwnership:
         bpo2 = MagicMock(material_efficiency=10)
         result = _describe_ownership({"bpos": [bpo1, bpo2], "bpcs": []})
         assert result == "BPO (ME 10)"
+
+
+# --- _compute_blueprint_depths ---
+
+
+class TestComputeBlueprintDepths:
+    def test_single_blueprint(self):
+        mats = {100: [(34, 2000)]}
+        result = _compute_blueprint_depths(100, mats, {})
+        assert result == {100: 0}
+
+    def test_two_levels(self):
+        mats = {100: [(200, 10)], 201: [(34, 100)]}
+        prods = {200: (201, 1)}
+        result = _compute_blueprint_depths(100, mats, prods)
+        assert result == {100: 0, 201: 1}
+
+    def test_three_levels(self):
+        mats = {100: [(200, 10)], 201: [(300, 5)], 301: [(34, 50)]}
+        prods = {200: (201, 1), 300: (301, 1)}
+        result = _compute_blueprint_depths(100, mats, prods)
+        assert result == {100: 0, 201: 1, 301: 2}
+
+    def test_diamond_takes_max_depth(self):
+        # bp 100 needs mat 200 and 300; both need mat 400
+        mats = {100: [(200, 10), (300, 5)], 201: [(400, 1)], 301: [(400, 2)]}
+        prods = {200: (201, 1), 300: (301, 1), 400: (401, 1)}
+        # 401 is reachable at depth 2 from both paths
+        mats[401] = [(34, 10)]
+        result = _compute_blueprint_depths(100, mats, prods)
+        assert result[401] == 2
+
+    def test_blacklist_skips(self):
+        mats = {100: [(200, 10)], 201: [(34, 100)]}
+        prods = {200: (201, 1)}
+        result = _compute_blueprint_depths(100, mats, prods, blacklist={200})
+        assert result == {100: 0}
+
+
+# --- _compute_phase_timeline ---
+
+
+class TestComputePhaseTimeline:
+    def _make_bp(self, name, depth, recommended="bpo", bpo_time=3600, bpc_time=None,
+                 bpc_copy_time=None, bpc_mfg_time=None, copy_only_time=None):
+        return {
+            "name": name,
+            "depth": depth,
+            "build_strategy": {
+                "recommended": recommended,
+                "bpo_time": bpo_time,
+                "bpc_time": bpc_time,
+                "bpc_copy_time": bpc_copy_time,
+                "bpc_mfg_time": bpc_mfg_time,
+                "copy_only_time": copy_only_time,
+            },
+        }
+
+    def test_single_phase(self):
+        bps = [self._make_bp("Widget", 0, bpo_time=7200)]
+        result = _compute_phase_timeline(bps)
+        assert len(result["phases"]) == 1
+        assert result["total_wall_seconds"] == 7200
+
+    def test_two_phases_sum(self):
+        bps = [
+            self._make_bp("Ship", 0, bpo_time=10000),
+            self._make_bp("Component", 1, bpo_time=5000),
+        ]
+        result = _compute_phase_timeline(bps)
+        assert len(result["phases"]) == 2
+        # Phase 1 = depth 1 (component, 5000s), Phase 2 = depth 0 (ship, 10000s)
+        assert result["total_wall_seconds"] == 15000
+
+    def test_parallel_within_phase(self):
+        bps = [
+            self._make_bp("Ship", 0, bpo_time=10000),
+            self._make_bp("Comp A", 1, bpo_time=5000),
+            self._make_bp("Comp B", 1, bpo_time=8000),
+        ]
+        result = _compute_phase_timeline(bps)
+        assert len(result["phases"]) == 2
+        # Phase 1 = max(5000, 8000) = 8000, Phase 2 = 10000
+        assert result["total_wall_seconds"] == 18000
+
+    def test_bpc_mode_uses_bpc_time(self):
+        bps = [self._make_bp("Widget", 0, recommended="bpc", bpo_time=7200,
+                              bpc_time=3600, bpc_copy_time=1800, bpc_mfg_time=1800)]
+        result = _compute_phase_timeline(bps)
+        assert result["total_wall_seconds"] == 3600
+
+    def test_copy_only_comparison(self):
+        bps = [self._make_bp("Widget", 0, recommended="bpc", bpo_time=7200,
+                              bpc_time=2000, bpc_copy_time=1000, bpc_mfg_time=1000,
+                              copy_only_time=5000)]
+        result = _compute_phase_timeline(bps)
+        assert result["total_wall_seconds"] == 2000
+        assert result["copy_only_seconds"] == 5000
+
+    def test_slot_hours(self):
+        bps = [
+            self._make_bp("A", 0, bpo_time=3600),
+            self._make_bp("B", 0, bpo_time=7200),
+        ]
+        result = _compute_phase_timeline(bps)
+        assert result["total_slot_hours"] == 3.0  # (3600 + 7200) / 3600
+
+
+# --- _compute_build_strategy TE handling ---
+
+
+class TestBuildStrategyTE:
+    def test_te_warning_when_low(self):
+        result = _compute_build_strategy(
+            runs_needed=10, max_prod_limit=10, te=0,
+            mfg_time_per_run=100, copy_time_per_run=50,
+            mfg_slots=5, bp_materials=[], me=10, struct_me=0,
+        )
+        assert result["te_warning"] is True
+
+    def test_no_te_warning_at_max(self):
+        result = _compute_build_strategy(
+            runs_needed=10, max_prod_limit=10, te=20,
+            mfg_time_per_run=100, copy_time_per_run=50,
+            mfg_slots=5, bp_materials=[], me=10, struct_me=0,
+        )
+        assert result["te_warning"] is False
+
+    def test_copy_only_time_present(self):
+        result = _compute_build_strategy(
+            runs_needed=100, max_prod_limit=10, te=20,
+            mfg_time_per_run=100, copy_time_per_run=50,
+            mfg_slots=10, bp_materials=[], me=10, struct_me=0,
+        )
+        assert result["copy_only_time"] is not None
+        assert result["copy_only_time"] > 0
+
+    def test_struct_te_and_skills_reduce_mfg_time(self):
+        # Without bonuses
+        result_base = _compute_build_strategy(
+            runs_needed=1, max_prod_limit=10, te=0,
+            mfg_time_per_run=10000, copy_time_per_run=50,
+            mfg_slots=5, bp_materials=[], me=10, struct_me=0,
+            struct_te=1.0, industry_level=0, adv_industry_level=0,
+        )
+        # With struct TE 0.7 (Sotiyo) and max skills
+        result_bonused = _compute_build_strategy(
+            runs_needed=1, max_prod_limit=10, te=0,
+            mfg_time_per_run=10000, copy_time_per_run=50,
+            mfg_slots=5, bp_materials=[], me=10, struct_me=0,
+            struct_te=0.7, industry_level=5, adv_industry_level=5,
+        )
+        # time_mult = 1.0 * 0.7 * (1-0.2) * (1-0.15) = 0.7 * 0.8 * 0.85 = 0.476
+        expected = 10000 * 0.7 * 0.8 * 0.85
+        assert abs(result_bonused["bpo_time"] - expected) < 0.01
+        assert result_bonused["bpo_time"] < result_base["bpo_time"]
+
+    def test_copy_time_not_affected_by_struct_te_or_skills(self):
+        # BPC mode: copy time should only use te_factor, not struct_te/skills
+        result = _compute_build_strategy(
+            runs_needed=100, max_prod_limit=10, te=20,
+            mfg_time_per_run=100, copy_time_per_run=50,
+            mfg_slots=10, bp_materials=[], me=10, struct_me=0,
+            struct_te=0.5, industry_level=5, adv_industry_level=5,
+        )
+        # Copy time per BPC = 50 * 10 * 0.8 = 400 (only te_factor=0.8)
+        assert result["bpc_copy_time"] is not None
+        # single_bpc_copy_time = 50 * 10 * 0.8 = 400
+        # copies_per_bpo = 10, total copy = 10 * 400 = 4000
+        assert abs(result["bpc_copy_time"] - 4000) < 0.01
+
+    def test_bought_bpcs_uses_faster_mfg(self):
+        # With low TE BPO (te=0), buying all BPCs should use TE 20 mfg time
+        # First compute to find num_bpcs
+        result_none_bought = _compute_build_strategy(
+            runs_needed=10, max_prod_limit=5, te=0,
+            mfg_time_per_run=1000, copy_time_per_run=500,
+            mfg_slots=5, bp_materials=[], me=10, struct_me=0,
+            bought_bpcs=0,
+        )
+        num_bpcs = result_none_bought["num_bpcs"]
+        result_all_bought = _compute_build_strategy(
+            runs_needed=10, max_prod_limit=5, te=0,
+            mfg_time_per_run=1000, copy_time_per_run=500,
+            mfg_slots=5, bp_materials=[], me=10, struct_me=0,
+            bought_bpcs=num_bpcs,  # buy ALL BPCs
+        )
+        # All-bought should have shorter mfg time (TE 20 = 0.8x vs TE 0 = 1.0x)
+        assert result_all_bought["bpc_mfg_time"] < result_none_bought["bpc_mfg_time"]

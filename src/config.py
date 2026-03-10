@@ -22,6 +22,8 @@ DEFAULT_CONFIG = {
     "build_slots": 10,
     "copy_slots": 10,
     "default_timeframe_hours": None,
+    "industry_level": 5,
+    "adv_industry_level": 5,
 }
 
 
@@ -40,7 +42,7 @@ def load_user_config(character_id):
         return json.loads(json.dumps(DEFAULT_CONFIG))
 
     config = json.loads(json.dumps(DEFAULT_CONFIG))
-    for key in ("stations", "blacklist", "build_slots", "copy_slots", "default_timeframe_hours"):
+    for key in ("stations", "blacklist", "build_slots", "copy_slots", "default_timeframe_hours", "industry_level", "adv_industry_level"):
         if key in stored:
             config[key] = stored[key]
 
@@ -340,12 +342,20 @@ class ConfigBlueprint(Blueprint):
                 config["default_timeframe_hours"] = None
             else:
                 config["default_timeframe_hours"] = max(1, float(val))
+        if "industry_level" in data:
+            val = int(data["industry_level"])
+            config["industry_level"] = max(0, min(5, val))
+        if "adv_industry_level" in data:
+            val = int(data["adv_industry_level"])
+            config["adv_industry_level"] = max(0, min(5, val))
 
         self._save_config_json(char_id, config)
         return jsonify({
             "build_slots": config["build_slots"],
             "copy_slots": config["copy_slots"],
             "default_timeframe_hours": config["default_timeframe_hours"],
+            "industry_level": config["industry_level"],
+            "adv_industry_level": config["adv_industry_level"],
         })
 
     def _save_config_json(self, char_id, config):

@@ -17,6 +17,8 @@ class TestLoadUserConfig:
                 "build_slots": 10,
                 "copy_slots": 10,
                 "default_timeframe_hours": None,
+                "industry_level": 5,
+                "adv_industry_level": 5,
             }
 
     def test_valid_json(self, app, test_user):
@@ -58,6 +60,8 @@ class TestLoadUserConfig:
                 "build_slots": 10,
                 "copy_slots": 10,
                 "default_timeframe_hours": None,
+                "industry_level": 5,
+                "adv_industry_level": 5,
             }
 
     def test_partial_config_gets_defaults(self, app, test_user):

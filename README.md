@@ -117,5 +117,4 @@ src/
 - Project planner -- allow users to save and share build plans with specific items, quantities, and ME levels, and track progress as they acquire materials and complete jobs
 - Reactions support -- add a section for chemical reactions in refineries, with similar DFS material breakdowns and job planning
 - Corporation support -- allow users to link corporation accounts and view corporation-owned blueprints and jobs, with appropriate permission checks
-- cache character info in the background right after login rather than when hitting the blueprint endpoint, would be less annoying
 - maybe at some point ill rewrite the frontend in react

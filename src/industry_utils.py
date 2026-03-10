@@ -13,6 +13,7 @@ from src.models.models import (
 )
 from src.industry_constants import (
     STRUCTURE_BASE_ME,
+    STRUCTURE_BASE_TE,
     BASIC_SMALL_SHIP_GROUPS,
     BASIC_MEDIUM_SHIP_GROUPS,
     BASIC_LARGE_SHIP_GROUPS,
@@ -23,6 +24,7 @@ from src.industry_constants import (
     RIG_GROUP_TO_CATEGORIES,
     ALL_ME_RIG_GROUPS,
     ATTR_ME_BONUS,
+    ATTR_TE_BONUS,
     ATTR_HIGHSEC_MODIFIER,
     ATTR_LOWSEC_MODIFIER,
     ATTR_NULLSEC_MODIFIER,
@@ -117,7 +119,7 @@ def load_rig_data():
 
     # Fetch dogma attributes from static DB via engine
     type_list = ",".join(str(t) for t in rig_type_ids)
-    attr_ids = f"{ATTR_ME_BONUS},{ATTR_HIGHSEC_MODIFIER},{ATTR_LOWSEC_MODIFIER},{ATTR_NULLSEC_MODIFIER}"
+    attr_ids = f"{ATTR_ME_BONUS},{ATTR_TE_BONUS},{ATTR_HIGHSEC_MODIFIER},{ATTR_LOWSEC_MODIFIER},{ATTR_NULLSEC_MODIFIER}"
     attrs_sql = text(f"""
         SELECT typeID, attributeID, COALESCE(valueFloat, valueInt) as value
         FROM dgmTypeAttributes
@@ -136,8 +138,10 @@ def load_rig_data():
     for type_id in rig_type_ids:
         attrs = type_attrs.get(type_id, {})
         me_bonus = abs(attrs.get(ATTR_ME_BONUS, 0.0))
+        te_bonus = abs(attrs.get(ATTR_TE_BONUS, 0.0))
         rig_data[type_id] = {
             "me_bonus": me_bonus,
+            "te_bonus": te_bonus,
             "sec_mult": {
                 "hs": attrs.get(ATTR_HIGHSEC_MODIFIER, 1.0),
                 "ls": attrs.get(ATTR_LOWSEC_MODIFIER, 1.9),
@@ -191,13 +195,40 @@ def _compute_station_me(station, product_rig_category, system_security, rig_data
     return total_me
 
 
+def _compute_station_te(station, product_rig_category, system_security, rig_data):
+    """Compute effective TE multiplier for a station.
+
+    Returns a multiplier (0.0-1.0) where lower = faster.
+    """
+    structure_type = station.get("structure_type", "")
+    base_te = STRUCTURE_BASE_TE.get(structure_type, 1.0)
+
+    best_rig_te = 0.0
+    sec_class = _get_security_class(system_security)
+
+    for rig_id in station.get("rigs", []):
+        if rig_id is None:
+            continue
+        rig = rig_data.get(rig_id)
+        if not rig:
+            continue
+        categories_covered = RIG_GROUP_TO_CATEGORIES.get(rig["group_id"], set())
+        if product_rig_category not in categories_covered:
+            continue
+        rig_effective = rig["te_bonus"] * rig["sec_mult"].get(sec_class, 1.0) / 100
+        best_rig_te = max(best_rig_te, rig_effective)
+
+    return base_te * (1 - best_rig_te)
+
+
 def pick_best_station(stations, product_rig_category, system_securities, rig_data):
     """For a product rig category, find the station with highest effective ME.
 
-    Returns (station_dict, effective_me_percent) or (None, 0).
+    Returns (station_dict, effective_me_percent, effective_te_multiplier) or (None, 0, 1.0).
     """
     best_station = None
     best_me = 0.0
+    best_te = 1.0
 
     for station in stations:
         sec = system_securities.get(station.get("system_id"))
@@ -205,8 +236,9 @@ def pick_best_station(stations, product_rig_category, system_securities, rig_dat
         if me > best_me:
             best_me = me
             best_station = station
+            best_te = _compute_station_te(station, product_rig_category, sec, rig_data)
 
-    return best_station, best_me
+    return best_station, best_me, best_te
 
 
 def load_activity_times():
