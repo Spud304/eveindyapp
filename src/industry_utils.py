@@ -209,6 +209,28 @@ def pick_best_station(stations, product_rig_category, system_securities, rig_dat
     return best_station, best_me
 
 
+def load_activity_times():
+    """Load manufacturing and copy times from SDE industryActivity table.
+
+    Returns {bp_type_id: (mfg_seconds, copy_seconds)}.
+    """
+    engine = db.engines["static"]
+    sql = text(
+        "SELECT typeID, activityID, time FROM industryActivity WHERE activityID IN (1, 5)"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql).all()
+
+    times = {}  # {typeID: {1: mfg_time, 5: copy_time}}
+    for type_id, activity_id, time_val in rows:
+        times.setdefault(type_id, {})[activity_id] = time_val
+
+    return {
+        type_id: (acts.get(1, 0), acts.get(5, 0))
+        for type_id, acts in times.items()
+    }
+
+
 def load_sde_manufacturing_data():
     """Load manufacturing activity materials and products into dicts for fast DFS lookups.
 

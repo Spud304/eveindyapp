@@ -109,7 +109,6 @@ src/
 
 ## TODO
 
-- Token refresh -- access tokens expire after ~20 minutes; the app should automatically refresh them using the stored refresh token before making ESI calls
 - Invention support -- handle T2 blueprint invention chains (datacores, decryptors, probability)
 - Multi-character support -- allow users to link multiple characters and aggregate blueprint ownership
   - partially done, need to add tracking of blueprint ownership and jobs across linked characters, should also add character suggesstion for jobs based on skills (will need to adjust scopes to pull skill data)

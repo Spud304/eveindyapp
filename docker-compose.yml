@@ -27,3 +27,14 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+
+  celery-beat:
+    build: .
+    command: celery -A src.main:celery_app beat --loglevel=info
+    env_file:
+      - .env
+    volumes:
+      - ./src/instance:/app/src/instance
+    depends_on:
+      - redis
+    restart: unless-stopped

@@ -52,6 +52,7 @@ def auth_page(live_app, browser, base_url, _integration_cleanup):
             character_id=12345678,
             character_name="TestPilot",
             character_owner_hash="testhash",
+            main_character_id=12345678,
             access_token="test-access-token",
             access_token_expires=datetime.now(timezone.utc) + timedelta(hours=1),
             refresh_token="test-refresh-token",

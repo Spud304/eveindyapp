@@ -468,6 +468,12 @@
 
         <div class="hero-body">
             <div class="container has-text-centered">
+               {% if current_user.is_authenticated and current_user.token_refresh_failed %}
+               <div class="notification" style="background: rgba(255,68,68,0.1); border: 1px solid var(--nc-red); color: var(--nc-text); margin-bottom: 1.5rem; padding: 0.8rem 1.2rem; font-family: var(--nc-font-mono); font-size: 0.85rem; position: relative;">
+                   <button class="delete" onclick="this.parentElement.remove()" style="position: absolute; right: 0.5rem; top: 0.5rem;"></button>
+                   Your EVE session has expired. Please <a href="{{ url_for('auth.login') }}" style="color: var(--nc-teal); text-decoration: underline;">log in again</a> to continue using ESI features.
+               </div>
+               {% endif %}
                {% block content %}
                {% endblock %}
             </div>

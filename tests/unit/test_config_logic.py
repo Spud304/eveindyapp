@@ -11,7 +11,13 @@ class TestLoadUserConfig:
     def test_no_row_returns_defaults(self, app):
         with app.app_context():
             config = load_user_config(99999)
-            assert config == {"stations": [], "blacklist": []}
+            assert config == {
+                "stations": [],
+                "blacklist": [],
+                "build_slots": 10,
+                "copy_slots": 10,
+                "default_timeframe_hours": None,
+            }
 
     def test_valid_json(self, app, test_user):
         with app.app_context():
@@ -46,7 +52,13 @@ class TestLoadUserConfig:
             db.session.commit()
 
             config = load_user_config(test_user.character_id)
-            assert config == {"stations": [], "blacklist": []}
+            assert config == {
+                "stations": [],
+                "blacklist": [],
+                "build_slots": 10,
+                "copy_slots": 10,
+                "default_timeframe_hours": None,
+            }
 
     def test_partial_config_gets_defaults(self, app, test_user):
         with app.app_context():

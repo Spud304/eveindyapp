@@ -124,6 +124,7 @@ class AuthBlueprint(Blueprint):
 
             if existing_user:
                 existing_user.update_token(token_response)
+                existing_user.token_refresh_failed = False
                 old_main_id = existing_user.main_character_id
                 new_main_id = current_user.main_character_id
                 if old_main_id != new_main_id:
@@ -168,6 +169,7 @@ class AuthBlueprint(Blueprint):
 
             if existing_user:
                 existing_user.update_token(token_response)
+                existing_user.token_refresh_failed = False
                 db.session.commit()
                 session["user_id"] = existing_user.character_id
                 login_user(existing_user)

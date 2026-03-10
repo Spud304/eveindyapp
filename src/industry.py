@@ -36,6 +36,7 @@ from src.config import load_user_config
 from src.industry_utils import (
     load_rig_data,
     load_sde_manufacturing_data,
+    load_activity_times,
     load_type_group_category_maps,
     pick_best_station,
     classify_product_for_rig,
@@ -170,8 +171,7 @@ class IndustryBlueprint(Blueprint):
     def _start_blueprint_task(self, char_id):
         """Dispatch a Celery task to fetch blueprints in the background."""
         try:
-            token = current_user.get_sso_data()["access_token"]
-            task = fetch_blueprints_task.delay(char_id, token)
+            task = fetch_blueprints_task.delay(char_id)
             return task
         except Exception:
             logger.exception("Failed to dispatch blueprint fetch task")
@@ -368,12 +368,26 @@ class IndustryBlueprint(Blueprint):
             is not None
         )
 
+        # Read build settings from config
+        build_slots = config.get("build_slots", 10)
+        copy_slots = config.get("copy_slots", 10)
+        default_timeframe = config.get("default_timeframe_hours")
+
+        # Read timeframe from query params (overrides config default)
+        timeframe_hours = request.args.get("timeframe_hours", None, type=float)
+        if timeframe_hours is None and default_timeframe:
+            timeframe_hours = default_timeframe
+        timeframe_seconds = timeframe_hours * 3600 if timeframe_hours else None
+
         if not product_type_id:
             return render_template(
                 "calculator.html",
                 product=None,
                 has_blueprints=has_blueprints,
                 stations=stations,
+                build_slots=build_slots,
+                copy_slots=copy_slots,
+                timeframe_hours=timeframe_hours,
             )
 
         # Look up product name
@@ -423,6 +437,9 @@ class IndustryBlueprint(Blueprint):
 
         # Load rig data from SDE
         rig_data = load_rig_data()
+
+        # Load activity times (mfg + copy) from SDE
+        activity_times = load_activity_times()
 
         # Discover full blueprint tree (respecting blacklist)
         tree_bp_ids = _discover_blueprints(
@@ -551,6 +568,25 @@ class IndustryBlueprint(Blueprint):
                 copy_jobs = 0
 
             assigned_station = bp_station_assignments.get(bp_id)
+
+            # Compute build strategy (BPO vs BPC)
+            bp_times = activity_times.get(bp_id, (0, 0))
+            mfg_time_per_run = bp_times[0]
+            copy_time_per_run = bp_times[1]
+            bp_mats = materials_by_bp.get(bp_id, [])
+            strategy = _compute_build_strategy(
+                runs_needed=needed,
+                max_prod_limit=max_prod,
+                te=best_te,
+                mfg_time_per_run=mfg_time_per_run,
+                copy_time_per_run=copy_time_per_run,
+                mfg_slots=build_slots,
+                bp_materials=bp_mats,
+                me=me_levels.get(bp_id, 0),
+                struct_me=structure_me_by_bp.get(bp_id, 0),
+                timeframe_seconds=timeframe_seconds,
+            )
+
             bp_statuses.append(
                 {
                     "type_id": bp_id,
@@ -568,6 +604,7 @@ class IndustryBlueprint(Blueprint):
                     if assigned_station
                     else None,
                     "structure_me": structure_me_by_bp.get(bp_id, 0),
+                    "build_strategy": strategy,
                 }
             )
 
@@ -641,6 +678,26 @@ class IndustryBlueprint(Blueprint):
         bpc_only_count = sum(1 for b in bp_statuses if b["status"] == "owned_bpc_only")
         missing_count = sum(1 for b in bp_statuses if b["status"] == "missing")
 
+        # Build time summary — critical path is the longest single blueprint
+        total_slot_hours = 0
+        critical_path_seconds = 0
+        for bp in bp_statuses:
+            s = bp["build_strategy"]
+            rec_time = s["bpc_time"] if s["recommended"] == "bpc" and s["bpc_time"] else s["bpo_time"]
+            total_slot_hours += s["bpo_time"] / 3600  # slot-hours = serial time
+            critical_path_seconds = max(critical_path_seconds, rec_time)
+
+        time_summary = {
+            "total_slot_hours": total_slot_hours,
+            "critical_path_seconds": critical_path_seconds,
+            "critical_path_fmt": _format_duration(critical_path_seconds),
+            "timeframe_seconds": timeframe_seconds,
+            "exceeds_timeframe": (
+                timeframe_seconds is not None
+                and critical_path_seconds > timeframe_seconds
+            ),
+        }
+
         return render_template(
             "calculator.html",
             product={"type_id": product_type_id, "name": product_name},
@@ -658,6 +715,10 @@ class IndustryBlueprint(Blueprint):
             total_job_cost=total_job_cost,
             grand_total=grand_total,
             stations=stations,
+            build_slots=build_slots,
+            copy_slots=copy_slots,
+            timeframe_hours=timeframe_hours,
+            time_summary=time_summary,
         )
 
     def get_jobs(self):
@@ -784,6 +845,124 @@ class IndustryBlueprint(Blueprint):
             data,
         )
         return "Unknown Location"
+
+
+# --- Build strategy computation ---
+
+
+def _format_duration(seconds):
+    """Format seconds into 'Xd Yh Zm' string."""
+    if seconds <= 0:
+        return "0m"
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    minutes = int((seconds % 3600) // 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or not parts:
+        parts.append(f"{minutes}m")
+    return " ".join(parts)
+
+
+def _compute_build_strategy(
+    runs_needed,
+    max_prod_limit,
+    te,
+    mfg_time_per_run,
+    copy_time_per_run,
+    mfg_slots,
+    bp_materials,
+    me,
+    struct_me,
+    timeframe_seconds=None,
+):
+    """Compute BPO vs BPC build strategy for a blueprint.
+
+    Returns dict with mode recommendation, times, and material waste info.
+    """
+    te_factor = 1 - te / 100
+
+    # BPO serial time
+    bpo_time = runs_needed * mfg_time_per_run * te_factor
+
+    # If no parallelism benefit possible, always BPO
+    if max_prod_limit <= 1 or runs_needed <= 1 or copy_time_per_run <= 0:
+        return {
+            "mode": "bpo",
+            "bpo_time": bpo_time,
+            "bpc_time": None,
+            "bpc_copy_time": None,
+            "bpc_mfg_time": None,
+            "num_bpcs": 0,
+            "runs_per_bpc": 0,
+            "slots_used": 1,
+            "recommended": "bpo",
+            "material_waste": {},
+            "bpo_time_fmt": _format_duration(bpo_time),
+            "bpc_time_fmt": None,
+        }
+
+    # BPC strategy: use as few BPCs as needed to fill mfg slots
+    num_bpcs = min(mfg_slots, math.ceil(runs_needed / 1))
+    runs_per_bpc = min(max_prod_limit, math.ceil(runs_needed / num_bpcs))
+    num_bpcs = math.ceil(runs_needed / runs_per_bpc)
+
+    single_bpc_copy_time = copy_time_per_run * runs_per_bpc * te_factor
+    bpc_mfg_time = runs_per_bpc * mfg_time_per_run * te_factor
+
+    # Pipelined: last BPC finishes copying, then its mfg completes
+    bpc_total_time = (num_bpcs * single_bpc_copy_time) + bpc_mfg_time
+
+    # Material waste: compare BPC split rounding vs single BPO job rounding
+    material_waste = {}
+    if bp_materials:
+        me_factor = (1 - me / 100) * (1 - struct_me / 100)
+        for mat_id, base_qty in bp_materials:
+            # Single BPO job: material for all runs
+            bpo_qty = max(runs_needed, math.ceil(runs_needed * base_qty * me_factor))
+            # BPC split: material per BPC * num BPCs
+            per_bpc_qty = max(runs_per_bpc, math.ceil(runs_per_bpc * base_qty * me_factor))
+            # Last BPC might have fewer runs
+            last_bpc_runs = runs_needed - (num_bpcs - 1) * runs_per_bpc
+            if last_bpc_runs > 0 and last_bpc_runs != runs_per_bpc:
+                last_bpc_qty = max(last_bpc_runs, math.ceil(last_bpc_runs * base_qty * me_factor))
+                bpc_total_qty = per_bpc_qty * (num_bpcs - 1) + last_bpc_qty
+            else:
+                bpc_total_qty = per_bpc_qty * num_bpcs
+            waste = bpc_total_qty - bpo_qty
+            if waste > 0:
+                material_waste[mat_id] = waste
+
+    # Recommendation
+    if timeframe_seconds is not None:
+        bpo_fits = bpo_time <= timeframe_seconds
+        bpc_fits = bpc_total_time <= timeframe_seconds
+        if bpo_fits:
+            recommended = "bpo"
+        elif bpc_fits:
+            recommended = "bpc"
+        else:
+            recommended = "bpc"  # still recommend BPC as faster, flag red in UI
+    else:
+        recommended = "bpo" if bpo_time <= bpc_total_time else "bpc"
+
+    return {
+        "mode": recommended,
+        "bpo_time": bpo_time,
+        "bpc_time": bpc_total_time,
+        "bpc_copy_time": num_bpcs * single_bpc_copy_time,
+        "bpc_mfg_time": bpc_mfg_time,
+        "num_bpcs": num_bpcs,
+        "runs_per_bpc": runs_per_bpc,
+        "slots_used": min(num_bpcs, mfg_slots),
+        "recommended": recommended,
+        "material_waste": material_waste,
+        "bpo_time_fmt": _format_duration(bpo_time),
+        "bpc_time_fmt": _format_duration(bpc_total_time),
+    }
 
 
 # --- DFS helpers (pure dict lookups, no DB calls) ---

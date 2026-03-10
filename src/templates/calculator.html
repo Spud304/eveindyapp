@@ -199,6 +199,46 @@
     .nc-cost-breakdown span {
         margin-right: 1.5em;
     }
+    .nc-mode-tag {
+        display: inline-block;
+        font-family: var(--nc-font-mono);
+        font-size: 0.65rem;
+        font-weight: 700;
+        padding: 0.15em 0.5em;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+    .nc-mode-bpo {
+        color: var(--nc-teal);
+        border: 1px solid var(--nc-teal);
+    }
+    .nc-mode-bpc {
+        color: var(--nc-gold);
+        border: 1px solid var(--nc-gold);
+    }
+    .nc-time-exceed {
+        color: var(--nc-red) !important;
+    }
+    .nc-time-summary {
+        font-family: var(--nc-font-mono);
+        font-size: 0.85rem;
+        color: var(--nc-text);
+    }
+    .nc-time-summary strong { color: var(--nc-text-bright); }
+    .nc-time-summary .nc-on-track { color: var(--nc-teal); }
+    .nc-time-summary .nc-exceeds { color: var(--nc-red); }
+    .nc-time-detail {
+        font-family: var(--nc-font-mono);
+        font-size: 0.75rem;
+        color: var(--nc-text-dim);
+        margin-top: 0.3rem;
+    }
+    .nc-strategy-sub {
+        font-family: var(--nc-font-mono);
+        font-size: 0.65rem;
+        color: var(--nc-text-dim);
+        margin-top: 0.15rem;
+    }
 </style>
 {% endblock %}
 {% block content %}
@@ -237,6 +277,15 @@
                 <label class="nc-field-label">Quantity</label>
                 <input class="nc-input nc-qty-input" type="number" name="quantity" min="1"
                        value="{{ desired_qty if desired_qty is defined else 1 }}">
+            </div>
+            <div class="nc-field">
+                <label class="nc-field-label">Timeframe (hours)</label>
+                <input class="nc-input" type="number" name="timeframe_hours" min="0" step="1"
+                       value="{{ timeframe_hours if timeframe_hours else '' }}"
+                       placeholder="None" style="width: 120px;">
+                <div style="font-family: var(--nc-font-mono); font-size: 0.6rem; color: var(--nc-text-dim); margin-top: 0.25rem;">
+                    Target build window — recommends BPC parallel builds when BPO serial won't fit
+                </div>
             </div>
             <div class="nc-field">
                 <button type="submit" class="nc-btn">Calculate</button>
@@ -287,6 +336,31 @@
     {% endif %}
     </div>
 </div>
+
+{# Build Time Summary #}
+{% if time_summary is defined and time_summary %}
+<div class="nc-panel nc-animate nc-animate-d2">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Build Time Estimate</div>
+    <div class="nc-time-summary">
+        Wall-clock time: <strong>{{ time_summary.critical_path_fmt }}</strong>
+        ({{ build_slots }} build slot{{ "s" if build_slots != 1 else "" }})
+        {% if time_summary.timeframe_seconds %}
+        &mdash;
+        {% if time_summary.exceeds_timeframe %}
+        <span class="nc-exceeds">exceeds {{ "%.0f"|format(timeframe_hours) }}h timeframe</span>
+        {% else %}
+        <span class="nc-on-track">within {{ "%.0f"|format(timeframe_hours) }}h timeframe</span>
+        {% endif %}
+        {% endif %}
+    </div>
+    <div class="nc-time-detail">
+        Total slot-hours: {{ "{:,.1f}".format(time_summary.total_slot_hours) }}h
+        &middot;
+        {% set bpc_count = bp_statuses|selectattr('build_strategy.recommended', 'eq', 'bpc')|list|length %}
+        {{ bpc_count }} blueprint{{ "s" if bpc_count != 1 else "" }} using BPC mode
+    </div>
+</div>
+{% endif %}
 
 {# Blueprint Inventory #}
 <div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d2">
@@ -348,6 +422,7 @@
 <form method="GET" action="{{ url_for('industry.calculator') }}" id="meForm">
     <input type="hidden" name="product_type_id" value="{{ product.type_id }}">
     <input type="hidden" name="quantity" value="{{ desired_qty }}">
+    {% if timeframe_hours %}<input type="hidden" name="timeframe_hours" value="{{ timeframe_hours }}">{% endif %}
     <div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
         <div class="nc-panel-title"><span class="nc-icon"></span>ME Overrides<span class="nc-chevron">&#9662;</span></div>
         <div class="nc-panel-body">
@@ -431,6 +506,9 @@
         <thead>
             <tr>
                 <th>Blueprint</th>
+                <th>Mode</th>
+                <th class="nc-qty-header">Est. Time</th>
+                <th class="nc-qty-header">Slots</th>
                 <th>Station</th>
                 <th class="nc-qty-header">Struct ME</th>
                 <th class="nc-qty-header">Runs</th>
@@ -440,8 +518,28 @@
         </thead>
         <tbody>
             {% for bp in bp_statuses %}
+            {% set s = bp.build_strategy %}
             <tr>
-                <td>{{ bp.name }}</td>
+                <td>
+                    {{ bp.name }}
+                    {% if s.bpo_time and s.bpc_time %}
+                    <div class="nc-strategy-sub">
+                        BPO: {{ s.bpo_time_fmt }}
+                        {% if s.bpc_time_fmt %} / BPC: {{ s.bpc_time_fmt }}{% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if s.recommended == 'bpc' %}
+                    <span class="nc-mode-tag nc-mode-bpc">BPC</span>
+                    {% else %}
+                    <span class="nc-mode-tag nc-mode-bpo">BPO</span>
+                    {% endif %}
+                </td>
+                <td class="nc-qty{% if timeframe_hours and s.recommended == 'bpc' and s.bpc_time and s.bpc_time > timeframe_hours * 3600 %} nc-time-exceed{% elif timeframe_hours and s.recommended == 'bpo' and s.bpo_time > timeframe_hours * 3600 %} nc-time-exceed{% endif %}">
+                    {% if s.recommended == 'bpc' and s.bpc_time_fmt %}{{ s.bpc_time_fmt }}{% else %}{{ s.bpo_time_fmt }}{% endif %}
+                </td>
+                <td class="nc-qty">{{ s.slots_used }}</td>
                 <td style="font-size: 0.7rem; color: var(--nc-text-dim);">{{ bp.station_name or '—' }}</td>
                 <td class="nc-qty">{{ "{:.2f}".format(bp.structure_me) }}%</td>
                 <td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td>
@@ -454,6 +552,9 @@
                 <td></td>
                 <td class="nc-qty"></td>
                 <td class="nc-qty"></td>
+                <td></td>
+                <td class="nc-qty"></td>
+                <td class="nc-qty"></td>
                 <td class="nc-qty"></td>
                 <td class="nc-qty"><strong>{{ "{:,.2f}".format(total_job_cost) }} ISK</strong></td>
             </tr>
@@ -463,9 +564,9 @@
 </div>
 {% endif %}
 
-{# BPC Copy Plan #}
-{% set copy_bps = bp_statuses|selectattr('status', 'eq', 'owned_bpo')|selectattr('copy_jobs', 'gt', 0)|list %}
-{% if copy_bps %}
+{# BPC Copy Plan — only for BPC-recommended blueprints #}
+{% set bpc_bps = bp_statuses|selectattr('build_strategy.recommended', 'eq', 'bpc')|list %}
+{% if bpc_bps %}
 <div class="nc-panel nc-bpc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d4">
     <div class="nc-panel-title"><span class="nc-icon"></span>BPC Copy Plan<span class="nc-chevron">&#9662;</span></div>
     <div class="nc-panel-body">
@@ -474,21 +575,27 @@
             <tr>
                 <th>Blueprint</th>
                 <th class="nc-qty-header">Runs Needed</th>
-                <th class="nc-qty-header">Max Runs / Copy</th>
-                <th class="nc-qty-header">Copy Jobs</th>
+                <th class="nc-qty-header">Runs / Copy</th>
+                <th class="nc-qty-header">Num Copies</th>
+                <th class="nc-qty-header">Copy Time</th>
             </tr>
         </thead>
         <tbody>
-            {% for bp in copy_bps %}
+            {% for bp in bpc_bps %}
+            {% set s = bp.build_strategy %}
             <tr>
                 <td>{{ bp.name }}</td>
                 <td class="nc-qty">{{ "{:,}".format(bp.runs_needed) }}</td>
-                <td class="nc-qty">{{ "{:,}".format(bp.max_prod_limit) }}</td>
-                <td class="nc-qty" style="color: var(--nc-gold); font-weight: bold;">{{ "{:,}".format(bp.copy_jobs) }}</td>
+                <td class="nc-qty">{{ "{:,}".format(s.runs_per_bpc) }}</td>
+                <td class="nc-qty" style="color: var(--nc-gold); font-weight: bold;">{{ "{:,}".format(s.num_bpcs) }}</td>
+                <td class="nc-qty">{% if s.bpc_copy_time %}{{ "{:,.0f}".format(s.bpc_copy_time / 3600) }}h{% else %}—{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    <div style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim); margin-top: 0.5rem;">
+        Copy jobs run serially per BPO (BPO is locked during copy). Manufacturing starts as each BPC becomes available.
+    </div>
     </div>
 </div>
 {% endif %}

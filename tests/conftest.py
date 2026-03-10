@@ -49,6 +49,16 @@ def _seed_static_data():
             )
         """)
         )
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS industryActivity (
+                typeID INTEGER,
+                activityID INTEGER,
+                time INTEGER,
+                PRIMARY KEY (typeID, activityID)
+            )
+        """)
+        )
         conn.commit()
 
     # Groups
@@ -161,6 +171,17 @@ def _seed_static_data():
                 (37178, 2355, NULL, 1.0),
                 (37178, 2356, NULL, 1.9),
                 (37178, 2357, NULL, 2.1)
+        """)
+        )
+        # Activity times: mfg (activityID=1) and copy (activityID=5) for blueprints
+        conn.execute(
+            text("""
+            INSERT OR REPLACE INTO industryActivity (typeID, activityID, time)
+            VALUES
+                (688, 1, 3600),
+                (688, 5, 1800),
+                (9002, 1, 7200),
+                (9002, 5, 3600)
         """)
         )
         conn.commit()

@@ -59,6 +59,12 @@ app.config.from_mapping(
         "broker_url": os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
         "result_backend": os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
         "task_ignore_result": False,
+        "beat_schedule": {
+            "refresh-all-tokens": {
+                "task": "src.tasks.refresh_all_tokens_task",
+                "schedule": 900.0,
+            },
+        },
     },
 )
 

@@ -52,8 +52,6 @@ STATIC_TABLES = {
     "industryBlueprints",
     "mapSolarSystems",
     "invGroups",
-    "CachedLocations",
-    "CachedToonInfo",
 }
 
 

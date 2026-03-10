@@ -95,6 +95,33 @@
     <p class="nc-subtitle">Manufacturing stations &amp; production blacklist</p>
 </div>
 
+{# Section 0: General Settings #}
+<div class="nc-panel nc-animate nc-animate-d1">
+    <div class="nc-panel-title"><span class="nc-icon"></span>General Settings</div>
+    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-end;">
+        <div class="nc-field">
+            <label class="nc-field-label">Build Slots</label>
+            <input class="nc-input" type="number" id="settingBuildSlots" min="1" max="50" step="1"
+                   value="{{ config.build_slots }}" style="width: 80px;">
+        </div>
+        <div class="nc-field">
+            <label class="nc-field-label">Copy Slots</label>
+            <input class="nc-input" type="number" id="settingCopySlots" min="1" max="50" step="1"
+                   value="{{ config.copy_slots }}" style="width: 80px;">
+        </div>
+        <div class="nc-field">
+            <label class="nc-field-label">Default Timeframe (hours)</label>
+            <input class="nc-input" type="number" id="settingTimeframe" min="0" step="1"
+                   value="{{ config.default_timeframe_hours or '' }}" placeholder="None"
+                   style="width: 120px;">
+        </div>
+        <div class="nc-field">
+            <button type="button" class="nc-btn nc-btn-sm" id="saveSettingsBtn">Save</button>
+            <span id="settingsSaved" style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-teal); margin-left: 0.5rem; opacity: 0; transition: opacity 0.3s;">Saved</span>
+        </div>
+    </div>
+</div>
+
 {# Section 1: Stations #}
 <div class="nc-panel nc-search-panel nc-animate nc-animate-d1">
     <div class="nc-panel-title"><span class="nc-icon"></span>Stations</div>
@@ -236,6 +263,26 @@
 
 <script>
 (function() {
+    // ===== General Settings =====
+    document.getElementById('saveSettingsBtn').addEventListener('click', function() {
+        var tf = document.getElementById('settingTimeframe').value;
+        fetch('{{ url_for("config.settings_update") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                build_slots: parseInt(document.getElementById('settingBuildSlots').value) || 10,
+                copy_slots: parseInt(document.getElementById('settingCopySlots').value) || 10,
+                default_timeframe_hours: tf ? parseFloat(tf) : null
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var msg = document.getElementById('settingsSaved');
+            msg.style.opacity = '1';
+            setTimeout(function() { msg.style.opacity = '0'; }, 2000);
+        });
+    });
+
     var STRUCTURE_RIG_SIZES = {raitaru: 2, azbel: 3, sotiyo: 4, athanor: 2, tatara: 3};
 
     // ===== Station CRUD =====

@@ -23,6 +23,7 @@ class User(db.Model, UserMixin):
     access_token: Mapped[str] = mapped_column(String(4096), nullable=False)
     access_token_expires: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     refresh_token: Mapped[str] = mapped_column(String(4096), nullable=False)
+    token_refresh_failed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     def get_id(self):
         return self.character_id

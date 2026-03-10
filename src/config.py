@@ -19,6 +19,9 @@ from src.industry_constants import ALL_ME_RIG_GROUPS
 DEFAULT_CONFIG = {
     "stations": [],
     "blacklist": [],
+    "build_slots": 10,
+    "copy_slots": 10,
+    "default_timeframe_hours": None,
 }
 
 
@@ -37,10 +40,9 @@ def load_user_config(character_id):
         return json.loads(json.dumps(DEFAULT_CONFIG))
 
     config = json.loads(json.dumps(DEFAULT_CONFIG))
-    if "stations" in stored:
-        config["stations"] = stored["stations"]
-    if "blacklist" in stored:
-        config["blacklist"] = stored["blacklist"]
+    for key in ("stations", "blacklist", "build_slots", "copy_slots", "default_timeframe_hours"):
+        if key in stored:
+            config[key] = stored[key]
 
     return config
 
@@ -100,6 +102,12 @@ class ConfigBlueprint(Blueprint):
             "/config/blacklist/remove",
             "blacklist_remove",
             login_required(self.blacklist_remove),
+            methods=["POST"],
+        )
+        self.add_url_rule(
+            "/config/settings/update",
+            "settings_update",
+            login_required(self.settings_update),
             methods=["POST"],
         )
 
@@ -311,6 +319,34 @@ class ConfigBlueprint(Blueprint):
 
         self._save_config_json(char_id, config)
         return jsonify(self._blacklist_response(config["blacklist"]))
+
+    def settings_update(self):
+        char_id = current_user.character_id
+        data = request.json
+        if not data:
+            return jsonify({"error": "no data"}), 400
+
+        config = load_user_config(char_id)
+
+        if "build_slots" in data:
+            val = int(data["build_slots"])
+            config["build_slots"] = max(1, min(50, val))
+        if "copy_slots" in data:
+            val = int(data["copy_slots"])
+            config["copy_slots"] = max(1, min(50, val))
+        if "default_timeframe_hours" in data:
+            val = data["default_timeframe_hours"]
+            if val is None or val == "" or val == 0:
+                config["default_timeframe_hours"] = None
+            else:
+                config["default_timeframe_hours"] = max(1, float(val))
+
+        self._save_config_json(char_id, config)
+        return jsonify({
+            "build_slots": config["build_slots"],
+            "copy_slots": config["copy_slots"],
+            "default_timeframe_hours": config["default_timeframe_hours"],
+        })
 
     def _save_config_json(self, char_id, config):
         row = db.session.execute(
