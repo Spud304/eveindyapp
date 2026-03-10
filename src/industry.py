@@ -26,7 +26,6 @@ from src.constants import ESI_BASE_URL
 from celery.result import AsyncResult
 from src.utils import (
     esi_get,
-    esi_headers,
     batch_type_names,
     batch_market_info,
     get_manufacturing_cost_index,

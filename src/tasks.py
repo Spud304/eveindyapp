@@ -103,6 +103,49 @@ def _ensure_fresh_token(character_id):
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=30)
+def fetch_skills_task(self, character_id):
+    """Fetch and cache skills from ESI for a single character."""
+    user = _ensure_fresh_token(character_id)
+    if user is None:
+        raise self.retry(exc=Exception(f"User {character_id} not found"))
+
+    headers = {
+        "Authorization": f"Bearer {user.access_token}",
+        "Content-Type": "application/json",
+    }
+
+    skills_url = f"{ESI_BASE_URL}/characters/{character_id}/skills"
+    skills_status, skills_data = esi_get(skills_url, headers=headers)
+    if skills_status != 200 or skills_data is None:
+        raise self.retry(exc=Exception(f"Skills ESI returned {skills_status}"))
+
+    now = datetime.now(timezone.utc)
+
+    db.session.execute(
+        CachedSkill.__table__.delete().where(
+            CachedSkill.character_id == character_id
+        )
+    )
+    skill_rows = [
+        CachedSkill(
+            character_id=character_id,
+            skill_id=s["skill_id"],
+            trained_skill_level=s["trained_skill_level"],
+            active_skill_level=s["active_skill_level"],
+            skillpoints_in_skill=s["skillpoints_in_skill"],
+            cached_at=now,
+        )
+        for s in skills_data.get("skills", [])
+    ]
+    if skill_rows:
+        db.session.add_all(skill_rows)
+    db.session.commit()
+
+    logger.info("Cached %d skills for character %s", len(skill_rows), character_id)
+    return {"character_id": character_id, "skills_count": len(skill_rows)}
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=30)
 def fetch_blueprints_task(self, character_id):
     """Fetch blueprints from ESI, cache them, and resolve location names.
 
@@ -165,7 +208,7 @@ def fetch_blueprints_task(self, character_id):
     location_ids = {bp["location_id"] for bp in all_bps if bp.get("location_id")}
     _resolve_location_names(location_ids, headers, character_id)
 
-    # --- Fetch and cache skills for this character + all linked characters ---
+    # --- Dispatch skill fetch for this character + all linked characters ---
     from sqlalchemy import select as sa_select
     linked_ids = (
         db.session.execute(
@@ -175,56 +218,13 @@ def fetch_blueprints_task(self, character_id):
         .all()
     )
 
-    skills_count = 0
     for cid in linked_ids:
         try:
-            if cid == character_id:
-                char_headers = headers
-            else:
-                linked_user = _ensure_fresh_token(cid)
-                if linked_user is None:
-                    logger.warning("Linked character %s not found, skipping skills", cid)
-                    continue
-                char_headers = {
-                    "Authorization": f"Bearer {linked_user.access_token}",
-                    "Content-Type": "application/json",
-                }
-
-            skills_url = f"{ESI_BASE_URL}/characters/{cid}/skills"
-            skills_status, skills_data = esi_get(skills_url, headers=char_headers)
-            if skills_status == 200 and skills_data:
-                db.session.execute(
-                    CachedSkill.__table__.delete().where(
-                        CachedSkill.character_id == cid
-                    )
-                )
-                skill_rows = [
-                    CachedSkill(
-                        character_id=cid,
-                        skill_id=s["skill_id"],
-                        trained_skill_level=s["trained_skill_level"],
-                        active_skill_level=s["active_skill_level"],
-                        skillpoints_in_skill=s["skillpoints_in_skill"],
-                        cached_at=now,
-                    )
-                    for s in skills_data.get("skills", [])
-                ]
-                if skill_rows:
-                    db.session.add_all(skill_rows)
-                db.session.commit()
-                skills_count += len(skill_rows)
-                logger.info("Cached %d skills for character %s", len(skill_rows), cid)
-            else:
-                logger.warning(
-                    "Skills fetch failed for character %s: status=%s",
-                    cid, skills_status,
-                )
+            fetch_skills_task.delay(cid)
         except Exception:
-            logger.warning(
-                "Skills fetch error for character %s", cid, exc_info=True
-            )
+            logger.warning("Failed to dispatch skill fetch for character %s", cid, exc_info=True)
 
-    return {"character_id": character_id, "count": len(all_bps), "skills_count": skills_count}
+    return {"character_id": character_id, "count": len(all_bps), "skills_dispatched": len(linked_ids)}
 
 
 def _resolve_location_names(location_ids, headers, character_id):

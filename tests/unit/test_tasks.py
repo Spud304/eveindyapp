@@ -44,29 +44,27 @@ SAMPLE_SKILLS = [
 ]
 
 
-class TestFetchBlueprintsTaskSkills:
-    """Test skill caching within fetch_blueprints_task."""
+class TestFetchSkillsTask:
+    """Test the standalone fetch_skills_task."""
 
     @pytest.fixture(autouse=True)
     def _clean_skills(self, app):
-        """Remove cached skills/blueprints before each test."""
+        """Remove cached skills before each test."""
         with app.app_context():
             db.session.execute(CachedSkill.__table__.delete())
-            db.session.execute(CachedBlueprint.__table__.delete())
             db.session.commit()
         yield
 
     @responses.activate
     def test_skills_cached_on_success(self, app, test_user):
-        """Skills are cached alongside blueprints when ESI returns 200."""
-        from src.tasks import fetch_blueprints_task
+        """Skills are cached when ESI returns 200."""
+        from src.tasks import fetch_skills_task
 
         cid = test_user.character_id
-        _mock_blueprints(cid)
         _mock_skills(cid, SAMPLE_SKILLS)
 
         with app.app_context():
-            result = fetch_blueprints_task(cid)
+            result = fetch_skills_task(cid)
 
         with app.app_context():
             rows = db.session.query(CachedSkill).filter_by(character_id=cid).all()
@@ -94,19 +92,106 @@ class TestFetchBlueprintsTaskSkills:
             db.session.add(old)
             db.session.commit()
 
-        from src.tasks import fetch_blueprints_task
+        from src.tasks import fetch_skills_task
 
-        _mock_blueprints(cid)
         _mock_skills(cid, SAMPLE_SKILLS)
 
         with app.app_context():
-            fetch_blueprints_task(cid)
+            fetch_skills_task(cid)
 
         with app.app_context():
             rows = db.session.query(CachedSkill).filter_by(character_id=cid).all()
             skill_ids = {r.skill_id for r in rows}
             assert 9999 not in skill_ids
             assert len(rows) == 2
+
+    @responses.activate
+    def test_skills_failure_retries(self, app, test_user):
+        """Non-200 from ESI raises retry."""
+        from celery.exceptions import MaxRetriesExceededError
+        from src.tasks import fetch_skills_task
+
+        cid = test_user.character_id
+        _mock_skills(cid, status=500)
+        _mock_skills(cid, status=500)
+        _mock_skills(cid, status=500)
+
+        with app.app_context():
+            with pytest.raises((Exception, MaxRetriesExceededError)):
+                fetch_skills_task(cid)
+
+    @responses.activate
+    def test_active_vs_trained_levels_stored(self, app, test_user):
+        """Both active and trained skill levels are stored correctly."""
+        from src.tasks import fetch_skills_task
+
+        cid = test_user.character_id
+        paused_skill = [
+            {
+                "skill_id": 3380,
+                "trained_skill_level": 5,
+                "active_skill_level": 0,
+                "skillpoints_in_skill": 256000,
+            }
+        ]
+        _mock_skills(cid, paused_skill)
+
+        with app.app_context():
+            fetch_skills_task(cid)
+
+        with app.app_context():
+            row = db.session.query(CachedSkill).filter_by(
+                character_id=cid, skill_id=3380
+            ).one()
+            assert row.trained_skill_level == 5
+            assert row.active_skill_level == 0
+            assert row.skillpoints_in_skill == 256000
+
+    @responses.activate
+    def test_empty_skills_list(self, app, test_user):
+        """Handles ESI returning an empty skills list gracefully."""
+        from src.tasks import fetch_skills_task
+
+        cid = test_user.character_id
+        _mock_skills(cid, skills=[])
+
+        with app.app_context():
+            result = fetch_skills_task(cid)
+
+        with app.app_context():
+            rows = db.session.query(CachedSkill).filter_by(character_id=cid).all()
+            assert len(rows) == 0
+            assert result["skills_count"] == 0
+
+
+class TestFetchBlueprintsTaskSkills:
+    """Test that fetch_blueprints_task dispatches skill tasks."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, app):
+        """Remove cached skills/blueprints before each test."""
+        with app.app_context():
+            db.session.execute(CachedSkill.__table__.delete())
+            db.session.execute(CachedBlueprint.__table__.delete())
+            db.session.commit()
+        yield
+
+    @responses.activate
+    def test_blueprints_dispatch_skills(self, app, test_user):
+        """Blueprint task dispatches skill tasks which cache skills (eager mode)."""
+        from src.tasks import fetch_blueprints_task
+
+        cid = test_user.character_id
+        _mock_blueprints(cid)
+        _mock_skills(cid, SAMPLE_SKILLS)
+
+        with app.app_context():
+            result = fetch_blueprints_task(cid)
+
+        with app.app_context():
+            rows = db.session.query(CachedSkill).filter_by(character_id=cid).all()
+            assert len(rows) == 2
+            assert result["skills_dispatched"] == 1
 
     @responses.activate
     def test_skills_failure_doesnt_break_blueprints(self, app, test_user):
@@ -127,6 +212,9 @@ class TestFetchBlueprintsTaskSkills:
             }
         ]
         _mock_blueprints(cid, bp_data)
+        # Skills will fail - mock 3 times for retries
+        _mock_skills(cid, status=500)
+        _mock_skills(cid, status=500)
         _mock_skills(cid, status=500)
         # Mock location resolution for the blueprint's station
         responses.add(
@@ -137,56 +225,10 @@ class TestFetchBlueprintsTaskSkills:
         )
 
         with app.app_context():
-            result = fetch_blueprints_task(cid)
+            _ = fetch_blueprints_task(cid)
 
         with app.app_context():
             bps = db.session.query(CachedBlueprint).filter_by(character_id=cid).all()
             assert len(bps) == 1
             skills = db.session.query(CachedSkill).filter_by(character_id=cid).all()
             assert len(skills) == 0
-            assert result["skills_count"] == 0
-
-    @responses.activate
-    def test_active_vs_trained_levels_stored(self, app, test_user):
-        """Both active and trained skill levels are stored correctly."""
-        from src.tasks import fetch_blueprints_task
-
-        cid = test_user.character_id
-        paused_skill = [
-            {
-                "skill_id": 3380,
-                "trained_skill_level": 5,
-                "active_skill_level": 0,
-                "skillpoints_in_skill": 256000,
-            }
-        ]
-        _mock_blueprints(cid)
-        _mock_skills(cid, paused_skill)
-
-        with app.app_context():
-            fetch_blueprints_task(cid)
-
-        with app.app_context():
-            row = db.session.query(CachedSkill).filter_by(
-                character_id=cid, skill_id=3380
-            ).one()
-            assert row.trained_skill_level == 5
-            assert row.active_skill_level == 0
-            assert row.skillpoints_in_skill == 256000
-
-    @responses.activate
-    def test_empty_skills_list(self, app, test_user):
-        """Handles ESI returning an empty skills list gracefully."""
-        from src.tasks import fetch_blueprints_task
-
-        cid = test_user.character_id
-        _mock_blueprints(cid)
-        _mock_skills(cid, skills=[])
-
-        with app.app_context():
-            result = fetch_blueprints_task(cid)
-
-        with app.app_context():
-            rows = db.session.query(CachedSkill).filter_by(character_id=cid).all()
-            assert len(rows) == 0
-            assert result["skills_count"] == 0

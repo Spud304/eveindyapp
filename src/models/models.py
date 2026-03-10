@@ -74,6 +74,7 @@ class CachedToonInfo(db.Model):
     alliance_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     alliance_name: Mapped[Optional[str]] = mapped_column(String(255))
     wallet_balance: Mapped[float] = mapped_column(Float, nullable=True)
+    cached_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     def __repr__(self):
         return f"CachedToonInfo('{self.character_id}', '{self.character_name}', '{self.corporation_id}', '{self.corporation_name}', '{self.alliance_id}', '{self.alliance_name}', '{self.wallet_balance}')"

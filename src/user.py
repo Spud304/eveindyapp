@@ -1,3 +1,5 @@
+from datetime import datetime, timezone, timedelta
+
 from flask import jsonify
 from flask import render_template
 from flask import Blueprint
@@ -7,6 +9,8 @@ from sqlalchemy import select
 from src.constants import ESI_BASE_URL
 from src.models.models import db, CachedToonInfo, User
 from src.utils import esi_get
+
+TOON_INFO_MAX_AGE = timedelta(hours=1)
 
 
 def get_linked_character_ids(user):
@@ -52,26 +56,26 @@ class UserBlueprint(Blueprint):
         }
 
         cached_info = CachedToonInfo.query.filter_by(character_id=character_id).first()
-        if cached_info:
-            if cached_info.wallet_balance is None:
-                wallet_status, wallet_data = esi_get(
-                    f"{ESI_BASE_URL}/characters/{character_id}/wallet", headers=headers
-                )
-                cached_info.wallet_balance = (
-                    wallet_data
-                    if wallet_status == 200 and wallet_data is not None
-                    else 0.0
-                )
-                db.session.commit()
-            return {
-                "character_id": cached_info.character_id,
-                "character_name": cached_info.character_name,
-                "corporation_id": cached_info.corporation_id,
-                "corporation_name": cached_info.corporation_name,
-                "alliance_id": cached_info.alliance_id,
-                "alliance_name": cached_info.alliance_name,
-                "wallet_balance": cached_info.wallet_balance,
-            }
+        if cached_info is not None:
+            now = datetime.now(timezone.utc)
+            cached_at = cached_info.cached_at
+            if cached_at is not None and cached_at.tzinfo is None:
+                cached_at = cached_at.replace(tzinfo=timezone.utc)
+            stale = cached_at is None or (now - cached_at) > TOON_INFO_MAX_AGE
+            has_unknowns = (
+                cached_info.corporation_name == "Unknown Corporation"
+                or cached_info.alliance_name == "Unknown Alliance"
+            )
+            if not stale and not has_unknowns:
+                return {
+                    "character_id": cached_info.character_id,
+                    "character_name": cached_info.character_name,
+                    "corporation_id": cached_info.corporation_id,
+                    "corporation_name": cached_info.corporation_name,
+                    "alliance_id": cached_info.alliance_id,
+                    "alliance_name": cached_info.alliance_name,
+                    "wallet_balance": cached_info.wallet_balance,
+                }
 
         status, data = esi_get(
             f"{ESI_BASE_URL}/characters/{character_id}", headers=headers
@@ -103,8 +107,9 @@ class UserBlueprint(Blueprint):
             alliance_id=data.get("alliance_id"),
             alliance_name=data.get("alliance_name"),
             wallet_balance=data["wallet_balance"],
+            cached_at=datetime.now(timezone.utc),
         )
-        db.session.add(entry)
+        db.session.merge(entry)
         db.session.commit()
 
         return {

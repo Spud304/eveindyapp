@@ -549,6 +549,7 @@ class TestUserRoutes:
                 alliance_id=None,
                 alliance_name=None,
                 wallet_balance=42.0,
+                cached_at=datetime.now(timezone.utc),
             )
             db.session.merge(entry)
             db.session.commit()
@@ -590,6 +591,7 @@ class TestUserRoutes:
                     corporation_id=1,
                     corporation_name="Main Corp",
                     wallet_balance=100.0,
+                    cached_at=datetime.now(timezone.utc),
                 )
             )
             db.session.merge(
@@ -599,6 +601,7 @@ class TestUserRoutes:
                     corporation_id=2,
                     corporation_name="Alt Corp",
                     wallet_balance=200.0,
+                    cached_at=datetime.now(timezone.utc),
                 )
             )
             db.session.commit()
@@ -638,6 +641,7 @@ class TestUserRoutes:
                     corporation_id=1,
                     corporation_name="Solo Corp",
                     wallet_balance=50.0,
+                    cached_at=datetime.now(timezone.utc),
                 )
             )
             db.session.commit()

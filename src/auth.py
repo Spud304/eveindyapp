@@ -14,6 +14,7 @@ from sqlalchemy import select
 from src.models.models import db, User
 from src.utils import generate_token
 from src.constants import ESI_BASE_URL
+from src.tasks import fetch_skills_task
 
 from datetime import datetime, timedelta, timezone
 
@@ -138,6 +139,10 @@ class AuthBlueprint(Blueprint):
                     for user in old_group:
                         user.main_character_id = new_main_id
                 db.session.commit()
+                try:
+                    fetch_skills_task.delay(existing_user.character_id)
+                except Exception:
+                    pass
                 session["user_id"] = current_user.character_id
                 return redirect(url_for("user.user"))
 
@@ -157,6 +162,10 @@ class AuthBlueprint(Blueprint):
 
             db.session.add(new_user)
             db.session.commit()
+            try:
+                fetch_skills_task.delay(new_user.character_id)
+            except Exception:
+                pass
 
             session["user_id"] = current_user.character_id
             return redirect(url_for("user.user"))
