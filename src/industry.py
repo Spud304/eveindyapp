@@ -29,6 +29,7 @@ from src.utils import (
     batch_type_names,
     batch_market_info,
     get_manufacturing_cost_index,
+    search_systems as _search_systems,
 )
 from src.tasks import fetch_blueprints_task
 from src.config import load_user_config
@@ -340,16 +341,7 @@ class IndustryBlueprint(Blueprint):
 
     def search_systems(self):
         q = request.args.get("q", "", type=str).strip()
-        if len(q) < 2:
-            return jsonify([])
-        results = db.session.execute(
-            select(MapSolarSystems.solarSystemID, MapSolarSystems.solarSystemName)
-            .where(MapSolarSystems.solarSystemName.ilike(f"%{q}%"))
-            .limit(15)
-        ).all()
-        return jsonify(
-            [{"system_id": r.solarSystemID, "name": r.solarSystemName} for r in results]
-        )
+        return jsonify(_search_systems(q))
 
     def get_calculator(self):
         product_type_id = request.args.get("product_type_id", 0, type=int)
@@ -680,10 +672,9 @@ class IndustryBlueprint(Blueprint):
         all_price_ids = all_material_ids | eiv_material_ids
         prices, adjusted_prices = batch_market_info(all_price_ids)
 
+        name_to_type_id = {name: tid for tid, name in type_names.items()}
         for m in materials:
-            type_id = next(
-                (tid for tid, name in type_names.items() if name == m["name"]), None
-            )
+            type_id = name_to_type_id.get(m["name"])
             price = prices.get(type_id) if type_id else None
             m["unit_price"] = price
             m["total_price"] = price * m["quantity"] if price else None
@@ -881,107 +872,6 @@ class IndustryBlueprint(Blueprint):
         )
         return {row.location_id: row.location_name for row in cached}
 
-    def _resolve_location_names(self, location_ids: set, headers: dict) -> dict:
-        """Return a {location_id: name} map for all given IDs, using cache then ESI."""
-        if not location_ids:
-            return {}
-
-        cached = (
-            db.session.execute(
-                select(CachedLocations).where(
-                    CachedLocations.location_id.in_(location_ids)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        names = {row.location_id: row.location_name for row in cached}
-
-        missing = location_ids - names.keys()
-        if not missing:
-            return names
-
-        # IDs that can't be resolved directly (or return 403) may be containers
-        # inside stations. Build asset map lazily to walk the chain if needed.
-        asset_map = None
-        for loc_id in missing:
-            name = self._fetch_location_name(loc_id, headers)
-            if name is None or name == "Unknown Location":
-                # Unrecognized ID range or ESI failed — try asset chain fallback.
-                if asset_map is None:
-                    asset_map = self._build_asset_location_map(headers)
-                station_id = self._follow_asset_chain(loc_id, asset_map)
-                if station_id:
-                    resolved = self._fetch_location_name(station_id, headers)
-                    if resolved and resolved != "Unknown Location":
-                        name = resolved
-                name = name or "Unknown Location"
-            names[loc_id] = name
-            db.session.merge(CachedLocations(location_id=loc_id, location_name=name))  # type: ignore[call-arg]
-
-        if missing:
-            db.session.commit()
-
-        return names
-
-    def _build_asset_location_map(self, headers: dict) -> dict:
-        """Fetch character assets and return {item_id: location_id} map."""
-        char_id = current_user.character_id
-        url = f"{ESI_BASE_URL}/characters/{char_id}/assets/"
-        asset_map = {}
-        page = 1
-        while True:
-            status, data = esi_get(url, headers=headers, params={"page": page})
-            if status != 200 or not data:
-                break
-            for asset in data:
-                asset_map[asset["item_id"]] = asset["location_id"]
-            if len(data) < 1000:
-                break
-            page += 1
-        return asset_map
-
-    @staticmethod
-    def _follow_asset_chain(
-        item_id: int, asset_map: dict, max_depth: int = 10
-    ) -> int | None:
-        """Walk asset_map from item_id until we reach a station/structure ID."""
-        current = item_id
-        for _ in range(max_depth):
-            parent = asset_map.get(current)
-            if parent is None:
-                return None
-            if 60_000_000 <= parent <= 63_999_999:
-                return parent
-            if parent > 1_000_000_000_000:
-                return parent
-            current = parent
-        return None
-
-    def _fetch_location_name(self, location_id: int, headers: dict) -> str | None:
-        """Resolve a location ID to a name. Returns None if the ID isn't a known type."""
-        # NPC stations: 60000000–63999999
-        if 60_000_000 <= location_id <= 63_999_999:
-            url = f"{ESI_BASE_URL}/universe/stations/{location_id}/"
-        # Player-owned structures: IDs > 1 trillion
-        elif location_id > 1_000_000_000_000:
-            url = f"{ESI_BASE_URL}/universe/structures/{location_id}/"
-        # Solar systems: 30000000–39999999
-        elif 30_000_000 <= location_id <= 39_999_999:
-            url = f"{ESI_BASE_URL}/universe/systems/{location_id}/"
-        else:
-            return None
-
-        status, data = esi_get(url, headers=headers)
-        if status == 200 and data:
-            return data.get("name", "Unknown Location")
-        logger.warning(
-            "Failed to resolve location %s: status=%s data=%s",
-            location_id,
-            status,
-            data,
-        )
-        return "Unknown Location"
 
 
 # --- Build strategy computation ---

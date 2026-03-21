@@ -1,4 +1,5 @@
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,16 @@ from src.industry_constants import (
 )
 
 
+_sde_cache = {}
+_sde_cache_lock = threading.Lock()
+
+
 def load_type_group_category_maps():
-    """Load {typeID: groupID} and {groupID: categoryID} from SDE."""
+    """Load {typeID: groupID} and {groupID: categoryID} from SDE. Cached after first call."""
+    key = "type_group_category"
+    if key in _sde_cache:
+        return _sde_cache[key]
+
     type_to_group = {}
     for row in db.session.execute(select(InvTypes.typeID, InvTypes.groupID)).all():
         if row.groupID is not None:
@@ -53,7 +62,10 @@ def load_type_group_category_maps():
         if row.categoryID is not None:
             group_to_category[row.groupID] = row.categoryID
 
-    return type_to_group, group_to_category
+    result = (type_to_group, group_to_category)
+    with _sde_cache_lock:
+        _sde_cache[key] = result
+    return result
 
 
 def classify_product_for_rig(product_type_id, type_to_group, group_to_category):
@@ -272,13 +284,17 @@ def load_activity_times():
 
 
 def load_sde_manufacturing_data():
-    """Load manufacturing activity materials and products into dicts for fast DFS lookups.
+    """Load manufacturing activity materials and products into dicts for fast DFS lookups. Cached after first call.
 
     Returns:
         materials_by_bp: {typeID: [(materialTypeID, quantity), ...]}
         products_by_product: {productTypeID: (blueprintTypeID, quantity)}
         bp_to_product: {blueprintTypeID: productTypeID}
     """
+    key = "manufacturing_data"
+    if key in _sde_cache:
+        return _sde_cache[key]
+
     materials_by_bp = {}
     for row in db.session.execute(
         select(IndustryActivityMaterials).where(
@@ -297,7 +313,10 @@ def load_sde_manufacturing_data():
         products_by_product[row.productTypeID] = (row.typeID, row.quantity)
         bp_to_product[row.typeID] = row.productTypeID
 
-    return materials_by_bp, products_by_product, bp_to_product
+    result = (materials_by_bp, products_by_product, bp_to_product)
+    with _sde_cache_lock:
+        _sde_cache[key] = result
+    return result
 
 
 def load_blueprint_skill_requirements():

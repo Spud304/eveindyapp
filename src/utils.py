@@ -130,6 +130,113 @@ def batch_market_info(type_ids: set[int]) -> tuple[dict[int, float], dict[int, f
     return avg_result, adj_result
 
 
+def search_systems(query: str, limit: int = 15) -> list[dict]:
+    """Search solar systems by name prefix. Returns list of {system_id, name} dicts."""
+    from src.models.models import MapSolarSystems
+
+    if len(query) < 2:
+        return []
+    results = db.session.execute(
+        select(MapSolarSystems.solarSystemID, MapSolarSystems.solarSystemName)
+        .where(MapSolarSystems.solarSystemName.ilike(f"%{query}%"))
+        .limit(limit)
+    ).all()
+    return [{"system_id": r.solarSystemID, "name": r.solarSystemName} for r in results]
+
+
+def resolve_location_names(location_ids, headers, character_id):
+    """Resolve location IDs to names, caching results. Standalone version for use without Flask request context."""
+    if not location_ids:
+        return
+
+    cached = (
+        db.session.execute(
+            select(CachedLocations).where(
+                CachedLocations.location_id.in_(location_ids)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    known = {row.location_id for row in cached if row.location_name and row.location_name != "Unknown Location"}
+    missing = location_ids - known
+
+    if not missing:
+        return
+
+    asset_map = None
+    for loc_id in missing:
+        name = fetch_location_name(loc_id, headers)
+        if name is None or name == "Unknown Location":
+            if asset_map is None:
+                asset_map = build_asset_location_map(headers, character_id)
+            station_id = follow_asset_chain(loc_id, asset_map)
+            if station_id:
+                resolved = fetch_location_name(station_id, headers)
+                if resolved and resolved != "Unknown Location":
+                    name = resolved
+            name = name or "Unknown Location"
+        db.session.merge(CachedLocations(location_id=loc_id, location_name=name))
+
+    db.session.commit()
+
+
+def fetch_location_name(location_id, headers):
+    """Resolve a single location ID to a name via ESI."""
+    from src.constants import ESI_BASE_URL, STATION_ID_RANGE, STRUCTURE_ID_MIN, SYSTEM_ID_RANGE
+
+    if STATION_ID_RANGE[0] <= location_id <= STATION_ID_RANGE[1]:
+        url = f"{ESI_BASE_URL}/universe/stations/{location_id}/"
+    elif location_id > STRUCTURE_ID_MIN:
+        url = f"{ESI_BASE_URL}/universe/structures/{location_id}/"
+    elif SYSTEM_ID_RANGE[0] <= location_id <= SYSTEM_ID_RANGE[1]:
+        url = f"{ESI_BASE_URL}/universe/systems/{location_id}/"
+    else:
+        return None
+
+    status, data = esi_get(url, headers=headers)
+    if status == 200 and data:
+        return data.get("name", "Unknown Location")
+    logger.warning("Failed to resolve location %s: status=%s", location_id, status)
+    return "Unknown Location"
+
+
+def build_asset_location_map(headers, character_id):
+    """Fetch character assets and return {item_id: location_id} map."""
+    from src.constants import ESI_BASE_URL
+
+    url = f"{ESI_BASE_URL}/characters/{character_id}/assets/"
+    asset_map = {}
+    page = 1
+    while True:
+        status, data = esi_get(url, headers=headers, params={"page": page})
+        if status != 200 or not data:
+            break
+        for asset in data:
+            asset_map[asset["item_id"]] = asset["location_id"]
+        if len(data) < 1000:
+            break
+        page += 1
+    return asset_map
+
+
+def follow_asset_chain(item_id, asset_map, max_depth=10):
+    """Walk asset_map from item_id until we reach a station/structure ID."""
+    from src.constants import STATION_ID_RANGE, STRUCTURE_ID_MIN
+
+    current = item_id
+    for _ in range(max_depth):
+        parent = asset_map.get(current)
+        if parent is None:
+            return None
+        if STATION_ID_RANGE[0] <= parent <= STATION_ID_RANGE[1]:
+            return parent
+        if parent > STRUCTURE_ID_MIN:
+            return parent
+        current = parent
+    return None
+
+
 def get_manufacturing_cost_index(system_id: int) -> float:
     """Fetch the manufacturing cost index for a solar system from ESI.
 

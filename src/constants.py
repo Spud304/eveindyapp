@@ -1,1 +1,6 @@
 ESI_BASE_URL = "https://esi.evetech.net/latest"
+
+# EVE location ID ranges
+STATION_ID_RANGE = (60_000_000, 63_999_999)
+STRUCTURE_ID_MIN = 1_000_000_000_000
+SYSTEM_ID_RANGE = (30_000_000, 39_999_999)

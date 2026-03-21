@@ -10,10 +10,10 @@ from src.models.models import (
     db,
     UserConfig,
     InvTypes,
-    MapSolarSystems,
     IndustryActivityMaterials,
 )
 from src.industry_constants import ALL_ME_RIG_GROUPS
+from src.utils import search_systems as _search_systems
 
 
 DEFAULT_CONFIG = {
@@ -179,16 +179,7 @@ class ConfigBlueprint(Blueprint):
 
     def search_systems(self):
         q = request.args.get("q", "", type=str).strip()
-        if len(q) < 2:
-            return jsonify([])
-        results = db.session.execute(
-            select(MapSolarSystems.solarSystemID, MapSolarSystems.solarSystemName)
-            .where(MapSolarSystems.solarSystemName.ilike(f"%{q}%"))
-            .limit(15)
-        ).all()
-        return jsonify(
-            [{"system_id": r.solarSystemID, "name": r.solarSystemName} for r in results]
-        )
+        return jsonify(_search_systems(q))
 
     def search_items(self):
         q = request.args.get("q", "", type=str).strip()

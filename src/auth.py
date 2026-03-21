@@ -1,3 +1,4 @@
+import logging
 import requests
 import os
 import base64
@@ -17,6 +18,8 @@ from src.constants import ESI_BASE_URL
 from src.tasks import fetch_skills_task
 
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 
 class AuthBlueprint(Blueprint):
@@ -142,7 +145,7 @@ class AuthBlueprint(Blueprint):
                 try:
                     fetch_skills_task.delay(existing_user.character_id)
                 except Exception:
-                    pass
+                    logger.warning("Failed to dispatch skill fetch for character %s", existing_user.character_id, exc_info=True)
                 session["user_id"] = current_user.character_id
                 return redirect(url_for("user.user"))
 
@@ -165,7 +168,7 @@ class AuthBlueprint(Blueprint):
             try:
                 fetch_skills_task.delay(new_user.character_id)
             except Exception:
-                pass
+                logger.warning("Failed to dispatch skill fetch for character %s", new_user.character_id, exc_info=True)
 
             session["user_id"] = current_user.character_id
             return redirect(url_for("user.user"))
