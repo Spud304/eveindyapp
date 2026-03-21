@@ -17,7 +17,7 @@ A web application for tracking and planning manufacturing in EVE Online. Authent
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv) (package manager)
 - An EVE Online developer application (for SSO credentials)
-- The EVE Static Data Export (SDE) as a SQLite database (`sqlite-latest.sqlite`)
+- The EVE Static Data Export (SDE) as a SQLite database (`sqlite-latest.sqlite`) — must be the March 2026+ format with the new schema (e.g. `EveType`, `BlueprintProduct` tables)
 
 ## ESI Scopes
 The app requires the following ESI scopes to function properly, some of these are just allocated atm but not fully utilized yet, i just kinda grabbed anything indy related to pull as much data as possible for future features:
@@ -112,15 +112,14 @@ src/
   celery_app.py         -- Celery app initialization
   tasks.py              -- Async tasks (token refresh, blueprint/skill fetch)
   models/
-    models.py           -- All ORM models (User, CachedBlueprint, SDE tables)
-    base_sde_models.py  -- SDE model definitions
+    models.py           -- All ORM models (User, CachedBlueprint, EveType, BlueprintProduct, etc.)
+    base_sde_models.py  -- Reference SDE model definitions (not used by app directly)
   templates/            -- Jinja2 HTML templates
   instance/             -- SQLite database files (not committed)
 ```
 
 ## TODO
 
-- Invention support -- handle T2 blueprint invention chains (datacores, decryptors, probability)
 - Job notifications -- alert when industry jobs complete
 - Search improvements -- support partial matching and category filtering on the calculator search
 - Project planner -- allow users to save and share build plans with specific items, quantities, and ME levels, and track progress as they acquire materials and complete jobs
