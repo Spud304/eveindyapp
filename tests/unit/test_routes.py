@@ -154,7 +154,7 @@ class TestIndustryRoutes:
         data = resp.get_json()
         assert isinstance(data, list)
         # "Rifter" is in our seeded data but it's a product, not a material
-        # search_items in industry.py joins with IndustryActivityProducts
+        # search_items in industry.py joins with BlueprintProduct
         # so this should find items that are products of manufacturing
 
     def test_calculator_search_short_query(self, auth_client):

@@ -9,8 +9,8 @@ from sqlalchemy import select
 from src.models.models import (
     db,
     UserConfig,
-    InvTypes,
-    IndustryActivityMaterials,
+    EveType,
+    BlueprintActivityMaterial,
 )
 from src.industry_constants import ALL_ME_RIG_GROUPS
 from src.utils import search_systems as _search_systems
@@ -131,8 +131,8 @@ class ConfigBlueprint(Blueprint):
         blacklist_items = []
         if blacklist_ids:
             rows = db.session.execute(
-                select(InvTypes.typeID, InvTypes.typeName).where(
-                    InvTypes.typeID.in_(blacklist_ids)
+                select(EveType.typeID, EveType.typeName).where(
+                    EveType.typeID.in_(blacklist_ids)
                 )
             ).all()
             name_map = {r.typeID: r.typeName for r in rows}
@@ -150,8 +150,8 @@ class ConfigBlueprint(Blueprint):
         rig_names = {}
         if all_rig_ids:
             rows = db.session.execute(
-                select(InvTypes.typeID, InvTypes.typeName).where(
-                    InvTypes.typeID.in_(all_rig_ids)
+                select(EveType.typeID, EveType.typeName).where(
+                    EveType.typeID.in_(all_rig_ids)
                 )
             ).all()
             rig_names = {r.typeID: r.typeName for r in rows}
@@ -198,14 +198,14 @@ class ConfigBlueprint(Blueprint):
         if len(q) < 2:
             return jsonify([])
         results = db.session.execute(
-            select(InvTypes.typeID, InvTypes.typeName)
+            select(EveType.typeID, EveType.typeName)
             .join(
-                IndustryActivityMaterials,
-                IndustryActivityMaterials.materialTypeID == InvTypes.typeID,
+                BlueprintActivityMaterial,
+                BlueprintActivityMaterial.materialTypeID == EveType.typeID,
             )
-            .where(IndustryActivityMaterials.activityID == 1)
-            .where(InvTypes.typeName.ilike(f"%{q}%"))
-            .where(InvTypes.published)
+            .where(BlueprintActivityMaterial.activityID == "manufacturing")
+            .where(EveType.typeName.ilike(f"%{q}%"))
+            .where(EveType.published == 1)
             .distinct()
             .limit(15)
         ).all()
@@ -236,10 +236,10 @@ class ConfigBlueprint(Blueprint):
             return jsonify([])
 
         results = db.session.execute(
-            select(InvTypes.typeID, InvTypes.typeName)
-            .where(InvTypes.groupID.in_(allowed_groups))
-            .where(InvTypes.typeName.ilike(f"%{q}%"))
-            .where(InvTypes.published)
+            select(EveType.typeID, EveType.typeName)
+            .where(EveType.groupID.in_(allowed_groups))
+            .where(EveType.typeName.ilike(f"%{q}%"))
+            .where(EveType.published == 1)
             .limit(15)
         ).all()
         return jsonify([{"type_id": r.typeID, "name": r.typeName} for r in results])
@@ -418,8 +418,8 @@ class ConfigBlueprint(Blueprint):
         rig_names = {}
         if all_rig_ids:
             rows = db.session.execute(
-                select(InvTypes.typeID, InvTypes.typeName).where(
-                    InvTypes.typeID.in_(all_rig_ids)
+                select(EveType.typeID, EveType.typeName).where(
+                    EveType.typeID.in_(all_rig_ids)
                 )
             ).all()
             rig_names = {r.typeID: r.typeName for r in rows}
@@ -430,8 +430,8 @@ class ConfigBlueprint(Blueprint):
         items = []
         if blacklist_ids:
             rows = db.session.execute(
-                select(InvTypes.typeID, InvTypes.typeName).where(
-                    InvTypes.typeID.in_(blacklist_ids)
+                select(EveType.typeID, EveType.typeName).where(
+                    EveType.typeID.in_(blacklist_ids)
                 )
             ).all()
             name_map = {r.typeID: r.typeName for r in rows}

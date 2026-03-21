@@ -45,13 +45,18 @@ target_db = current_app.extensions["migrate"].db
 
 
 STATIC_TABLES = {
-    "InvTypes",
-    "InvTypeMaterials",
-    "industryActivityMaterials",
-    "industryActivityProducts",
-    "industryBlueprints",
-    "mapSolarSystems",
-    "invGroups",
+    "EveType",
+    "EveTypeName",
+    "TypeMaterial",
+    "BlueprintActivityMaterial",
+    "BlueprintProduct",
+    "Blueprints",
+    "BlueprintActivityType",
+    "BlueprintSkill",
+    "TypeDogmaAttribute",
+    "mapSolarSystem",
+    "SolarSystemName",
+    "EveGroup",
 }
 
 

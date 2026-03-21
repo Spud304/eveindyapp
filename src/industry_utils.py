@@ -7,10 +7,10 @@ from sqlalchemy import select, text
 
 from src.models.models import (
     db,
-    InvTypes,
-    InvGroups,
-    IndustryActivityMaterials,
-    IndustryActivityProducts,
+    EveType,
+    EveGroup,
+    BlueprintActivityMaterial,
+    BlueprintProduct,
 )
 from src.industry_constants import (
     STRUCTURE_BASE_ME,
@@ -55,14 +55,12 @@ def load_type_group_category_maps():
         return _sde_cache[key]
 
     type_to_group = {}
-    for row in db.session.execute(select(InvTypes.typeID, InvTypes.groupID)).all():
+    for row in db.session.execute(select(EveType.typeID, EveType.groupID)).all():
         if row.groupID is not None:
             type_to_group[row.typeID] = row.groupID
 
     group_to_category = {}
-    for row in db.session.execute(
-        select(InvGroups.groupID, InvGroups.categoryID)
-    ).all():
+    for row in db.session.execute(select(EveGroup.groupID, EveGroup.categoryID)).all():
         if row.categoryID is not None:
             group_to_category[row.groupID] = row.categoryID
 
@@ -131,9 +129,9 @@ def load_rig_data():
     """
     # Get all typeIDs in ME rig groups (ORM routes to static DB)
     rig_rows = db.session.execute(
-        select(InvTypes.typeID, InvTypes.groupID)
-        .where(InvTypes.groupID.in_(ALL_ME_RIG_GROUPS))
-        .where(InvTypes.published)
+        select(EveType.typeID, EveType.groupID)
+        .where(EveType.groupID.in_(ALL_ME_RIG_GROUPS))
+        .where(EveType.published == 1)
     ).all()
     if not rig_rows:
         return {}
@@ -145,8 +143,8 @@ def load_rig_data():
     type_list = ",".join(str(t) for t in rig_type_ids)
     attr_ids = f"{ATTR_ME_BONUS},{ATTR_TE_BONUS},{ATTR_HIGHSEC_MODIFIER},{ATTR_LOWSEC_MODIFIER},{ATTR_NULLSEC_MODIFIER}"
     attrs_sql = text(f"""
-        SELECT typeID, attributeID, COALESCE(valueFloat, valueInt) as value
-        FROM dgmTypeAttributes
+        SELECT typeID, attributeID, value
+        FROM TypeDogmaAttribute
         WHERE typeID IN ({type_list}) AND attributeID IN ({attr_ids})
     """)
     engine = db.engines["static"]
@@ -266,23 +264,24 @@ def pick_best_station(stations, product_rig_category, system_securities, rig_dat
 
 
 def load_activity_times():
-    """Load manufacturing and copy times from SDE industryActivity table.
+    """Load manufacturing and copy times from SDE BlueprintActivityType table.
 
     Returns {bp_type_id: (mfg_seconds, copy_seconds)}.
     """
     engine = db.engines["static"]
     sql = text(
-        "SELECT typeID, activityID, time FROM industryActivity WHERE activityID IN (1, 5)"
+        "SELECT blueprintTypeID, activityName, time FROM BlueprintActivityType WHERE activityName IN ('manufacturing', 'copying')"
     )
     with engine.connect() as conn:
         rows = conn.execute(sql).all()
 
-    times = {}  # {typeID: {1: mfg_time, 5: copy_time}}
-    for type_id, activity_id, time_val in rows:
-        times.setdefault(type_id, {})[activity_id] = time_val
+    times = {}  # {typeID: {'manufacturing': time, 'copying': time}}
+    for type_id, activity_name, time_val in rows:
+        times.setdefault(type_id, {})[activity_name] = time_val
 
     return {
-        type_id: (acts.get(1, 0), acts.get(5, 0)) for type_id, acts in times.items()
+        type_id: (acts.get("manufacturing", 0), acts.get("copying", 0))
+        for type_id, acts in times.items()
     }
 
 
@@ -300,8 +299,8 @@ def load_sde_manufacturing_data():
 
     materials_by_bp = {}
     for row in db.session.execute(
-        select(IndustryActivityMaterials).where(
-            IndustryActivityMaterials.activityID == 1
+        select(BlueprintActivityMaterial).where(
+            BlueprintActivityMaterial.activityID == "manufacturing"
         )
     ).scalars():
         materials_by_bp.setdefault(row.typeID, []).append(
@@ -311,7 +310,7 @@ def load_sde_manufacturing_data():
     products_by_product = {}
     bp_to_product = {}
     for row in db.session.execute(
-        select(IndustryActivityProducts).where(IndustryActivityProducts.activityID == 1)
+        select(BlueprintProduct).where(BlueprintProduct.activityID == "manufacturing")
     ).scalars():
         products_by_product[row.productTypeID] = (row.typeID, row.quantity)
         bp_to_product[row.typeID] = row.productTypeID
@@ -323,25 +322,25 @@ def load_sde_manufacturing_data():
 
 
 def load_blueprint_skill_requirements():
-    """Load skill requirements for manufacturing (activityID=1) and copying (activityID=5) from SDE.
+    """Load skill requirements for manufacturing and copying from SDE.
 
     Returns (mfg_skill_reqs, copy_skill_reqs) where each is
     {bp_type_id: [(skill_id, min_level), ...]}.
     """
     engine = db.engines["static"]
     sql = text(
-        "SELECT typeID, activityID, skillID, level FROM industryActivitySkills WHERE activityID IN (1, 5)"
+        "SELECT parentTypeId, activityName, typeID, level FROM BlueprintSkill WHERE activityName IN ('manufacturing', 'copying')"
     )
     with engine.connect() as conn:
         rows = conn.execute(sql).all()
 
     mfg_skill_reqs = {}
     copy_skill_reqs = {}
-    for type_id, activity_id, skill_id, level in rows:
-        if activity_id == 1:
-            mfg_skill_reqs.setdefault(type_id, []).append((skill_id, level))
+    for bp_id, activity_name, skill_id, level in rows:
+        if activity_name == "manufacturing":
+            mfg_skill_reqs.setdefault(bp_id, []).append((skill_id, level))
         else:
-            copy_skill_reqs.setdefault(type_id, []).append((skill_id, level))
+            copy_skill_reqs.setdefault(bp_id, []).append((skill_id, level))
 
     return mfg_skill_reqs, copy_skill_reqs
 
@@ -429,33 +428,26 @@ def load_sde_invention_data():
     if key in _sde_cache:
         return _sde_cache[key]
 
-    # Materials for invention (activityID=8)
+    # Materials for invention
     invention_materials = {}
     for row in db.session.execute(
-        select(IndustryActivityMaterials).where(
-            IndustryActivityMaterials.activityID == 8
+        select(BlueprintActivityMaterial).where(
+            BlueprintActivityMaterial.activityID == "invention"
         )
     ).scalars():
         invention_materials.setdefault(row.typeID, []).append(
             (row.materialTypeID, row.quantity)
         )
 
-    # Products: T1 BP -> T2 BP mapping (activityID=8)
+    # Products + probabilities: T1 BP -> T2 BP mapping (now includes probability on same table)
     invention_products = {}
+    invention_probabilities = {}
     for row in db.session.execute(
-        select(IndustryActivityProducts).where(IndustryActivityProducts.activityID == 8)
+        select(BlueprintProduct).where(BlueprintProduct.activityID == "invention")
     ).scalars():
         invention_products[row.productTypeID] = (row.typeID, row.quantity)
-
-    # Probabilities from industryActivityProbabilities (no ORM model, use raw SQL)
-    engine = db.engines["static"]
-    prob_sql = text(
-        "SELECT typeID, productTypeID, probability FROM industryActivityProbabilities WHERE activityID = 8"
-    )
-    invention_probabilities = {}
-    with engine.connect() as conn:
-        for type_id, product_type_id, probability in conn.execute(prob_sql).all():
-            invention_probabilities[(type_id, product_type_id)] = probability
+        if row.probability is not None:
+            invention_probabilities[(row.typeID, row.productTypeID)] = row.probability
 
     result = (invention_materials, invention_products, invention_probabilities)
     with _sde_cache_lock:
@@ -474,9 +466,9 @@ def load_decryptor_data():
 
     # Find published decryptor types (groupID 1304 = Decryptors)
     decryptor_rows = db.session.execute(
-        select(InvTypes.typeID, InvTypes.typeName)
-        .where(InvTypes.groupID == 1304)
-        .where(InvTypes.published)
+        select(EveType.typeID, EveType.typeName)
+        .where(EveType.groupID == 1304)
+        .where(EveType.published == 1)
     ).all()
 
     if not decryptor_rows:
@@ -491,8 +483,8 @@ def load_decryptor_data():
     type_list = ",".join(str(t) for t in type_ids)
     attr_ids = f"{ATTR_INVENTION_PROB_MULT},{ATTR_INVENTION_ME_MOD},{ATTR_INVENTION_TE_MOD},{ATTR_INVENTION_RUN_MOD}"
     attrs_sql = text(f"""
-        SELECT typeID, attributeID, COALESCE(valueFloat, valueInt) as value
-        FROM dgmTypeAttributes
+        SELECT typeID, attributeID, value
+        FROM TypeDogmaAttribute
         WHERE typeID IN ({type_list}) AND attributeID IN ({attr_ids})
     """)
     engine = db.engines["static"]
@@ -524,7 +516,7 @@ def load_decryptor_data():
 
 
 def load_invention_times():
-    """Load invention times from SDE industryActivity table. Cached after first call.
+    """Load invention times from SDE BlueprintActivityType table. Cached after first call.
 
     Returns {t1_bp_id: invention_seconds}.
     """
@@ -533,7 +525,9 @@ def load_invention_times():
         return _sde_cache[key]
 
     engine = db.engines["static"]
-    sql = text("SELECT typeID, time FROM industryActivity WHERE activityID = 8")
+    sql = text(
+        "SELECT blueprintTypeID, time FROM BlueprintActivityType WHERE activityName = 'invention'"
+    )
     with engine.connect() as conn:
         rows = conn.execute(sql).all()
 

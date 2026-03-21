@@ -9,7 +9,7 @@ from flask_login import current_user
 from sqlalchemy import select
 from datetime import datetime, timedelta
 
-from src.models.models import db, InvTypes, CachedMarketData, CachedLocations
+from src.models.models import db, EveType, CachedMarketData, CachedLocations
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def batch_type_names(type_ids: set[int]) -> dict[int, str]:
     if not type_ids:
         return {}
     rows = db.session.execute(
-        select(InvTypes.typeID, InvTypes.typeName).where(InvTypes.typeID.in_(type_ids))
+        select(EveType.typeID, EveType.typeName).where(EveType.typeID.in_(type_ids))
     ).all()
     return {r.typeID: r.typeName for r in rows}
 
@@ -132,13 +132,13 @@ def batch_market_info(type_ids: set[int]) -> tuple[dict[int, float], dict[int, f
 
 def search_systems(query: str, limit: int = 15) -> list[dict]:
     """Search solar systems by name prefix. Returns list of {system_id, name} dicts."""
-    from src.models.models import MapSolarSystems
+    from src.models.models import MapSolarSystem
 
     if len(query) < 2:
         return []
     results = db.session.execute(
-        select(MapSolarSystems.solarSystemID, MapSolarSystems.solarSystemName)
-        .where(MapSolarSystems.solarSystemName.ilike(f"%{query}%"))
+        select(MapSolarSystem.solarSystemID, MapSolarSystem.solarSystemName)
+        .where(MapSolarSystem.solarSystemName.ilike(f"%{query}%"))
         .limit(limit)
     ).all()
     return [{"system_id": r.solarSystemID, "name": r.solarSystemName} for r in results]

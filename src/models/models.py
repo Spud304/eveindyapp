@@ -4,8 +4,8 @@ import flask_sqlalchemy
 from datetime import datetime, timezone, timedelta
 from flask_login import UserMixin
 from sqlalchemy import String, BigInteger, Integer, Text, Float, Boolean
-from sqlalchemy import DECIMAL, DateTime
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import DateTime, select as sa_select
+from sqlalchemy.orm import Mapped, mapped_column, column_property
 
 
 db = flask_sqlalchemy.SQLAlchemy()
@@ -122,86 +122,116 @@ class CachedSkill(db.Model):
     cached_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
-class InvTypes(db.Model):
+class EveTypeName(db.Model):
     __bind_key__ = "static"
-    __tablename__ = "InvTypes"
+    __tablename__ = "EveTypeName"
+
+    parentTypeId: Mapped[int] = mapped_column(Integer, primary_key=True)
+    parentTypeId2: Mapped[int] = mapped_column(Integer, primary_key=True)
+    parentTypeCategory: Mapped[str] = mapped_column(Text, primary_key=True)
+    en: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class EveType(db.Model):
+    __bind_key__ = "static"
+    __tablename__ = "EveType"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     groupID: Mapped[Optional[int]] = mapped_column(Integer)
-    typeName: Mapped[Optional[str]] = mapped_column(String(100))
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    mass: Mapped[Optional[float]] = mapped_column(Float)
-    volume: Mapped[Optional[float]] = mapped_column(Float)
-    capacity: Mapped[Optional[float]] = mapped_column(Float)
-    portionSize: Mapped[Optional[int]] = mapped_column(Integer)
-    raceID: Mapped[Optional[int]] = mapped_column(Integer)
-    basePrice: Mapped[Optional[float]] = mapped_column(DECIMAL(19, 4))
-    published: Mapped[Optional[bool]] = mapped_column(Boolean)
+    published: Mapped[Optional[int]] = mapped_column(Integer)
     marketGroupID: Mapped[Optional[int]] = mapped_column(Integer)
-    iconID: Mapped[Optional[int]] = mapped_column(Integer)
+    portionSize: Mapped[Optional[int]] = mapped_column(Integer)
+    basePrice: Mapped[Optional[int]] = mapped_column(Integer)
+    volume: Mapped[Optional[int]] = mapped_column(Integer)
+    mass: Mapped[Optional[int]] = mapped_column(Integer)
+    capacity: Mapped[Optional[int]] = mapped_column(Integer)
+    raceID: Mapped[Optional[int]] = mapped_column(Integer)
     soundID: Mapped[Optional[int]] = mapped_column(Integer)
     graphicID: Mapped[Optional[int]] = mapped_column(Integer)
 
-    def __repr__(self):
-        return f"InvTypes('{self.typeID}', '{self.groupID}', '{self.typeName}', '{self.description}')"
+
+# typeName via correlated subquery to EveTypeName (set up after both classes exist)
+EveType.typeName = column_property(
+    sa_select(EveTypeName.en)
+    .where(EveTypeName.parentTypeId == EveType.typeID)
+    .where(EveTypeName.parentTypeCategory == "")
+    .correlate(EveType)
+    .scalar_subquery()
+)
 
 
-class InvTypeMaterials(db.Model):
+class TypeMaterial(db.Model):
     __bind_key__ = "static"
-    __tablename__ = "InvTypeMaterials"
+    __tablename__ = "TypeMaterial"
 
     typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
-    materialTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
-    quantity: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    def __repr__(self):
-        return f"InvTypeMaterials('{self.typeID}', '{self.materialTypeID}', '{self.quantity}')"
-
-
-class IndustryActivityMaterials(db.Model):
-    __bind_key__ = "static"
-    __tablename__ = "industryActivityMaterials"
-
-    typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
-    activityID: Mapped[int] = mapped_column(Integer, primary_key=True)
     materialTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
     quantity: Mapped[int] = mapped_column(Integer)
 
 
-class IndustryActivityProducts(db.Model):
+class BlueprintActivityMaterial(db.Model):
     __bind_key__ = "static"
-    __tablename__ = "industryActivityProducts"
+    __tablename__ = "BlueprintActivityMaterial"
 
-    typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
-    activityID: Mapped[int] = mapped_column(Integer, primary_key=True)
-    productTypeID: Mapped[int] = mapped_column(Integer, primary_key=True)
-    quantity: Mapped[int] = mapped_column(Integer)
+    typeID: Mapped[int] = mapped_column("blueprintTypeID", Integer, primary_key=True)
+    activityID: Mapped[str] = mapped_column("activityName", Text, primary_key=True)
+    materialTypeID: Mapped[int] = mapped_column("typeId", Integer, primary_key=True)
+    quantity: Mapped[Optional[int]] = mapped_column(Integer)
 
 
-class IndustryBlueprints(db.Model):
+class BlueprintProduct(db.Model):
     __bind_key__ = "static"
-    __tablename__ = "industryBlueprints"
+    __tablename__ = "BlueprintProduct"
 
-    typeID: Mapped[int] = mapped_column(Integer, primary_key=True)
+    typeID: Mapped[int] = mapped_column("blueprintTypeID", Integer, primary_key=True)
+    activityID: Mapped[str] = mapped_column("activityName", Text, primary_key=True)
+    productTypeID: Mapped[int] = mapped_column("typeID", Integer, primary_key=True)
+    quantity: Mapped[Optional[int]] = mapped_column(Integer)
+    probability: Mapped[Optional[float]] = mapped_column(Float)
+
+
+class Blueprints(db.Model):
+    __bind_key__ = "static"
+    __tablename__ = "Blueprints"
+
+    typeID: Mapped[int] = mapped_column("blueprintTypeID", Integer, primary_key=True)
     maxProductionLimit: Mapped[Optional[int]] = mapped_column(Integer)
 
 
-class MapSolarSystems(db.Model):
+class SolarSystemName(db.Model):
     __bind_key__ = "static"
-    __tablename__ = "mapSolarSystems"
+    __tablename__ = "SolarSystemName"
+
+    parentTypeId: Mapped[int] = mapped_column(Integer, primary_key=True)
+    parentTypeId2: Mapped[int] = mapped_column(Integer, primary_key=True)
+    parentTypeCategory: Mapped[str] = mapped_column(Text, primary_key=True)
+    en: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class MapSolarSystem(db.Model):
+    __bind_key__ = "static"
+    __tablename__ = "mapSolarSystem"
 
     solarSystemID: Mapped[int] = mapped_column(Integer, primary_key=True)
-    solarSystemName: Mapped[Optional[str]] = mapped_column(String(100))
-    security: Mapped[Optional[float]] = mapped_column(Float)
+    security: Mapped[Optional[float]] = mapped_column("securityStatus", Float)
 
 
-class InvGroups(db.Model):
+# solarSystemName via correlated subquery to SolarSystemName
+MapSolarSystem.solarSystemName = column_property(
+    sa_select(SolarSystemName.en)
+    .where(SolarSystemName.parentTypeId == MapSolarSystem.solarSystemID)
+    .where(SolarSystemName.parentTypeCategory == "")
+    .correlate(MapSolarSystem)
+    .scalar_subquery()
+)
+
+
+class EveGroup(db.Model):
     __bind_key__ = "static"
-    __tablename__ = "invGroups"
+    __tablename__ = "EveGroup"
 
     groupID: Mapped[int] = mapped_column(Integer, primary_key=True)
     categoryID: Mapped[Optional[int]] = mapped_column(Integer)
-    groupName: Mapped[Optional[str]] = mapped_column(String(100))
 
 
 class UserConfig(db.Model):

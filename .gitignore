@@ -58,3 +58,4 @@ src/instance
 
 # AI generated files and artifacts
 .claude
+.mcp.json

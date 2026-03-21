@@ -15,12 +15,12 @@ from sqlalchemy import select
 
 from src.models.models import (
     db,
-    InvTypes,
+    EveType,
     CachedLocations,
     CachedBlueprint,
-    IndustryActivityProducts,
-    IndustryBlueprints,
-    MapSolarSystems,
+    BlueprintProduct,
+    Blueprints,
+    MapSolarSystem,
 )
 from src.constants import ESI_BASE_URL
 from celery.result import AsyncResult
@@ -230,7 +230,7 @@ class IndustryBlueprint(Blueprint):
 
     def get_blueprint_materials(self, type_id: int):
         blueprint = db.session.execute(
-            select(InvTypes.typeName).where(InvTypes.typeID == type_id)
+            select(EveType.typeName).where(EveType.typeID == type_id)
         ).scalar_one_or_none()
 
         # Parse top-level run count
@@ -330,14 +330,14 @@ class IndustryBlueprint(Blueprint):
         if len(q) < 2:
             return jsonify([])
         results = db.session.execute(
-            select(InvTypes.typeID, InvTypes.typeName)
+            select(EveType.typeID, EveType.typeName)
             .join(
-                IndustryActivityProducts,
-                IndustryActivityProducts.productTypeID == InvTypes.typeID,
+                BlueprintProduct,
+                BlueprintProduct.productTypeID == EveType.typeID,
             )
-            .where(IndustryActivityProducts.activityID == 1)
-            .where(InvTypes.typeName.ilike(f"%{q}%"))
-            .where(InvTypes.published)
+            .where(BlueprintProduct.activityID == "manufacturing")
+            .where(EveType.typeName.ilike(f"%{q}%"))
+            .where(EveType.published == 1)
             .limit(15)
         ).all()
         return jsonify([{"type_id": r.typeID, "name": r.typeName} for r in results])
@@ -424,14 +424,14 @@ class IndustryBlueprint(Blueprint):
 
         # Look up product name
         product_name = db.session.execute(
-            select(InvTypes.typeName).where(InvTypes.typeID == product_type_id)
+            select(EveType.typeName).where(EveType.typeID == product_type_id)
         ).scalar_one_or_none()
 
         # Reverse-lookup: product -> blueprint
         bp_product = db.session.execute(
-            select(IndustryActivityProducts)
-            .where(IndustryActivityProducts.productTypeID == product_type_id)
-            .where(IndustryActivityProducts.activityID == 1)
+            select(BlueprintProduct)
+            .where(BlueprintProduct.productTypeID == product_type_id)
+            .where(BlueprintProduct.activityID == "manufacturing")
             .limit(1)
         ).scalar_one_or_none()
 
@@ -461,8 +461,8 @@ class IndustryBlueprint(Blueprint):
         system_securities = {}
         if system_ids:
             sec_rows = db.session.execute(
-                select(MapSolarSystems.solarSystemID, MapSolarSystems.security).where(
-                    MapSolarSystems.solarSystemID.in_(system_ids)
+                select(MapSolarSystem.solarSystemID, MapSolarSystem.security).where(
+                    MapSolarSystem.solarSystemID.in_(system_ids)
                 )
             ).all()
             system_securities = {r.solarSystemID: r.security for r in sec_rows}
@@ -579,9 +579,9 @@ class IndustryBlueprint(Blueprint):
         max_prod_limits = {}
         if tree_bp_ids:
             rows = db.session.execute(
-                select(
-                    IndustryBlueprints.typeID, IndustryBlueprints.maxProductionLimit
-                ).where(IndustryBlueprints.typeID.in_(tree_bp_ids))
+                select(Blueprints.typeID, Blueprints.maxProductionLimit).where(
+                    Blueprints.typeID.in_(tree_bp_ids)
+                )
             ).all()
             max_prod_limits = {r.typeID: r.maxProductionLimit for r in rows}
 
