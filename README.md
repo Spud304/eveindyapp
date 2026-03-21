@@ -4,10 +4,13 @@ A web application for tracking and planning manufacturing in EVE Online. Authent
 
 ## Features
 
-- **Blueprint Library** -- View all blueprints owned by your character, with type names and location names resolved automatically. Data is cached for 24 hours with a manual refresh option.
-- **Material Calculator** -- Select a manufacturable item and quantity, then get a full recursive bill of materials broken down to raw materials. Supports per-blueprint Material Efficiency (ME) overrides and BPC run planning.
+- **Blueprint Library** -- View all blueprints owned by your character, with type names and location names resolved automatically. Data is cached for 24 hours with a manual refresh option via async Celery tasks.
+- **Material Calculator** -- Select a manufacturable item and quantity, then get a full recursive bill of materials broken down to raw materials. Supports per-blueprint Material Efficiency (ME) overrides and BPC run planning. Skill-aware build time calculations using cached character skills.
 - **Blueprint Ownership Status** -- The calculator cross-references your cached blueprints to show which BPOs/BPCs you own, which are missing, and how many copy jobs you need.
 - **Industry Jobs** -- View your character's active industry jobs from ESI.
+- **Station Configuration** -- Configure manufacturing stations with structure type, facility tax, and up to 3 rigs per station. The calculator automatically picks the best station for each product based on rig ME bonuses.
+- **Material Blacklist** -- Exclude specific materials from the recursive BOM breakdown (e.g., buy intermediates instead of building them).
+- **Build Settings** -- Configure build/copy slot counts, industry skill levels, and toggle between manual skill levels or character-fetched skills.
 
 ## Requirements
 
@@ -35,6 +38,7 @@ The app requires the following ESI scopes to function properly, some of these ar
 - `esi-industry.read_corporation_jobs.v1` (to show corporation industry jobs on the dashboard, if applicable)
 - `esi-industry.read_character_mining.v1` (to show active mining jobs on the dashboard)
 - `esi-industry.read_corporation_mining.v1` (to show corporation mining jobs on the dashboard, if applicable)
+- `esi-skills.read_skills.v1` (to fetch character skills for skill-aware build time calculations)
 
 ## Setup
 
@@ -55,6 +59,8 @@ cp .env.example .env
 | `STATIC_DB` | SDE database name without extension (default `sqlite-latest`) |
 | `SECRET_KEY` | Flask secret key for session signing |
 | `SCOPES` | JSON array of ESI scopes to request |
+| `CELERY_BROKER_URL` | Redis URL for Celery broker (default `redis://redis:6379/0`) |
+| `CELERY_RESULT_BACKEND` | Redis URL for Celery result backend (default `redis://redis:6379/0`) |
 
 3. Place the SDE SQLite file at `src/instance/sqlite-latest.sqlite`. The app database (`localuser.sqlite`) is created automatically on first run.
 
@@ -77,9 +83,8 @@ The app starts on `http://localhost:5050`.
 ### Tests
 
 ```
-uv run pytest tests/unit/ -v          # unit only
-uv run pytest tests/integration/ -v   # integration only
-uv run pytest -v                      # all 108 tests
+uv run --group test pytest tests/unit/ -v          # unit only
+uv run --group test pytest tests/integration/ -v   # integration only
 ```
 
 ### Docker
@@ -88,23 +93,29 @@ uv run pytest -v                      # all 108 tests
 docker compose up --build
 ```
 
-The `src/instance/` directory is mounted as a volume so database files persist across container restarts. The container runs gunicorn with 4 workers.
+Starts 4 services: the Flask app (gunicorn, 4 workers), Redis (Celery broker), a Celery worker for async tasks, and Celery Beat for scheduled token refresh. The `src/instance/` directory is mounted as a volume so database files persist across container restarts.
 
 ## Project Structure
 
 ```
 src/
-  main.py             -- App factory, config, blueprint registration
-  auth.py             -- EVE SSO login/callback/logout
-  user.py             -- Character info page
-  industry.py         -- Blueprints, materials DFS, calculator, jobs
-  utils.py            -- ESI request helpers, token generation
-  constants.py        -- ESI base URL
-  application.py      -- Flask Application subclass
+  main.py               -- App factory, config, blueprint registration
+  auth.py               -- EVE SSO login/callback/logout
+  user.py               -- Character info page
+  industry.py           -- Blueprints, materials DFS, calculator, jobs
+  config.py             -- Station/blacklist/settings CRUD (AJAX endpoints)
+  utils.py              -- ESI request helpers, token generation
+  constants.py          -- ESI base URL
+  industry_constants.py -- Structure ME/TE, rig groups, ship classifications, skill IDs
+  industry_utils.py     -- DFS helpers, rig selection, skill handling
+  application.py        -- Flask Application subclass
+  celery_app.py         -- Celery app initialization
+  tasks.py              -- Async tasks (token refresh, blueprint/skill fetch)
   models/
-    models.py         -- All ORM models (User, CachedBlueprint, SDE tables)
-  templates/          -- Jinja2 HTML templates
-  instance/           -- SQLite database files (not committed)
+    models.py           -- All ORM models (User, CachedBlueprint, SDE tables)
+    base_sde_models.py  -- SDE model definitions
+  templates/            -- Jinja2 HTML templates
+  instance/             -- SQLite database files (not committed)
 ```
 
 ## TODO
