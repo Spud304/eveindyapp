@@ -282,8 +282,7 @@ def load_activity_times():
         times.setdefault(type_id, {})[activity_id] = time_val
 
     return {
-        type_id: (acts.get(1, 0), acts.get(5, 0))
-        for type_id, acts in times.items()
+        type_id: (acts.get(1, 0), acts.get(5, 0)) for type_id, acts in times.items()
     }
 
 
@@ -358,8 +357,11 @@ def load_character_skills(character_ids):
         return {}
 
     rows = db.session.execute(
-        select(CachedSkill.character_id, CachedSkill.skill_id, CachedSkill.active_skill_level)
-        .where(CachedSkill.character_id.in_(character_ids))
+        select(
+            CachedSkill.character_id,
+            CachedSkill.skill_id,
+            CachedSkill.active_skill_level,
+        ).where(CachedSkill.character_id.in_(character_ids))
     ).all()
 
     result = {}
@@ -408,8 +410,9 @@ def get_character_names(character_ids):
         return {}
 
     rows = db.session.execute(
-        select(User.character_id, User.character_name)
-        .where(User.character_id.in_(character_ids))
+        select(User.character_id, User.character_name).where(
+            User.character_id.in_(character_ids)
+        )
     ).all()
     return {r.character_id: r.character_name for r in rows}
 
@@ -503,14 +506,16 @@ def load_decryptor_data():
     decryptors = []
     for type_id in type_ids:
         attrs = type_attrs.get(type_id, {})
-        decryptors.append({
-            "type_id": type_id,
-            "name": type_names[type_id],
-            "prob_mult": attrs.get(ATTR_INVENTION_PROB_MULT, 1.0),
-            "me_mod": int(attrs.get(ATTR_INVENTION_ME_MOD, 0)),
-            "te_mod": int(attrs.get(ATTR_INVENTION_TE_MOD, 0)),
-            "run_mod": int(attrs.get(ATTR_INVENTION_RUN_MOD, 0)),
-        })
+        decryptors.append(
+            {
+                "type_id": type_id,
+                "name": type_names[type_id],
+                "prob_mult": attrs.get(ATTR_INVENTION_PROB_MULT, 1.0),
+                "me_mod": int(attrs.get(ATTR_INVENTION_ME_MOD, 0)),
+                "te_mod": int(attrs.get(ATTR_INVENTION_TE_MOD, 0)),
+                "run_mod": int(attrs.get(ATTR_INVENTION_RUN_MOD, 0)),
+            }
+        )
 
     decryptors.sort(key=lambda d: d["name"])
     with _sde_cache_lock:
@@ -573,12 +578,20 @@ def assign_jobs_to_characters(phase_bps, characters, skill_reqs, job_type="mfg")
         eligible = []
         for c in characters:
             cid = c["char_id"]
-            if remaining_slots[cid] >= slots_needed and can_character_build(bp_id, c["skills"], skill_reqs):
+            if remaining_slots[cid] >= slots_needed and can_character_build(
+                bp_id, c["skills"], skill_reqs
+            ):
                 eligible.append(c)
 
         if eligible:
             # Pick character with most remaining slots (tie-break: best industry skill)
-            best = max(eligible, key=lambda c: (remaining_slots[c["char_id"]], c.get("industry_level", 0)))
+            best = max(
+                eligible,
+                key=lambda c: (
+                    remaining_slots[c["char_id"]],
+                    c.get("industry_level", 0),
+                ),
+            )
             remaining_slots[best["char_id"]] -= slots_needed
             bp["assigned_character"] = {
                 "char_id": best["char_id"],
@@ -586,13 +599,19 @@ def assign_jobs_to_characters(phase_bps, characters, skill_reqs, job_type="mfg")
             }
         else:
             # Check if it's a skill issue vs a slot issue
-            skill_eligible = [c for c in characters if can_character_build(bp_id, c["skills"], skill_reqs)]
+            skill_eligible = [
+                c
+                for c in characters
+                if can_character_build(bp_id, c["skills"], skill_reqs)
+            ]
             if not skill_eligible:
                 # Find which skills are missing
                 reqs = skill_reqs.get(bp_id, [])
                 missing_skills = []
                 for skill_id, min_level in reqs:
-                    if all(c["skills"].get(skill_id, 0) < min_level for c in characters):
+                    if all(
+                        c["skills"].get(skill_id, 0) < min_level for c in characters
+                    ):
                         missing_skills.append((skill_id, min_level))
                 bp["unassignable_reason"] = "No character has required skills"
                 bp["missing_skill_reqs"] = missing_skills

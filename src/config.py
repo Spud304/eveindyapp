@@ -43,7 +43,16 @@ def load_user_config(character_id):
         return json.loads(json.dumps(DEFAULT_CONFIG))
 
     config = json.loads(json.dumps(DEFAULT_CONFIG))
-    for key in ("stations", "blacklist", "build_slots", "copy_slots", "default_timeframe_hours", "industry_level", "adv_industry_level", "use_character_skills"):
+    for key in (
+        "stations",
+        "blacklist",
+        "build_slots",
+        "copy_slots",
+        "default_timeframe_hours",
+        "industry_level",
+        "adv_industry_level",
+        "use_character_skills",
+    ):
         if key in stored:
             config[key] = stored[key]
 
@@ -156,18 +165,21 @@ class ConfigBlueprint(Blueprint):
                 compute_character_capabilities,
                 get_character_names,
             )
+
             char_ids = get_linked_character_ids(current_user)
             char_skills_map = load_character_skills(char_ids)
             char_names = get_character_names(char_ids)
             for cid in char_ids:
                 skills = char_skills_map.get(cid, {})
                 caps = compute_character_capabilities(skills)
-                character_summaries.append({
-                    "char_id": cid,
-                    "name": char_names.get(cid, f"Character {cid}"),
-                    "has_skills": bool(skills),
-                    **caps,
-                })
+                character_summaries.append(
+                    {
+                        "char_id": cid,
+                        "name": char_names.get(cid, f"Character {cid}"),
+                        "has_skills": bool(skills),
+                        **caps,
+                    }
+                )
 
         return render_template(
             "config.html",
@@ -367,14 +379,16 @@ class ConfigBlueprint(Blueprint):
             config["use_character_skills"] = bool(data["use_character_skills"])
 
         self._save_config_json(char_id, config)
-        return jsonify({
-            "build_slots": config["build_slots"],
-            "copy_slots": config["copy_slots"],
-            "default_timeframe_hours": config["default_timeframe_hours"],
-            "industry_level": config["industry_level"],
-            "adv_industry_level": config["adv_industry_level"],
-            "use_character_skills": config["use_character_skills"],
-        })
+        return jsonify(
+            {
+                "build_slots": config["build_slots"],
+                "copy_slots": config["copy_slots"],
+                "default_timeframe_hours": config["default_timeframe_hours"],
+                "industry_level": config["industry_level"],
+                "adv_industry_level": config["adv_industry_level"],
+                "use_character_skills": config["use_character_skills"],
+            }
+        )
 
     def _save_config_json(self, char_id, config):
         row = db.session.execute(

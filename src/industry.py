@@ -374,6 +374,7 @@ class IndustryBlueprint(Blueprint):
         copy_skill_reqs = {}
         if use_char_skills:
             from src.user import get_linked_character_ids
+
             char_ids = get_linked_character_ids(current_user)
             char_skills_map = load_character_skills(char_ids)
             char_names = get_character_names(char_ids)
@@ -381,16 +382,20 @@ class IndustryBlueprint(Blueprint):
             for cid in char_ids:
                 skills = char_skills_map.get(cid, {})
                 caps = compute_character_capabilities(skills)
-                characters.append({
-                    "char_id": cid,
-                    "char_name": char_names.get(cid, f"Character {cid}"),
-                    "skills": skills,
-                    **caps,
-                })
+                characters.append(
+                    {
+                        "char_id": cid,
+                        "char_name": char_names.get(cid, f"Character {cid}"),
+                        "skills": skills,
+                        **caps,
+                    }
+                )
             build_slots = sum(c["mfg_slots"] for c in characters)
             copy_slots = sum(c["copy_slots"] for c in characters)
             industry_level = max((c["industry_level"] for c in characters), default=5)
-            adv_industry_level = max((c["adv_industry_level"] for c in characters), default=5)
+            adv_industry_level = max(
+                (c["adv_industry_level"] for c in characters), default=5
+            )
         else:
             build_slots = config.get("build_slots", 10)
             copy_slots = config.get("copy_slots", 10)
@@ -749,19 +754,29 @@ class IndustryBlueprint(Blueprint):
             invention_times = load_invention_times()
 
             # Use prices from the combined batch (already includes invention IDs)
-            datacore_ids = {mat_id for mat_id, _ in invention_materials.get(t1_bp_id, [])}
+            datacore_ids = {
+                mat_id for mat_id, _ in invention_materials.get(t1_bp_id, [])
+            }
 
             # Resolve T1 blueprint name
-            t1_bp_name = batch_type_names({t1_bp_id}).get(t1_bp_id, f"Unknown ({t1_bp_id})")
+            t1_bp_name = batch_type_names({t1_bp_id}).get(
+                t1_bp_id, f"Unknown ({t1_bp_id})"
+            )
 
             # Parse decryptor_id from query params
             selected_decryptor_id = request.args.get("decryptor_id", None, type=int)
 
             # Build comparison table
             decryptor_comparison = _build_decryptor_comparison(
-                t1_bp_id, top_bp_id, base_runs, top_runs,
-                invention_materials, invention_probabilities, invention_times,
-                decryptors, prices,
+                t1_bp_id,
+                top_bp_id,
+                base_runs,
+                top_runs,
+                invention_materials,
+                invention_probabilities,
+                invention_times,
+                decryptors,
+                prices,
             )
 
             # Select decryptor: user choice or auto-select optimal
@@ -777,12 +792,14 @@ class IndustryBlueprint(Blueprint):
                         break
             if selected_option is None:
                 # Auto-select optimal (first in sorted list)
-                selected_option = decryptor_comparison[0] if decryptor_comparison else None
+                selected_option = (
+                    decryptor_comparison[0] if decryptor_comparison else None
+                )
 
             if selected_option:
                 # Mark selected in comparison
                 for opt in decryptor_comparison:
-                    opt["selected"] = (opt is selected_option)
+                    opt["selected"] = opt is selected_option
 
                 total_invention_cost = selected_option["total_cost"]
 
@@ -790,12 +807,14 @@ class IndustryBlueprint(Blueprint):
                 datacores_display = []
                 datacore_names = batch_type_names(datacore_ids)
                 for mat_id, qty in invention_materials.get(t1_bp_id, []):
-                    datacores_display.append({
-                        "name": datacore_names.get(mat_id, f"Unknown ({mat_id})"),
-                        "type_id": mat_id,
-                        "quantity": qty,
-                        "unit_price": prices.get(mat_id, 0.0),
-                    })
+                    datacores_display.append(
+                        {
+                            "name": datacore_names.get(mat_id, f"Unknown ({mat_id})"),
+                            "type_id": mat_id,
+                            "quantity": qty,
+                            "unit_price": prices.get(mat_id, 0.0),
+                        }
+                    )
 
                 invention_info = {
                     "t1_bp_id": t1_bp_id,
@@ -803,7 +822,13 @@ class IndustryBlueprint(Blueprint):
                     "base_probability": selected_option["base_probability"],
                     "effective_probability": selected_option["probability"],
                     "selected_decryptor": selected_option["decryptor"],
-                    "selected_decryptor_id": selected_decryptor_id if selected_decryptor_id is not None else (0 if selected_option["decryptor"] is None else selected_option["decryptor"]["type_id"]),
+                    "selected_decryptor_id": selected_decryptor_id
+                    if selected_decryptor_id is not None
+                    else (
+                        0
+                        if selected_option["decryptor"] is None
+                        else selected_option["decryptor"]["type_id"]
+                    ),
                     "me": selected_option["me"],
                     "te": selected_option["te"],
                     "runs_per_bpc": selected_option["runs_per_bpc"],
@@ -811,7 +836,9 @@ class IndustryBlueprint(Blueprint):
                     "expected_attempts": selected_option["expected_attempts"],
                     "total_cost": total_invention_cost,
                     "invention_time": selected_option["invention_time"],
-                    "invention_time_fmt": _format_duration(selected_option["invention_time"]),
+                    "invention_time_fmt": _format_duration(
+                        selected_option["invention_time"]
+                    ),
                     "datacores": datacores_display,
                     "decryptors": decryptors,
                 }
@@ -824,15 +851,27 @@ class IndustryBlueprint(Blueprint):
                     me_levels[top_bp_id] = invented_me
                     # Recompute runs_needed and raw_materials with new ME
                     runs_needed = _compute_runs_needed(
-                        top_bp_id, me_levels, top_runs,
-                        materials_by_bp, products_by_product, blacklist, structure_me_by_bp,
+                        top_bp_id,
+                        me_levels,
+                        top_runs,
+                        materials_by_bp,
+                        products_by_product,
+                        blacklist,
+                        structure_me_by_bp,
                     )
                     raw_materials = _resolve_material_tree(
-                        top_bp_id, {}, me_levels, materials_by_bp, products_by_product,
-                        blacklist, structure_me_by_bp,
+                        top_bp_id,
+                        {},
+                        me_levels,
+                        materials_by_bp,
+                        products_by_product,
+                        blacklist,
+                        structure_me_by_bp,
                     )
                     if top_runs > 1:
-                        raw_materials = {tid: qty * top_runs for tid, qty in raw_materials.items()}
+                        raw_materials = {
+                            tid: qty * top_runs for tid, qty in raw_materials.items()
+                        }
 
                     # Recompute material costs
                     all_material_ids = set(raw_materials.keys())
@@ -842,7 +881,10 @@ class IndustryBlueprint(Blueprint):
 
                     materials = sorted(
                         [
-                            {"name": type_names.get(tid, f"Unknown ({tid})"), "quantity": qty}
+                            {
+                                "name": type_names.get(tid, f"Unknown ({tid})"),
+                                "quantity": qty,
+                            }
                             for tid, qty in raw_materials.items()
                         ],
                         key=lambda m: m["name"],
@@ -854,7 +896,12 @@ class IndustryBlueprint(Blueprint):
                         m["unit_price"] = price
                         m["total_price"] = price * m["quantity"] if price else None
                     total_material_cost = sum(
-                        (m["total_price"] for m in materials if m["total_price"] is not None), 0.0
+                        (
+                            m["total_price"]
+                            for m in materials
+                            if m["total_price"] is not None
+                        ),
+                        0.0,
                     )
 
                     # Update bp_statuses ME for top bp
@@ -929,19 +976,30 @@ class IndustryBlueprint(Blueprint):
                 if not phase_bps:
                     continue
                 # Assign manufacturing jobs
-                unassignable = assign_jobs_to_characters(phase_bps, characters, mfg_skill_reqs, job_type="mfg")
+                unassignable = assign_jobs_to_characters(
+                    phase_bps, characters, mfg_skill_reqs, job_type="mfg"
+                )
                 unassignable_warnings.extend(unassignable)
 
                 # Assign copy jobs for BPC-mode blueprints
-                copy_bps = [bp for bp in phase_bps if bp["build_strategy"]["recommended"] == "bpc" and bp["build_strategy"].get("copies_to_make", 0) > 0]
+                copy_bps = [
+                    bp
+                    for bp in phase_bps
+                    if bp["build_strategy"]["recommended"] == "bpc"
+                    and bp["build_strategy"].get("copies_to_make", 0) > 0
+                ]
                 if copy_bps:
-                    assign_jobs_to_characters(copy_bps, characters, copy_skill_reqs, job_type="copy")
+                    assign_jobs_to_characters(
+                        copy_bps, characters, copy_skill_reqs, job_type="copy"
+                    )
 
             # Recompute strategy using assigned character's skill levels
             for bp in bp_statuses:
                 ac = bp.get("assigned_character")
                 if ac:
-                    char = next((c for c in characters if c["char_id"] == ac["char_id"]), None)
+                    char = next(
+                        (c for c in characters if c["char_id"] == ac["char_id"]), None
+                    )
                     if char:
                         bp_times = activity_times.get(bp["type_id"], (0, 0))
                         bp["build_strategy"] = _compute_build_strategy(
@@ -1025,7 +1083,6 @@ class IndustryBlueprint(Blueprint):
         return {row.location_id: row.location_name for row in cached}
 
 
-
 # --- Build strategy computation ---
 
 
@@ -1046,7 +1103,9 @@ def _format_duration(seconds):
     return " ".join(parts)
 
 
-def _suggest_extra_bpos(num_bpcs, single_bpc_copy_time, bpc_mfg_time, timeframe_seconds):
+def _suggest_extra_bpos(
+    num_bpcs, single_bpc_copy_time, bpc_mfg_time, timeframe_seconds
+):
     """Return minimum total BPOs needed to fit timeframe, or None if impossible."""
     if timeframe_seconds is None or bpc_mfg_time >= timeframe_seconds:
         return None
@@ -1059,7 +1118,9 @@ def _suggest_extra_bpos(num_bpcs, single_bpc_copy_time, bpc_mfg_time, timeframe_
     return math.ceil(num_bpcs / max_copies_per_bpo)
 
 
-def _suggest_buy_bpcs(num_bpcs, num_bpos, single_bpc_copy_time, bpc_mfg_time, timeframe_seconds):
+def _suggest_buy_bpcs(
+    num_bpcs, num_bpos, single_bpc_copy_time, bpc_mfg_time, timeframe_seconds
+):
     """Return number of BPCs to buy to fit timeframe, or None if impossible."""
     if timeframe_seconds is None or bpc_mfg_time >= timeframe_seconds:
         return None
@@ -1142,11 +1203,15 @@ def _compute_build_strategy(
     bpc_mfg_time = copied_mfg_time if copies_to_make > 0 else bought_mfg_time
 
     # Pipelined: BPOs copy in parallel, then last BPC's mfg completes
-    copies_per_bpo = math.ceil(copies_to_make / num_bpos) if num_bpos > 0 else copies_to_make
+    copies_per_bpo = (
+        math.ceil(copies_to_make / num_bpos) if num_bpos > 0 else copies_to_make
+    )
     bpc_total_time = (copies_per_bpo * single_bpc_copy_time) + bpc_mfg_time
 
     # Copy-only time: what if bought_bpcs were 0?
-    copy_only_copies_per_bpo = math.ceil(num_bpcs / num_bpos) if num_bpos > 0 else num_bpcs
+    copy_only_copies_per_bpo = (
+        math.ceil(num_bpcs / num_bpos) if num_bpos > 0 else num_bpcs
+    )
     copy_only_time = (copy_only_copies_per_bpo * single_bpc_copy_time) + copied_mfg_time
 
     # Material waste: compare BPC split rounding vs single BPO job rounding
@@ -1157,11 +1222,15 @@ def _compute_build_strategy(
             # Single BPO job: material for all runs
             bpo_qty = max(runs_needed, math.ceil(runs_needed * base_qty * me_factor))
             # BPC split: material per BPC * num BPCs
-            per_bpc_qty = max(runs_per_bpc, math.ceil(runs_per_bpc * base_qty * me_factor))
+            per_bpc_qty = max(
+                runs_per_bpc, math.ceil(runs_per_bpc * base_qty * me_factor)
+            )
             # Last BPC might have fewer runs
             last_bpc_runs = runs_needed - (num_bpcs - 1) * runs_per_bpc
             if last_bpc_runs > 0 and last_bpc_runs != runs_per_bpc:
-                last_bpc_qty = max(last_bpc_runs, math.ceil(last_bpc_runs * base_qty * me_factor))
+                last_bpc_qty = max(
+                    last_bpc_runs, math.ceil(last_bpc_runs * base_qty * me_factor)
+                )
                 bpc_total_qty = per_bpc_qty * (num_bpcs - 1) + last_bpc_qty
             else:
                 bpc_total_qty = per_bpc_qty * num_bpcs
@@ -1221,7 +1290,9 @@ def _compute_build_strategy(
     return result
 
 
-def _compute_blueprint_depths(top_bp_id, materials_by_bp, products_by_product, blacklist=None):
+def _compute_blueprint_depths(
+    top_bp_id, materials_by_bp, products_by_product, blacklist=None
+):
     """BFS from top blueprint. Each child gets depth = parent_depth + 1.
     Diamond dependencies take max depth."""
     depths = {top_bp_id: 0}
@@ -1275,15 +1346,25 @@ def _compute_phase_timeline(bp_statuses, use_char_skills=False):
                 char_id = ac["char_id"] if ac else "__unassigned__"
 
                 if s["recommended"] == "bpc" and s.get("bpc_mfg_time"):
-                    char_mfg_times[char_id] = max(char_mfg_times.get(char_id, 0), s["bpc_mfg_time"])
+                    char_mfg_times[char_id] = max(
+                        char_mfg_times.get(char_id, 0), s["bpc_mfg_time"]
+                    )
                     if s.get("bpc_copy_time"):
-                        char_copy_times[char_id] = max(char_copy_times.get(char_id, 0), s["bpc_copy_time"])
+                        char_copy_times[char_id] = max(
+                            char_copy_times.get(char_id, 0), s["bpc_copy_time"]
+                        )
                 else:
-                    char_mfg_times[char_id] = max(char_mfg_times.get(char_id, 0), s["bpo_time"])
+                    char_mfg_times[char_id] = max(
+                        char_mfg_times.get(char_id, 0), s["bpo_time"]
+                    )
 
             phase_mfg_secs = max(char_mfg_times.values()) if char_mfg_times else 0
             phase_copy_secs = max(char_copy_times.values()) if char_copy_times else 0
-            phase_wall = max(phase_mfg_secs, phase_copy_secs + phase_mfg_secs) if phase_copy_secs > 0 else phase_mfg_secs
+            phase_wall = (
+                max(phase_mfg_secs, phase_copy_secs + phase_mfg_secs)
+                if phase_copy_secs > 0
+                else phase_mfg_secs
+            )
             # For copy+mfg pipeline: copy and mfg can overlap when different characters handle them
             # but conservatively, wall = max(copy) + max(mfg) for the bottleneck character
             if phase_copy_secs > 0:
@@ -1292,7 +1373,11 @@ def _compute_phase_timeline(bp_statuses, use_char_skills=False):
         else:
             for bp in bps:
                 s = bp["build_strategy"]
-                rec_time = s["bpc_time"] if s["recommended"] == "bpc" and s["bpc_time"] else s["bpo_time"]
+                rec_time = (
+                    s["bpc_time"]
+                    if s["recommended"] == "bpc" and s["bpc_time"]
+                    else s["bpo_time"]
+                )
                 phase_wall = max(phase_wall, rec_time)
                 total_slot_hours += s["bpo_time"] / 3600
 
@@ -1309,17 +1394,19 @@ def _compute_phase_timeline(bp_statuses, use_char_skills=False):
                 else:
                     phase_mfg_secs = max(phase_mfg_secs, s["bpo_time"])
 
-        phases.append({
-            "depth": depth,
-            "phase_num": phase_num,
-            "blueprints": bps,
-            "wall_seconds": phase_wall,
-            "wall_fmt": _format_duration(phase_wall),
-            "copy_seconds": phase_copy_secs,
-            "copy_fmt": _format_duration(phase_copy_secs),
-            "mfg_seconds": phase_mfg_secs,
-            "mfg_fmt": _format_duration(phase_mfg_secs),
-        })
+        phases.append(
+            {
+                "depth": depth,
+                "phase_num": phase_num,
+                "blueprints": bps,
+                "wall_seconds": phase_wall,
+                "wall_fmt": _format_duration(phase_wall),
+                "copy_seconds": phase_copy_secs,
+                "copy_fmt": _format_duration(phase_copy_secs),
+                "mfg_seconds": phase_mfg_secs,
+                "mfg_fmt": _format_duration(phase_mfg_secs),
+            }
+        )
         total_wall += phase_wall
         total_copy_only_wall += phase_copy_only
 
@@ -1373,7 +1460,9 @@ def _compute_invention_cost(
     effective_probability = base_prob * prob_mult * skill_modifier
     effective_probability = min(effective_probability, 1.0)
 
-    expected_attempts = 1.0 / effective_probability if effective_probability > 0 else float("inf")
+    expected_attempts = (
+        1.0 / effective_probability if effective_probability > 0 else float("inf")
+    )
 
     # Datacore cost per attempt
     datacore_cost_per_attempt = 0.0
@@ -1434,8 +1523,13 @@ def _build_decryptor_comparison(
     choices = [None] + decryptors
     for dec in choices:
         info = _compute_invention_cost(
-            t1_bp_id, t2_bp_id, base_runs, dec,
-            invention_materials, invention_probabilities, invention_times,
+            t1_bp_id,
+            t2_bp_id,
+            base_runs,
+            dec,
+            invention_materials,
+            invention_probabilities,
+            invention_times,
             prices,
         )
 
@@ -1448,23 +1542,29 @@ def _build_decryptor_comparison(
         total_invention_cost = total_attempts * info["total_cost_per_attempt"]
         cost_per_unit = total_invention_cost / runs_needed if runs_needed > 0 else 0
 
-        options.append({
-            "decryptor": dec,
-            "decryptor_name": dec["name"] if dec else "None",
-            "base_probability": info["base_probability"],
-            "probability": info["effective_probability"],
-            "me": info["t2_bpc_me"],
-            "te": info["t2_bpc_te"],
-            "runs_per_bpc": bpc_runs,
-            "bpcs_needed": bpcs_needed,
-            "expected_attempts": total_attempts,
-            "datacore_cost": bpcs_needed * info["expected_attempts"] * info["datacore_cost_per_attempt"],
-            "decryptor_cost": bpcs_needed * info["expected_attempts"] * info["decryptor_cost_per_attempt"],
-            "total_cost": total_invention_cost,
-            "cost_per_unit": cost_per_unit,
-            "invention_time": total_attempts * info["invention_time_per_attempt"],
-            "optimal": False,
-        })
+        options.append(
+            {
+                "decryptor": dec,
+                "decryptor_name": dec["name"] if dec else "None",
+                "base_probability": info["base_probability"],
+                "probability": info["effective_probability"],
+                "me": info["t2_bpc_me"],
+                "te": info["t2_bpc_te"],
+                "runs_per_bpc": bpc_runs,
+                "bpcs_needed": bpcs_needed,
+                "expected_attempts": total_attempts,
+                "datacore_cost": bpcs_needed
+                * info["expected_attempts"]
+                * info["datacore_cost_per_attempt"],
+                "decryptor_cost": bpcs_needed
+                * info["expected_attempts"]
+                * info["decryptor_cost_per_attempt"],
+                "total_cost": total_invention_cost,
+                "cost_per_unit": cost_per_unit,
+                "invention_time": total_attempts * info["invention_time_per_attempt"],
+                "optimal": False,
+            }
+        )
 
     options.sort(key=lambda o: o["cost_per_unit"])
     if options:

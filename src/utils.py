@@ -151,14 +151,16 @@ def resolve_location_names(location_ids, headers, character_id):
 
     cached = (
         db.session.execute(
-            select(CachedLocations).where(
-                CachedLocations.location_id.in_(location_ids)
-            )
+            select(CachedLocations).where(CachedLocations.location_id.in_(location_ids))
         )
         .scalars()
         .all()
     )
-    known = {row.location_id for row in cached if row.location_name and row.location_name != "Unknown Location"}
+    known = {
+        row.location_id
+        for row in cached
+        if row.location_name and row.location_name != "Unknown Location"
+    }
     missing = location_ids - known
 
     if not missing:
@@ -183,7 +185,12 @@ def resolve_location_names(location_ids, headers, character_id):
 
 def fetch_location_name(location_id, headers):
     """Resolve a single location ID to a name via ESI."""
-    from src.constants import ESI_BASE_URL, STATION_ID_RANGE, STRUCTURE_ID_MIN, SYSTEM_ID_RANGE
+    from src.constants import (
+        ESI_BASE_URL,
+        STATION_ID_RANGE,
+        STRUCTURE_ID_MIN,
+        SYSTEM_ID_RANGE,
+    )
 
     if STATION_ID_RANGE[0] <= location_id <= STATION_ID_RANGE[1]:
         url = f"{ESI_BASE_URL}/universe/stations/{location_id}/"

@@ -59,7 +59,9 @@ def refresh_token_task(character_id):
         logger.info("Refreshed token for character %s", character_id)
         return {"character_id": character_id, "refreshed": True}
     except Exception:
-        logger.warning("Token refresh failed for character %s", character_id, exc_info=True)
+        logger.warning(
+            "Token refresh failed for character %s", character_id, exc_info=True
+        )
         user.token_refresh_failed = True
         db.session.commit()
         return {"character_id": character_id, "refreshed": False}
@@ -123,9 +125,7 @@ def fetch_skills_task(self, character_id):
     now = datetime.now(timezone.utc)
 
     db.session.execute(
-        CachedSkill.__table__.delete().where(
-            CachedSkill.character_id == character_id
-        )
+        CachedSkill.__table__.delete().where(CachedSkill.character_id == character_id)
     )
     skill_rows = [
         CachedSkill(
@@ -211,9 +211,12 @@ def fetch_blueprints_task(self, character_id):
 
     # --- Dispatch skill fetch for this character + all linked characters ---
     from sqlalchemy import select as sa_select
+
     linked_ids = (
         db.session.execute(
-            sa_select(User.character_id).where(User.main_character_id == user.main_character_id)
+            sa_select(User.character_id).where(
+                User.main_character_id == user.main_character_id
+            )
         )
         .scalars()
         .all()
@@ -223,6 +226,12 @@ def fetch_blueprints_task(self, character_id):
         try:
             fetch_skills_task.delay(cid)
         except Exception:
-            logger.warning("Failed to dispatch skill fetch for character %s", cid, exc_info=True)
+            logger.warning(
+                "Failed to dispatch skill fetch for character %s", cid, exc_info=True
+            )
 
-    return {"character_id": character_id, "count": len(all_bps), "skills_dispatched": len(linked_ids)}
+    return {
+        "character_id": character_id,
+        "count": len(all_bps),
+        "skills_dispatched": len(linked_ids),
+    }

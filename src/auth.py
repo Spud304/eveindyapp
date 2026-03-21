@@ -145,7 +145,11 @@ class AuthBlueprint(Blueprint):
                 try:
                     fetch_skills_task.delay(existing_user.character_id)
                 except Exception:
-                    logger.warning("Failed to dispatch skill fetch for character %s", existing_user.character_id, exc_info=True)
+                    logger.warning(
+                        "Failed to dispatch skill fetch for character %s",
+                        existing_user.character_id,
+                        exc_info=True,
+                    )
                 session["user_id"] = current_user.character_id
                 return redirect(url_for("user.user"))
 
@@ -168,7 +172,11 @@ class AuthBlueprint(Blueprint):
             try:
                 fetch_skills_task.delay(new_user.character_id)
             except Exception:
-                logger.warning("Failed to dispatch skill fetch for character %s", new_user.character_id, exc_info=True)
+                logger.warning(
+                    "Failed to dispatch skill fetch for character %s",
+                    new_user.character_id,
+                    exc_info=True,
+                )
 
             session["user_id"] = current_user.character_id
             return redirect(url_for("user.user"))

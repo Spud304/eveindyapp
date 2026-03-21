@@ -15,9 +15,15 @@ TOON_INFO_MAX_AGE = timedelta(hours=1)
 
 def get_linked_character_ids(user):
     """Return list of all character_ids sharing the same main_character_id (including the user)."""
-    rows = db.session.execute(
-        select(User.character_id).where(User.main_character_id == user.main_character_id)
-    ).scalars().all()
+    rows = (
+        db.session.execute(
+            select(User.character_id).where(
+                User.main_character_id == user.main_character_id
+            )
+        )
+        .scalars()
+        .all()
+    )
     return rows
 
 
