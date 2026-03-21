@@ -308,6 +308,9 @@
     {% if bp.extra_bpos %}<input type="hidden" name="extra_bpos_{{ bp.type_id }}" value="{{ bp.extra_bpos }}">{% endif %}
     {% if bp.bought_bpcs %}<input type="hidden" name="bought_bpcs_{{ bp.type_id }}" value="{{ bp.bought_bpcs }}">{% endif %}
     {% endfor %}
+    {% if invention_info is defined and invention_info %}
+    <input type="hidden" name="decryptor_id" value="{{ invention_info.selected_decryptor_id }}">
+    {% endif %}
 </form>
 
 {# Build Summary #}
@@ -324,6 +327,9 @@
         <div class="nc-cost-breakdown">
             <span>Materials: {{ "{:,.2f}".format(total_material_cost) }} ISK</span>
             <span>Job Fees: {{ "{:,.2f}".format(total_job_cost) }} ISK</span>
+            {% if total_invention_cost is defined and total_invention_cost > 0 %}
+            <span>Invention: {{ "{:,.2f}".format(total_invention_cost) }} ISK</span>
+            {% endif %}
         </div>
     </div>
     <div style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim);">
@@ -347,6 +353,89 @@
     </div>
 </div>
 
+{% if invention_info is defined and invention_info %}
+<div class="nc-panel nc-animate nc-animate-d2">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Invention</div>
+    <div style="font-family: var(--nc-font-mono); font-size: 0.8rem; color: var(--nc-text); margin-bottom: 0.75rem;">
+        T1 Blueprint: <strong style="color: var(--nc-text-bright);">{{ invention_info.t1_bp_name }}</strong>
+        &middot; Base Probability: <strong style="color: var(--nc-text-bright);">{{ "%.1f"|format(invention_info.base_probability * 100) }}%</strong>
+    </div>
+    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+        <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim);">
+            <label style="color: var(--nc-text);">Decryptor:</label>
+            <select id="decryptorSelect" style="font-family: var(--nc-font-mono); font-size: 0.75rem; background: var(--nc-panel-light); color: var(--nc-text-bright); border: 1px solid var(--nc-border-bright); padding: 0.3em 0.5em;">
+                <option value="0" {{ 'selected' if invention_info.selected_decryptor is none }}>None</option>
+                {% for dec in invention_info.decryptors %}
+                <option value="{{ dec.type_id }}" {{ 'selected' if invention_info.selected_decryptor and invention_info.selected_decryptor.type_id == dec.type_id }}>{{ dec.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim);">
+            ME: <strong style="color: var(--nc-text-bright);">{{ invention_info.me }}</strong>
+            &middot; TE: <strong style="color: var(--nc-text-bright);">{{ invention_info.te }}</strong>
+            &middot; Runs/BPC: <strong style="color: var(--nc-text-bright);">{{ invention_info.runs_per_bpc }}</strong>
+        </div>
+        <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim);">
+            BPCs Needed: <strong style="color: var(--nc-gold);">{{ invention_info.bpcs_needed }}</strong>
+            &middot; Expected Attempts: <strong style="color: var(--nc-text-bright);">{{ "%.1f"|format(invention_info.expected_attempts) }}</strong>
+            &middot; Time: <strong style="color: var(--nc-text-bright);">{{ invention_info.invention_time_fmt }}</strong>
+        </div>
+    </div>
+    <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim); margin-bottom: 0.5rem;">
+        Datacores per attempt:
+        {% for dc in invention_info.datacores %}
+        {{ dc.quantity }}&times; {{ dc.name }} ({{ "{:,.2f}".format(dc.unit_price) }} ISK){{ "," if not loop.last else "" }}
+        {% endfor %}
+    </div>
+</div>
+
+{% if decryptor_comparison is defined and decryptor_comparison %}
+<div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d2">
+    <div class="nc-panel-title"><span class="nc-icon"></span>Decryptor Comparison<span class="nc-chevron">&#9662;</span></div>
+    <div class="nc-panel-body">
+    <table class="nc-table">
+        <thead>
+            <tr>
+                <th>Decryptor</th>
+                <th class="nc-qty-header">Prob</th>
+                <th class="nc-qty-header">ME</th>
+                <th class="nc-qty-header">TE</th>
+                <th class="nc-qty-header">Runs/BPC</th>
+                <th class="nc-qty-header">BPCs</th>
+                <th class="nc-qty-header">Attempts</th>
+                <th class="nc-qty-header">Datacore Cost</th>
+                <th class="nc-qty-header">Decryptor Cost</th>
+                <th class="nc-qty-header">Total Cost</th>
+                <th class="nc-qty-header">Cost/Unit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for opt in decryptor_comparison %}
+            <tr style="{% if opt.selected|default(false) %}background: rgba(0, 200, 255, 0.08); border-left: 2px solid var(--nc-teal);{% elif opt.optimal %}background: rgba(255, 200, 0, 0.04);{% endif %}">
+                <td>
+                    {{ opt.decryptor_name }}
+                    {% if opt.optimal %}<span style="color: var(--nc-teal); font-size: 0.65rem;"> OPTIMAL</span>{% endif %}
+                    {% if opt.selected|default(false) %}<span style="color: var(--nc-gold); font-size: 0.65rem;"> SELECTED</span>{% endif %}
+                </td>
+                <td class="nc-qty">{{ "%.1f"|format(opt.probability * 100) }}%</td>
+                <td class="nc-qty">{{ opt.me }}</td>
+                <td class="nc-qty">{{ opt.te }}</td>
+                <td class="nc-qty">{{ opt.runs_per_bpc }}</td>
+                <td class="nc-qty">{{ opt.bpcs_needed }}</td>
+                <td class="nc-qty">{{ "%.1f"|format(opt.expected_attempts) }}</td>
+                <td class="nc-qty">{{ "{:,.2f}".format(opt.datacore_cost) }}</td>
+                <td class="nc-qty">{{ "{:,.2f}".format(opt.decryptor_cost) }}</td>
+                <td class="nc-qty">{{ "{:,.2f}".format(opt.total_cost) }}</td>
+                <td class="nc-qty">{{ "{:,.2f}".format(opt.cost_per_unit) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+{% endif %}
+
 {% if unassignable_warnings is defined and unassignable_warnings %}
 <div class="nc-panel nc-missing-panel nc-animate nc-animate-d2">
     <div class="nc-panel-title"><span class="nc-icon"></span>Unassignable Jobs</div>
@@ -363,7 +452,7 @@
 <div class="nc-panel nc-animate nc-animate-d2">
     <div class="nc-panel-title"><span class="nc-icon"></span>Build Time Estimate</div>
     <div class="nc-time-summary">
-        Wall-clock time: <strong>{{ phase_timeline.total_wall_fmt }}</strong>
+        Wall-clock time: <strong>{{ phase_timeline.total_wall_fmt }}</strong>{% if invention_info is defined and invention_info %} (+ {{ invention_info.invention_time_fmt }} invention){% endif %}
         ({{ phase_timeline.phases|length }} phase{{ "s" if phase_timeline.phases|length != 1 else "" }},
          {{ build_slots }} build slot{{ "s" if build_slots != 1 else "" }}{% if use_character_skills|default(false) %} across {{ characters|length }} character{{ "s" if characters|length != 1 else "" }}{% endif %})
         {% if phase_timeline.timeframe_seconds %}
@@ -468,6 +557,7 @@
     {% if bp.bought_bpcs %}<input type="hidden" name="bought_bpcs_{{ bp.type_id }}" value="{{ bp.bought_bpcs }}">{% endif %}
     {% endfor %}
     {% if suggest_mode|default('none') != 'none' %}<input type="hidden" name="suggest_mode" value="{{ suggest_mode }}">{% endif %}
+    {% if invention_info is defined and invention_info %}<input type="hidden" name="decryptor_id" value="{{ invention_info.selected_decryptor_id }}">{% endif %}
     <div class="nc-panel nc-collapsible nc-collapsed nc-animate nc-animate-d3">
         <div class="nc-panel-title"><span class="nc-icon"></span>ME Overrides<span class="nc-chevron">&#9662;</span></div>
         <div class="nc-panel-body">
@@ -668,6 +758,7 @@
     <input type="hidden" name="product_type_id" value="{{ product.type_id }}">
     <input type="hidden" name="quantity" value="{{ desired_qty }}">
     {% if timeframe_hours %}<input type="hidden" name="timeframe_hours" value="{{ timeframe_hours }}">{% endif %}
+    {% if invention_info is defined and invention_info %}<input type="hidden" name="decryptor_id" value="{{ invention_info.selected_decryptor_id }}">{% endif %}
     {% for bp in bp_statuses %}
     <input type="hidden" name="me_{{ bp.type_id }}" value="{{ bp.me }}">
     {% endfor %}
@@ -940,6 +1031,26 @@ document.querySelectorAll('.nc-collapsible .nc-panel-title').forEach(function(ti
         title.closest('.nc-collapsible').classList.toggle('nc-collapsed');
     });
 });
+
+// Decryptor dropdown auto-submit
+var decSelect = document.getElementById('decryptorSelect');
+if (decSelect) {
+    decSelect.addEventListener('change', function() {
+        var form = document.getElementById('calcForm');
+        // Update or create hidden decryptor_id field
+        var existing = form.querySelector('input[name="decryptor_id"]');
+        if (existing) {
+            existing.value = decSelect.value;
+        } else {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'decryptor_id';
+            input.value = decSelect.value;
+            form.appendChild(input);
+        }
+        form.submit();
+    });
+}
 </script>
 
 {% endblock %}

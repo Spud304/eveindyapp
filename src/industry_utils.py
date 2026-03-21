@@ -29,6 +29,10 @@ from src.industry_constants import (
     ATTR_HIGHSEC_MODIFIER,
     ATTR_LOWSEC_MODIFIER,
     ATTR_NULLSEC_MODIFIER,
+    ATTR_INVENTION_PROB_MULT,
+    ATTR_INVENTION_ME_MOD,
+    ATTR_INVENTION_TE_MOD,
+    ATTR_INVENTION_RUN_MOD,
     SKILL_INDUSTRY,
     SKILL_ADV_INDUSTRY,
     SKILL_MASS_PRODUCTION,
@@ -408,6 +412,140 @@ def get_character_names(character_ids):
         .where(User.character_id.in_(character_ids))
     ).all()
     return {r.character_id: r.character_name for r in rows}
+
+
+def load_sde_invention_data():
+    """Load invention activity materials, products, and probabilities into dicts. Cached after first call.
+
+    Returns:
+        invention_materials: {t1_bp_id: [(materialTypeID, quantity), ...]} -- datacores per attempt
+        invention_products: {t2_bp_id: (t1_bp_id, base_runs)} -- reverse lookup
+        invention_probabilities: {(t1_bp_id, t2_bp_id): base_probability}
+    """
+    key = "invention_data"
+    if key in _sde_cache:
+        return _sde_cache[key]
+
+    # Materials for invention (activityID=8)
+    invention_materials = {}
+    for row in db.session.execute(
+        select(IndustryActivityMaterials).where(
+            IndustryActivityMaterials.activityID == 8
+        )
+    ).scalars():
+        invention_materials.setdefault(row.typeID, []).append(
+            (row.materialTypeID, row.quantity)
+        )
+
+    # Products: T1 BP -> T2 BP mapping (activityID=8)
+    invention_products = {}
+    for row in db.session.execute(
+        select(IndustryActivityProducts).where(IndustryActivityProducts.activityID == 8)
+    ).scalars():
+        invention_products[row.productTypeID] = (row.typeID, row.quantity)
+
+    # Probabilities from industryActivityProbabilities (no ORM model, use raw SQL)
+    engine = db.engines["static"]
+    prob_sql = text(
+        "SELECT typeID, productTypeID, probability FROM industryActivityProbabilities WHERE activityID = 8"
+    )
+    invention_probabilities = {}
+    with engine.connect() as conn:
+        for type_id, product_type_id, probability in conn.execute(prob_sql).all():
+            invention_probabilities[(type_id, product_type_id)] = probability
+
+    result = (invention_materials, invention_products, invention_probabilities)
+    with _sde_cache_lock:
+        _sde_cache[key] = result
+    return result
+
+
+def load_decryptor_data():
+    """Load decryptor types with their dogma attributes. Cached after first call.
+
+    Returns list of dicts: [{type_id, name, prob_mult, me_mod, te_mod, run_mod}, ...]
+    """
+    key = "decryptor_data"
+    if key in _sde_cache:
+        return _sde_cache[key]
+
+    # Find published decryptor types (groupID 1304 = Decryptors)
+    decryptor_rows = db.session.execute(
+        select(InvTypes.typeID, InvTypes.typeName)
+        .where(InvTypes.groupID == 1304)
+        .where(InvTypes.published)
+    ).all()
+
+    if not decryptor_rows:
+        with _sde_cache_lock:
+            _sde_cache[key] = []
+        return []
+
+    type_ids = {r.typeID for r in decryptor_rows}
+    type_names = {r.typeID: r.typeName for r in decryptor_rows}
+
+    # Fetch dogma attributes
+    type_list = ",".join(str(t) for t in type_ids)
+    attr_ids = f"{ATTR_INVENTION_PROB_MULT},{ATTR_INVENTION_ME_MOD},{ATTR_INVENTION_TE_MOD},{ATTR_INVENTION_RUN_MOD}"
+    attrs_sql = text(f"""
+        SELECT typeID, attributeID, COALESCE(valueFloat, valueInt) as value
+        FROM dgmTypeAttributes
+        WHERE typeID IN ({type_list}) AND attributeID IN ({attr_ids})
+    """)
+    engine = db.engines["static"]
+    with engine.connect() as conn:
+        attr_rows = conn.execute(attrs_sql).all()
+
+    type_attrs = {}
+    for type_id, attr_id, value in attr_rows:
+        type_attrs.setdefault(type_id, {})[attr_id] = value
+
+    decryptors = []
+    for type_id in type_ids:
+        attrs = type_attrs.get(type_id, {})
+        decryptors.append({
+            "type_id": type_id,
+            "name": type_names[type_id],
+            "prob_mult": attrs.get(ATTR_INVENTION_PROB_MULT, 1.0),
+            "me_mod": int(attrs.get(ATTR_INVENTION_ME_MOD, 0)),
+            "te_mod": int(attrs.get(ATTR_INVENTION_TE_MOD, 0)),
+            "run_mod": int(attrs.get(ATTR_INVENTION_RUN_MOD, 0)),
+        })
+
+    decryptors.sort(key=lambda d: d["name"])
+    with _sde_cache_lock:
+        _sde_cache[key] = decryptors
+    return decryptors
+
+
+def load_invention_times():
+    """Load invention times from SDE industryActivity table.
+
+    Returns {t1_bp_id: invention_seconds}.
+    """
+    engine = db.engines["static"]
+    sql = text("SELECT typeID, time FROM industryActivity WHERE activityID = 8")
+    with engine.connect() as conn:
+        rows = conn.execute(sql).all()
+    return {type_id: time_val for type_id, time_val in rows}
+
+
+def load_invention_skill_requirements():
+    """Load skill requirements for invention (activityID=8) from SDE.
+
+    Returns {t1_bp_id: [(skill_id, level), ...]}.
+    """
+    engine = db.engines["static"]
+    sql = text(
+        "SELECT typeID, skillID, level FROM industryActivitySkills WHERE activityID = 8"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql).all()
+
+    skill_reqs = {}
+    for type_id, skill_id, level in rows:
+        skill_reqs.setdefault(type_id, []).append((skill_id, level))
+    return skill_reqs
 
 
 def assign_jobs_to_characters(phase_bps, characters, skill_reqs, job_type="mfg"):

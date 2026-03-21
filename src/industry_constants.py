@@ -97,3 +97,13 @@ ATTR_TE_BONUS = 2593  # Time Reduction Bonus (e.g. -24.0)
 ATTR_HIGHSEC_MODIFIER = 2355  # highSecModifier
 ATTR_LOWSEC_MODIFIER = 2356  # lowSecModifier
 ATTR_NULLSEC_MODIFIER = 2357  # nullSecModifier / WH modifier
+
+# Invention decryptor dogma attribute IDs
+ATTR_INVENTION_PROB_MULT = 1112
+ATTR_INVENTION_ME_MOD = 1113
+ATTR_INVENTION_TE_MOD = 1114
+ATTR_INVENTION_RUN_MOD = 1124
+
+# Base T2 BPC stats (before decryptor modifiers)
+T2_BASE_ME = -2
+T2_BASE_TE = -4

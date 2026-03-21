@@ -45,6 +45,10 @@ from src.industry_utils import (
     compute_character_capabilities,
     get_character_names,
     assign_jobs_to_characters,
+    load_sde_invention_data,
+    load_decryptor_data,
+    load_invention_times,
+    load_invention_skill_requirements,
 )
 
 
@@ -716,7 +720,141 @@ class IndustryBlueprint(Blueprint):
             )
 
         total_job_cost = sum(bp["job_cost"] for bp in bp_statuses)
-        grand_total = total_material_cost + total_job_cost
+
+        # --- Invention support (T2 items only) ---
+        invention_info = None
+        decryptor_comparison = None
+        total_invention_cost = 0.0
+
+        invention_materials, invention_products, invention_probabilities = (
+            load_sde_invention_data()
+        )
+
+        # Check if top-level product is T2 (its manufacturing BP appears as invention output)
+        is_t2 = top_bp_id in invention_products
+        if is_t2:
+            t1_bp_id, base_runs = invention_products[top_bp_id]
+            decryptors = load_decryptor_data()
+            invention_times = load_invention_times()
+
+            # Get datacore prices
+            datacore_ids = {mat_id for mat_id, _ in invention_materials.get(t1_bp_id, [])}
+            decryptor_ids = {d["type_id"] for d in decryptors}
+            invention_price_ids = datacore_ids | decryptor_ids
+            inv_prices, _ = batch_market_info(invention_price_ids)
+
+            # Resolve T1 blueprint name
+            t1_bp_name = batch_type_names({t1_bp_id}).get(t1_bp_id, f"Unknown ({t1_bp_id})")
+
+            # Parse decryptor_id from query params
+            selected_decryptor_id = request.args.get("decryptor_id", None, type=int)
+
+            # Build comparison table
+            decryptor_comparison = _build_decryptor_comparison(
+                t1_bp_id, top_bp_id, base_runs, top_runs,
+                invention_materials, invention_probabilities, invention_times,
+                decryptors, inv_prices,
+            )
+
+            # Select decryptor: user choice or auto-select optimal
+            selected_option = None
+            if selected_decryptor_id is not None:
+                for opt in decryptor_comparison:
+                    dec = opt["decryptor"]
+                    if selected_decryptor_id == 0 and dec is None:
+                        selected_option = opt
+                        break
+                    elif dec and dec["type_id"] == selected_decryptor_id:
+                        selected_option = opt
+                        break
+            if selected_option is None:
+                # Auto-select optimal (first in sorted list)
+                selected_option = decryptor_comparison[0] if decryptor_comparison else None
+
+            if selected_option:
+                # Mark selected in comparison
+                for opt in decryptor_comparison:
+                    opt["selected"] = (opt is selected_option)
+
+                total_invention_cost = selected_option["total_cost"]
+
+                # Resolve datacore names for display
+                datacores_display = []
+                datacore_names = batch_type_names(datacore_ids)
+                for mat_id, qty in invention_materials.get(t1_bp_id, []):
+                    datacores_display.append({
+                        "name": datacore_names.get(mat_id, f"Unknown ({mat_id})"),
+                        "type_id": mat_id,
+                        "quantity": qty,
+                        "unit_price": inv_prices.get(mat_id, 0.0),
+                    })
+
+                invention_info = {
+                    "t1_bp_id": t1_bp_id,
+                    "t1_bp_name": t1_bp_name,
+                    "base_probability": selected_option["probability"],
+                    "selected_decryptor": selected_option["decryptor"],
+                    "selected_decryptor_id": selected_decryptor_id if selected_decryptor_id is not None else (0 if selected_option["decryptor"] is None else selected_option["decryptor"]["type_id"]),
+                    "me": selected_option["me"],
+                    "te": selected_option["te"],
+                    "runs_per_bpc": selected_option["runs_per_bpc"],
+                    "bpcs_needed": selected_option["bpcs_needed"],
+                    "expected_attempts": selected_option["expected_attempts"],
+                    "total_cost": total_invention_cost,
+                    "invention_time": selected_option["invention_time"],
+                    "invention_time_fmt": _format_duration(selected_option["invention_time"]),
+                    "datacores": datacores_display,
+                    "decryptors": decryptors,
+                }
+
+                # Default invented ME for the top blueprint (user can still override)
+                invented_me = max(0, selected_option["me"])
+                override = request.args.get(f"me_{top_bp_id}", None, type=int)
+                if override is None:
+                    me_levels[top_bp_id] = invented_me
+                    # Recompute runs_needed and raw_materials with new ME
+                    runs_needed = _compute_runs_needed(
+                        top_bp_id, me_levels, top_runs,
+                        materials_by_bp, products_by_product, blacklist, structure_me_by_bp,
+                    )
+                    raw_materials = _resolve_material_tree(
+                        top_bp_id, {}, me_levels, materials_by_bp, products_by_product,
+                        blacklist, structure_me_by_bp,
+                    )
+                    if top_runs > 1:
+                        raw_materials = {tid: qty * top_runs for tid, qty in raw_materials.items()}
+
+                    # Recompute material costs
+                    all_material_ids = set(raw_materials.keys())
+                    all_price_ids_new = all_material_ids | eiv_material_ids
+                    prices_new, _ = batch_market_info(all_price_ids_new)
+                    prices.update(prices_new)
+
+                    materials = sorted(
+                        [
+                            {"name": type_names.get(tid, f"Unknown ({tid})"), "quantity": qty}
+                            for tid, qty in raw_materials.items()
+                        ],
+                        key=lambda m: m["name"],
+                    )
+                    name_to_type_id = {name: tid for tid, name in type_names.items()}
+                    for m in materials:
+                        type_id_m = name_to_type_id.get(m["name"])
+                        price = prices.get(type_id_m) if type_id_m else None
+                        m["unit_price"] = price
+                        m["total_price"] = price * m["quantity"] if price else None
+                    total_material_cost = sum(
+                        (m["total_price"] for m in materials if m["total_price"] is not None), 0.0
+                    )
+
+                    # Update bp_statuses ME for top bp
+                    for bp in bp_statuses:
+                        if bp["type_id"] == top_bp_id:
+                            bp["me"] = invented_me
+                            bp["runs_needed"] = runs_needed.get(top_bp_id, top_runs)
+                            break
+
+        grand_total = total_material_cost + total_job_cost + total_invention_cost
 
         # Summary counts
         owned_bpo_count = sum(1 for b in bp_statuses if b["status"] == "owned_bpo")
@@ -837,6 +975,7 @@ class IndustryBlueprint(Blueprint):
             has_blueprints=has_blueprints,
             total_material_cost=total_material_cost,
             total_job_cost=total_job_cost,
+            total_invention_cost=total_invention_cost,
             grand_total=grand_total,
             stations=stations,
             build_slots=build_slots,
@@ -847,6 +986,9 @@ class IndustryBlueprint(Blueprint):
             use_character_skills=use_char_skills,
             characters=characters,
             unassignable_warnings=unassignable_warnings,
+            invention_info=invention_info,
+            decryptor_comparison=decryptor_comparison,
+            is_t2=is_t2,
         )
 
     def get_jobs(self):
@@ -1179,6 +1321,161 @@ def _compute_phase_timeline(bp_statuses, use_char_skills=False):
         "copy_only_fmt": _format_duration(total_copy_only_wall),
         "total_slot_hours": total_slot_hours,
     }
+
+
+# --- Invention helpers ---
+
+
+def _is_t2_item(top_bp_id, invention_products):
+    """Check if a product's manufacturing blueprint is an output of invention."""
+    return top_bp_id in invention_products
+
+
+def _compute_invention_cost(
+    t1_bp_id,
+    t2_bp_id,
+    base_runs,
+    decryptor,
+    invention_materials,
+    invention_probabilities,
+    invention_times,
+    prices,
+    skill_levels=None,
+):
+    """Compute invention cost and BPC stats for a given decryptor choice.
+
+    Args:
+        decryptor: dict with prob_mult, me_mod, te_mod, run_mod, type_id, name (or None for no decryptor)
+        skill_levels: dict {skill_id: level} for the character (optional)
+
+    Returns dict with probability, attempts, costs, BPC stats, and times.
+    """
+    from src.industry_constants import T2_BASE_ME, T2_BASE_TE
+
+    base_prob = invention_probabilities.get((t1_bp_id, t2_bp_id), 0.0)
+
+    # Decryptor modifiers
+    prob_mult = decryptor["prob_mult"] if decryptor else 1.0
+    me_mod = decryptor["me_mod"] if decryptor else 0
+    te_mod = decryptor["te_mod"] if decryptor else 0
+    run_mod = decryptor["run_mod"] if decryptor else 0
+
+    # Skill modifier: base_prob * (1 + encryption/40) * (1 + (sci1 + sci2) / 30)
+    # For now, assume level 5 skills if not provided (conservative estimate)
+    skill_modifier = 1.0
+    if skill_levels:
+        # Invention skills from industryActivitySkills: typically 1 encryption + 2 science skills
+        # We'd need to know which specific skills apply; for simplicity use a flat modifier
+        # based on passed-in skill levels for the specific blueprint
+        encryption_level = skill_levels.get("encryption", 5)
+        science1_level = skill_levels.get("science1", 5)
+        science2_level = skill_levels.get("science2", 5)
+        skill_modifier = (1 + encryption_level / 40) * (1 + (science1_level + science2_level) / 30)
+    else:
+        # Default: assume all level 5
+        skill_modifier = (1 + 5 / 40) * (1 + (5 + 5) / 30)
+
+    effective_probability = base_prob * prob_mult * skill_modifier
+    effective_probability = min(effective_probability, 1.0)
+
+    expected_attempts = 1.0 / effective_probability if effective_probability > 0 else float("inf")
+
+    # Datacore cost per attempt
+    datacore_cost_per_attempt = 0.0
+    datacores = invention_materials.get(t1_bp_id, [])
+    for mat_id, qty in datacores:
+        datacore_cost_per_attempt += prices.get(mat_id, 0.0) * qty
+
+    # Decryptor cost per attempt
+    decryptor_cost_per_attempt = 0.0
+    if decryptor:
+        decryptor_cost_per_attempt = prices.get(decryptor["type_id"], 0.0)
+
+    total_cost_per_attempt = datacore_cost_per_attempt + decryptor_cost_per_attempt
+
+    # T2 BPC stats
+    t2_bpc_me = T2_BASE_ME + me_mod
+    t2_bpc_te = T2_BASE_TE + te_mod
+    t2_bpc_runs = base_runs + run_mod
+
+    # Invention time
+    invention_time_per_attempt = invention_times.get(t1_bp_id, 0)
+    expected_invention_time = invention_time_per_attempt * expected_attempts
+
+    return {
+        "base_probability": base_prob,
+        "effective_probability": effective_probability,
+        "expected_attempts": expected_attempts,
+        "datacore_cost_per_attempt": datacore_cost_per_attempt,
+        "decryptor_cost_per_attempt": decryptor_cost_per_attempt,
+        "total_cost_per_attempt": total_cost_per_attempt,
+        "t2_bpc_me": t2_bpc_me,
+        "t2_bpc_te": t2_bpc_te,
+        "t2_bpc_runs": t2_bpc_runs,
+        "invention_time_per_attempt": invention_time_per_attempt,
+        "expected_invention_time": expected_invention_time,
+        "decryptor": decryptor,
+    }
+
+
+def _build_decryptor_comparison(
+    t1_bp_id,
+    t2_bp_id,
+    base_runs,
+    runs_needed,
+    invention_materials,
+    invention_probabilities,
+    invention_times,
+    decryptors,
+    prices,
+    skill_levels=None,
+):
+    """Build comparison table for no-decryptor + each decryptor option.
+
+    Returns list of dicts sorted by cost_per_unit, with 'optimal' flag on best.
+    """
+    options = []
+
+    # "No decryptor" option
+    choices = [None] + decryptors
+    for dec in choices:
+        info = _compute_invention_cost(
+            t1_bp_id, t2_bp_id, base_runs, dec,
+            invention_materials, invention_probabilities, invention_times,
+            prices, skill_levels,
+        )
+
+        bpc_runs = info["t2_bpc_runs"]
+        if bpc_runs <= 0:
+            continue
+
+        bpcs_needed = math.ceil(runs_needed / bpc_runs) if runs_needed > 0 else 0
+        total_attempts = bpcs_needed * info["expected_attempts"]
+        total_invention_cost = total_attempts * info["total_cost_per_attempt"]
+        cost_per_unit = total_invention_cost / runs_needed if runs_needed > 0 else 0
+
+        options.append({
+            "decryptor": dec,
+            "decryptor_name": dec["name"] if dec else "None",
+            "probability": info["effective_probability"],
+            "me": info["t2_bpc_me"],
+            "te": info["t2_bpc_te"],
+            "runs_per_bpc": bpc_runs,
+            "bpcs_needed": bpcs_needed,
+            "expected_attempts": total_attempts,
+            "datacore_cost": bpcs_needed * info["expected_attempts"] * info["datacore_cost_per_attempt"],
+            "decryptor_cost": bpcs_needed * info["expected_attempts"] * info["decryptor_cost_per_attempt"],
+            "total_cost": total_invention_cost,
+            "cost_per_unit": cost_per_unit,
+            "invention_time": total_attempts * info["invention_time_per_attempt"],
+            "optimal": False,
+        })
+
+    options.sort(key=lambda o: o["cost_per_unit"])
+    if options:
+        options[0]["optimal"] = True
+
+    return options
 
 
 # --- DFS helpers (pure dict lookups, no DB calls) ---
