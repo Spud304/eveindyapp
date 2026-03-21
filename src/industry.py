@@ -48,7 +48,6 @@ from src.industry_utils import (
     load_sde_invention_data,
     load_decryptor_data,
     load_invention_times,
-    load_invention_skill_requirements,
 )
 
 
@@ -522,11 +521,12 @@ class IndustryBlueprint(Blueprint):
                 entry["bpcs"].append(bp)
 
         # Auto-populate ME from best BPO, allow query param overrides
+        # T2 invented BPCs can have negative ME, so allow -10 to 10 range
         me_levels = {}
         for bp_id in tree_bp_ids:
             override = request.args.get(f"me_{bp_id}", None, type=int)
             if override is not None:
-                me_levels[bp_id] = max(0, min(10, override))
+                me_levels[bp_id] = max(-10, min(10, override))
             else:
                 own = ownership.get(bp_id, {"bpos": []})
                 if own["bpos"]:
@@ -674,6 +674,22 @@ class IndustryBlueprint(Blueprint):
             for mat_id, _ in materials_by_bp.get(bp_id, []):
                 eiv_material_ids.add(mat_id)
         all_price_ids = all_material_ids | eiv_material_ids
+
+        # Pre-load invention data to fold invention price IDs into the same batch
+        invention_materials, invention_products, invention_probabilities = (
+            load_sde_invention_data()
+        )
+        is_t2 = top_bp_id in invention_products
+        invention_price_ids = set()
+        if is_t2:
+            t1_bp_id_pre, _ = invention_products[top_bp_id]
+            decryptors_pre = load_decryptor_data()
+            for mat_id, _ in invention_materials.get(t1_bp_id_pre, []):
+                invention_price_ids.add(mat_id)
+            for d in decryptors_pre:
+                invention_price_ids.add(d["type_id"])
+
+        all_price_ids = all_price_ids | invention_price_ids
         prices, adjusted_prices = batch_market_info(all_price_ids)
 
         name_to_type_id = {name: tid for tid, name in type_names.items()}
@@ -722,26 +738,18 @@ class IndustryBlueprint(Blueprint):
         total_job_cost = sum(bp["job_cost"] for bp in bp_statuses)
 
         # --- Invention support (T2 items only) ---
+        # invention data + is_t2 already computed above (before batch_market_info)
         invention_info = None
         decryptor_comparison = None
         total_invention_cost = 0.0
 
-        invention_materials, invention_products, invention_probabilities = (
-            load_sde_invention_data()
-        )
-
-        # Check if top-level product is T2 (its manufacturing BP appears as invention output)
-        is_t2 = top_bp_id in invention_products
         if is_t2:
             t1_bp_id, base_runs = invention_products[top_bp_id]
             decryptors = load_decryptor_data()
             invention_times = load_invention_times()
 
-            # Get datacore prices
+            # Use prices from the combined batch (already includes invention IDs)
             datacore_ids = {mat_id for mat_id, _ in invention_materials.get(t1_bp_id, [])}
-            decryptor_ids = {d["type_id"] for d in decryptors}
-            invention_price_ids = datacore_ids | decryptor_ids
-            inv_prices, _ = batch_market_info(invention_price_ids)
 
             # Resolve T1 blueprint name
             t1_bp_name = batch_type_names({t1_bp_id}).get(t1_bp_id, f"Unknown ({t1_bp_id})")
@@ -753,7 +761,7 @@ class IndustryBlueprint(Blueprint):
             decryptor_comparison = _build_decryptor_comparison(
                 t1_bp_id, top_bp_id, base_runs, top_runs,
                 invention_materials, invention_probabilities, invention_times,
-                decryptors, inv_prices,
+                decryptors, prices,
             )
 
             # Select decryptor: user choice or auto-select optimal
@@ -786,13 +794,14 @@ class IndustryBlueprint(Blueprint):
                         "name": datacore_names.get(mat_id, f"Unknown ({mat_id})"),
                         "type_id": mat_id,
                         "quantity": qty,
-                        "unit_price": inv_prices.get(mat_id, 0.0),
+                        "unit_price": prices.get(mat_id, 0.0),
                     })
 
                 invention_info = {
                     "t1_bp_id": t1_bp_id,
                     "t1_bp_name": t1_bp_name,
-                    "base_probability": selected_option["probability"],
+                    "base_probability": selected_option["base_probability"],
+                    "effective_probability": selected_option["probability"],
                     "selected_decryptor": selected_option["decryptor"],
                     "selected_decryptor_id": selected_decryptor_id if selected_decryptor_id is not None else (0 if selected_option["decryptor"] is None else selected_option["decryptor"]["type_id"]),
                     "me": selected_option["me"],
@@ -808,7 +817,8 @@ class IndustryBlueprint(Blueprint):
                 }
 
                 # Default invented ME for the top blueprint (user can still override)
-                invented_me = max(0, selected_option["me"])
+                # T2 invented BPCs can have negative ME (e.g. -2 with no decryptor)
+                invented_me = selected_option["me"]
                 override = request.args.get(f"me_{top_bp_id}", None, type=int)
                 if override is None:
                     me_levels[top_bp_id] = invented_me
@@ -1326,11 +1336,6 @@ def _compute_phase_timeline(bp_statuses, use_char_skills=False):
 # --- Invention helpers ---
 
 
-def _is_t2_item(top_bp_id, invention_products):
-    """Check if a product's manufacturing blueprint is an output of invention."""
-    return top_bp_id in invention_products
-
-
 def _compute_invention_cost(
     t1_bp_id,
     t2_bp_id,
@@ -1340,15 +1345,13 @@ def _compute_invention_cost(
     invention_probabilities,
     invention_times,
     prices,
-    skill_levels=None,
 ):
     """Compute invention cost and BPC stats for a given decryptor choice.
 
     Args:
         decryptor: dict with prob_mult, me_mod, te_mod, run_mod, type_id, name (or None for no decryptor)
-        skill_levels: dict {skill_id: level} for the character (optional)
 
-    Returns dict with probability, attempts, costs, BPC stats, and times.
+    Returns dict with base_probability, effective_probability, attempts, costs, BPC stats, and times.
     """
     from src.industry_constants import T2_BASE_ME, T2_BASE_TE
 
@@ -1360,20 +1363,12 @@ def _compute_invention_cost(
     te_mod = decryptor["te_mod"] if decryptor else 0
     run_mod = decryptor["run_mod"] if decryptor else 0
 
-    # Skill modifier: base_prob * (1 + encryption/40) * (1 + (sci1 + sci2) / 30)
-    # For now, assume level 5 skills if not provided (conservative estimate)
+    # Skill modifier would normally be:
+    #   base_prob * (1 + encryption/40) * (1 + (sci1 + sci2) / 30)
+    # We don't currently derive the relevant invention skills from the character's
+    # actual skills and industryActivitySkills. To avoid an optimistic assumption,
+    # we apply no skill bonus here. The UI labels this as excluding skill bonuses.
     skill_modifier = 1.0
-    if skill_levels:
-        # Invention skills from industryActivitySkills: typically 1 encryption + 2 science skills
-        # We'd need to know which specific skills apply; for simplicity use a flat modifier
-        # based on passed-in skill levels for the specific blueprint
-        encryption_level = skill_levels.get("encryption", 5)
-        science1_level = skill_levels.get("science1", 5)
-        science2_level = skill_levels.get("science2", 5)
-        skill_modifier = (1 + encryption_level / 40) * (1 + (science1_level + science2_level) / 30)
-    else:
-        # Default: assume all level 5
-        skill_modifier = (1 + 5 / 40) * (1 + (5 + 5) / 30)
 
     effective_probability = base_prob * prob_mult * skill_modifier
     effective_probability = min(effective_probability, 1.0)
@@ -1428,7 +1423,6 @@ def _build_decryptor_comparison(
     invention_times,
     decryptors,
     prices,
-    skill_levels=None,
 ):
     """Build comparison table for no-decryptor + each decryptor option.
 
@@ -1442,7 +1436,7 @@ def _build_decryptor_comparison(
         info = _compute_invention_cost(
             t1_bp_id, t2_bp_id, base_runs, dec,
             invention_materials, invention_probabilities, invention_times,
-            prices, skill_levels,
+            prices,
         )
 
         bpc_runs = info["t2_bpc_runs"]
@@ -1457,6 +1451,7 @@ def _build_decryptor_comparison(
         options.append({
             "decryptor": dec,
             "decryptor_name": dec["name"] if dec else "None",
+            "base_probability": info["base_probability"],
             "probability": info["effective_probability"],
             "me": info["t2_bpc_me"],
             "te": info["t2_bpc_te"],

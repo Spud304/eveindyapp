@@ -519,33 +519,23 @@ def load_decryptor_data():
 
 
 def load_invention_times():
-    """Load invention times from SDE industryActivity table.
+    """Load invention times from SDE industryActivity table. Cached after first call.
 
     Returns {t1_bp_id: invention_seconds}.
     """
+    key = "invention_times"
+    if key in _sde_cache:
+        return _sde_cache[key]
+
     engine = db.engines["static"]
     sql = text("SELECT typeID, time FROM industryActivity WHERE activityID = 8")
     with engine.connect() as conn:
         rows = conn.execute(sql).all()
-    return {type_id: time_val for type_id, time_val in rows}
 
-
-def load_invention_skill_requirements():
-    """Load skill requirements for invention (activityID=8) from SDE.
-
-    Returns {t1_bp_id: [(skill_id, level), ...]}.
-    """
-    engine = db.engines["static"]
-    sql = text(
-        "SELECT typeID, skillID, level FROM industryActivitySkills WHERE activityID = 8"
-    )
-    with engine.connect() as conn:
-        rows = conn.execute(sql).all()
-
-    skill_reqs = {}
-    for type_id, skill_id, level in rows:
-        skill_reqs.setdefault(type_id, []).append((skill_id, level))
-    return skill_reqs
+    result = {type_id: time_val for type_id, time_val in rows}
+    with _sde_cache_lock:
+        _sde_cache[key] = result
+    return result
 
 
 def assign_jobs_to_characters(phase_bps, characters, skill_reqs, job_type="mfg"):

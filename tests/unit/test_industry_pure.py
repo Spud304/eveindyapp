@@ -11,6 +11,8 @@ from src.industry import (
     _compute_blueprint_depths,
     _compute_phase_timeline,
     _compute_build_strategy,
+    _compute_invention_cost,
+    _build_decryptor_comparison,
 )
 from src.industry_utils import (
     _get_security_class,
@@ -632,3 +634,174 @@ class TestBuildStrategyTE:
         )
         # All-bought should have shorter mfg time (TE 20 = 0.8x vs TE 0 = 1.0x)
         assert result_all_bought["bpc_mfg_time"] < result_none_bought["bpc_mfg_time"]
+
+
+# --- Invention cost computation ---
+
+# Shared test fixtures for invention tests
+_INV_MATERIALS = {100: [(200, 2), (201, 2)]}  # T1 BP 100 needs 2x datacore 200 + 2x datacore 201
+_INV_PROBABILITIES = {(100, 500): 0.34}  # T1 BP 100 -> T2 BP 500, base prob 0.34
+_INV_TIMES = {100: 3600}  # 1 hour invention time
+_PRICES = {200: 50000.0, 201: 60000.0, 300: 100000.0}  # datacores + decryptor price
+
+_DECRYPTOR = {
+    "type_id": 300,
+    "name": "Accelerant Decryptor",
+    "prob_mult": 1.2,
+    "me_mod": 2,
+    "te_mod": 10,
+    "run_mod": 1,
+}
+
+
+class TestComputeInventionCost:
+    def test_basic_no_decryptor(self):
+        result = _compute_invention_cost(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, decryptor=None,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, prices=_PRICES,
+        )
+        # No skill bonus: skill_modifier = 1.0
+        assert result["base_probability"] == 0.34
+        assert result["effective_probability"] == 0.34
+        assert abs(result["expected_attempts"] - 1.0 / 0.34) < 0.01
+        # Datacore cost: 2*50000 + 2*60000 = 220000
+        assert result["datacore_cost_per_attempt"] == 220000.0
+        assert result["decryptor_cost_per_attempt"] == 0.0
+        # T2 BPC stats: ME = -2, TE = -4, runs = 10
+        assert result["t2_bpc_me"] == -2
+        assert result["t2_bpc_te"] == -4
+        assert result["t2_bpc_runs"] == 10
+
+    def test_with_decryptor_modifiers(self):
+        result = _compute_invention_cost(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, decryptor=_DECRYPTOR,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, prices=_PRICES,
+        )
+        # prob = 0.34 * 1.2 * 1.0 = 0.408
+        assert abs(result["effective_probability"] - 0.408) < 0.001
+        # ME = -2 + 2 = 0, TE = -4 + 10 = 6, runs = 10 + 1 = 11
+        assert result["t2_bpc_me"] == 0
+        assert result["t2_bpc_te"] == 6
+        assert result["t2_bpc_runs"] == 11
+        # Decryptor cost per attempt = 100000
+        assert result["decryptor_cost_per_attempt"] == 100000.0
+
+    def test_zero_probability(self):
+        probs = {(100, 500): 0.0}
+        result = _compute_invention_cost(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, decryptor=None,
+            invention_materials=_INV_MATERIALS, invention_probabilities=probs,
+            invention_times=_INV_TIMES, prices=_PRICES,
+        )
+        assert result["effective_probability"] == 0.0
+        assert result["expected_attempts"] == float("inf")
+
+    def test_probability_capped_at_one(self):
+        probs = {(100, 500): 0.9}
+        high_prob_dec = {**_DECRYPTOR, "prob_mult": 1.8}
+        result = _compute_invention_cost(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, decryptor=high_prob_dec,
+            invention_materials=_INV_MATERIALS, invention_probabilities=probs,
+            invention_times=_INV_TIMES, prices=_PRICES,
+        )
+        assert result["effective_probability"] == 1.0
+        assert result["expected_attempts"] == 1.0
+
+    def test_invention_time(self):
+        result = _compute_invention_cost(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, decryptor=None,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, prices=_PRICES,
+        )
+        assert result["invention_time_per_attempt"] == 3600
+        expected_time = 3600 * (1.0 / 0.34)
+        assert abs(result["expected_invention_time"] - expected_time) < 0.01
+
+    def test_negative_run_mod_can_reduce_runs(self):
+        neg_run_dec = {**_DECRYPTOR, "run_mod": -5}
+        result = _compute_invention_cost(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, decryptor=neg_run_dec,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, prices=_PRICES,
+        )
+        assert result["t2_bpc_runs"] == 5
+
+
+class TestBuildDecryptorComparison:
+    _DECRYPTORS = [
+        {"type_id": 300, "name": "Accelerant", "prob_mult": 1.2, "me_mod": 2, "te_mod": 10, "run_mod": 1},
+        {"type_id": 301, "name": "Attainment", "prob_mult": 1.8, "me_mod": -1, "te_mod": 4, "run_mod": 4},
+        {"type_id": 302, "name": "Augmentation", "prob_mult": 0.6, "me_mod": -2, "te_mod": 2, "run_mod": 9},
+    ]
+
+    def test_sorted_by_cost_per_unit(self):
+        options = _build_decryptor_comparison(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, runs_needed=100,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, decryptors=self._DECRYPTORS, prices=_PRICES,
+        )
+        costs = [o["cost_per_unit"] for o in options]
+        assert costs == sorted(costs)
+
+    def test_optimal_flag_on_first(self):
+        options = _build_decryptor_comparison(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, runs_needed=100,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, decryptors=self._DECRYPTORS, prices=_PRICES,
+        )
+        assert options[0]["optimal"] is True
+        for opt in options[1:]:
+            assert opt["optimal"] is False
+
+    def test_includes_no_decryptor_option(self):
+        options = _build_decryptor_comparison(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, runs_needed=100,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, decryptors=self._DECRYPTORS, prices=_PRICES,
+        )
+        names = [o["decryptor_name"] for o in options]
+        assert "None" in names
+
+    def test_option_count(self):
+        options = _build_decryptor_comparison(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, runs_needed=100,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, decryptors=self._DECRYPTORS, prices=_PRICES,
+        )
+        # 1 (none) + 3 decryptors = 4
+        assert len(options) == 4
+
+    def test_zero_runs_needed(self):
+        options = _build_decryptor_comparison(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, runs_needed=0,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, decryptors=self._DECRYPTORS, prices=_PRICES,
+        )
+        for opt in options:
+            assert opt["total_cost"] == 0.0
+            assert opt["bpcs_needed"] == 0
+
+    def test_run_mod_leading_to_zero_runs_excluded(self):
+        bad_dec = [{"type_id": 303, "name": "BadDec", "prob_mult": 1.0, "me_mod": 0, "te_mod": 0, "run_mod": -10}]
+        options = _build_decryptor_comparison(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, runs_needed=100,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, decryptors=bad_dec, prices=_PRICES,
+        )
+        # BadDec produces 10 + (-10) = 0 runs, should be excluded
+        names = [o["decryptor_name"] for o in options]
+        assert "BadDec" not in names
+        # But "None" should still be there
+        assert "None" in names
+
+    def test_bpcs_needed_rounds_up(self):
+        options = _build_decryptor_comparison(
+            t1_bp_id=100, t2_bp_id=500, base_runs=10, runs_needed=15,
+            invention_materials=_INV_MATERIALS, invention_probabilities=_INV_PROBABILITIES,
+            invention_times=_INV_TIMES, decryptors=[], prices=_PRICES,
+        )
+        # No decryptor: runs_per_bpc = 10, ceil(15/10) = 2
+        none_opt = options[0]
+        assert none_opt["bpcs_needed"] == 2
