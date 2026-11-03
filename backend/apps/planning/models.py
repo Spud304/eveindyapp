@@ -60,3 +60,69 @@ class BuildRules(models.Model):
 
     class Meta:
         db_table = "planning_build_rules"
+
+
+class Visibility(models.TextChoices):
+    PRIVATE = "private", "Only me"
+    CORP = "corp", "My corporation"
+    LINK = "link", "Anyone with the link"
+
+
+class Plan(models.Model):
+    """A named set of lines to build, with its own settings. Sharing (visibility) is stored
+    now and enforced in step 7.
+
+    Build rule overrides flip the account defaults for this plan only:
+    `blacklist_add` / `blacklist_remove` are type ids; `category_overrides` maps an engine
+    BuildCategory to "buy" or "build".
+
+    Assets: `station_ids` limits where the plan builds (empty: every enabled account
+    station). The asset filter defaults to the locations of those stations;
+    `extra_location_ids` adds others, and `hangar_flags` (e.g. ["CorpSAG2", "Hangar"])
+    limits which hangars count (empty: all)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="plans"
+    )
+    name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=False)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    reserve_assets = models.BooleanField(default=False)
+    priority = models.IntegerField(default=100)  # lower claims first
+    visibility = models.CharField(
+        max_length=16, choices=Visibility.choices, default=Visibility.PRIVATE
+    )
+    blacklist_add = models.JSONField(default=list, blank=True)
+    blacklist_remove = models.JSONField(default=list, blank=True)
+    category_overrides = models.JSONField(default=dict, blank=True)
+    choices = models.JSONField(default=dict, blank=True)  # bp id -> {me, te, decryptor}
+    station_ids = models.JSONField(default=list, blank=True)
+    extra_location_ids = models.JSONField(default=list, blank=True)
+    hangar_flags = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "planning_plan"
+        ordering = ["priority", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(is_active=True),
+                name="planning_plan_one_active_per_user",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PlanLine(models.Model):
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="lines")
+    type_id = models.IntegerField()
+    quantity = models.PositiveIntegerField()
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "planning_plan_line"
+        ordering = ["position", "id"]

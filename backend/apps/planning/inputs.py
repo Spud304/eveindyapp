@@ -88,15 +88,27 @@ def owned_blueprints(user: User) -> tuple[OwnedBlueprint, ...]:
     return tuple(out)
 
 
-def available_assets(user: User, locations: Iterable[int]) -> dict[int, int]:
+AssetBucket = tuple[int, int, str]  # (type_id, root location id, hangar flag)
+
+
+def asset_buckets(user: User, locations: Iterable[int] | None = None) -> dict[AssetBucket, int]:
+    """Usable stock grouped by item, location and hangar: personal hangars, corp divisions
+    and deliveries, not assembled. `locations` None means everywhere."""
     hangar = Q(hangar_flag__in=AVAILABLE_FLAGS) | Q(hangar_flag__startswith="CorpSAG")
-    rows = (
-        Asset.objects.filter(_owners(user, Feed.ASSETS))
-        .filter(hangar, root_location_id__in=list(locations), is_singleton=False)
-        .values_list("type_id", "quantity")
-    )
+    qs = Asset.objects.filter(_owners(user, Feed.ASSETS)).filter(hangar, is_singleton=False)
+    if locations is not None:
+        qs = qs.filter(root_location_id__in=list(locations))
+    totals: dict[AssetBucket, int] = defaultdict(int)
+    for type_id, root, flag, qty in qs.values_list(
+        "type_id", "root_location_id", "hangar_flag", "quantity"
+    ):
+        totals[(type_id, root, flag)] += qty
+    return dict(totals)
+
+
+def available_assets(user: User, locations: Iterable[int]) -> dict[int, int]:
     totals: dict[int, int] = defaultdict(int)
-    for type_id, qty in rows:
+    for (type_id, _, _), qty in asset_buckets(user, locations).items():
         totals[type_id] += qty
     return dict(totals)
 

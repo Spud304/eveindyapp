@@ -1,0 +1,258 @@
+"""Plans: CRUD, lines, active plan, and the computed result with reservations."""
+
+from dataclasses import asdict
+from datetime import datetime
+from typing import Literal, cast
+
+from django.db import transaction
+from django.http import HttpRequest
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from ninja import Field, Router, Schema, Status
+from ninja.errors import HttpError
+
+from apps.accounts.models import User
+from apps.sde.models import EveType
+from engine.types import BuildCategory
+
+from . import reservation
+from .models import Plan, PlanLine, Visibility
+
+router = Router(tags=["plans"])
+
+
+class LineIO(Schema):
+    type_id: int
+    quantity: int = Field(..., ge=1, le=10_000_000)
+
+
+class LineOut(LineIO):
+    id: int
+    name: str
+
+
+class ChoiceIO(Schema):
+    me: int | None = Field(None, ge=-10, le=10)
+    te: int | None = Field(None, ge=0, le=20)
+    decryptor: int | Literal["auto", "none"] = "auto"
+
+
+class PlanSettings(Schema):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    reserve_assets: bool | None = None
+    priority: int | None = None
+    visibility: Visibility | None = None
+    blacklist_add: list[int] | None = None
+    blacklist_remove: list[int] | None = None
+    category_overrides: dict[BuildCategory, Literal["buy", "build"]] | None = None
+    choices: dict[int, ChoiceIO] | None = None
+    station_ids: list[int] | None = None
+    extra_location_ids: list[int] | None = None
+    hangar_flags: list[str] | None = None
+
+
+class PlanCreate(Schema):
+    name: str = Field(..., min_length=1, max_length=100)
+    lines: list[LineIO] = []
+    reserve_assets: bool = False
+    priority: int = 100
+
+
+class PlanSummary(Schema):
+    id: int
+    name: str
+    is_active: bool
+    reserve_assets: bool
+    priority: int
+    visibility: str
+    line_count: int
+    updated_at: datetime
+
+
+class PlanOut(PlanSummary):
+    activated_at: datetime | None
+    lines: list[LineOut]
+    blacklist_add: list[int]
+    blacklist_remove: list[int]
+    category_overrides: dict[str, str]
+    choices: dict[str, dict]
+    station_ids: list[int]
+    extra_location_ids: list[int]
+    hangar_flags: list[str]
+
+
+def _user(request: HttpRequest) -> User:
+    return cast(User, request.user)
+
+
+def _plan(request: HttpRequest, plan_id: int) -> Plan:
+    return get_object_or_404(Plan, pk=plan_id, user=_user(request))
+
+
+def _summary(p: Plan) -> dict:
+    return {
+        "id": p.pk,
+        "name": p.name,
+        "is_active": p.is_active,
+        "reserve_assets": p.reserve_assets,
+        "priority": p.priority,
+        "visibility": p.visibility,
+        "line_count": p.lines.count(),
+        "updated_at": p.updated_at,
+    }
+
+
+def _out(p: Plan) -> dict:
+    lines = list(p.lines.all())
+    names = dict(
+        EveType.objects.filter(pk__in=[ln.type_id for ln in lines]).values_list("id", "name")
+    )
+    return {
+        **_summary(p),
+        "activated_at": p.activated_at,
+        "lines": [
+            {
+                "id": ln.pk,
+                "type_id": ln.type_id,
+                "quantity": ln.quantity,
+                "name": names.get(ln.type_id, ""),
+            }
+            for ln in lines
+        ],
+        "blacklist_add": p.blacklist_add,
+        "blacklist_remove": p.blacklist_remove,
+        "category_overrides": p.category_overrides,
+        "choices": p.choices,
+        "station_ids": p.station_ids,
+        "extra_location_ids": p.extra_location_ids,
+        "hangar_flags": p.hangar_flags,
+    }
+
+
+def _check_types(type_ids: list[int]) -> None:
+    found = set(EveType.objects.filter(pk__in=type_ids, removed=False).values_list("id", flat=True))
+    missing = sorted(set(type_ids) - found)
+    if missing:
+        raise HttpError(422, f"unknown type ids: {missing}")
+
+
+def _set_lines(p: Plan, lines: list[LineIO]) -> None:
+    _check_types([ln.type_id for ln in lines])
+    p.lines.all().delete()
+    PlanLine.objects.bulk_create(
+        [
+            PlanLine(plan=p, type_id=ln.type_id, quantity=ln.quantity, position=i)
+            for i, ln in enumerate(lines)
+        ]
+    )
+
+
+@router.get("/plans", response=list[PlanSummary])
+def list_plans(request: HttpRequest):
+    return [_summary(p) for p in _user(request).plans.all()]
+
+
+@router.post("/plans", response={201: PlanOut})
+def create_plan(request: HttpRequest, body: PlanCreate):
+    with transaction.atomic():
+        p = Plan.objects.create(
+            user=_user(request),
+            name=body.name,
+            reserve_assets=body.reserve_assets,
+            priority=body.priority,
+        )
+        _set_lines(p, body.lines)
+    return Status(201, _out(p))
+
+
+@router.get("/plans/{plan_id}", response=PlanOut)
+def get_plan(request: HttpRequest, plan_id: int):
+    return _out(_plan(request, plan_id))
+
+
+@router.patch("/plans/{plan_id}", response=PlanOut)
+def edit_plan(request: HttpRequest, plan_id: int, body: PlanSettings):
+    p = _plan(request, plan_id)
+    data = body.dict(exclude_unset=True)
+    if "station_ids" in data:
+        own = set(_user(request).stations.values_list("id", flat=True))
+        bad = sorted(set(data["station_ids"]) - own)
+        if bad:
+            raise HttpError(422, f"not your stations: {bad}")
+    if "category_overrides" in data:
+        data["category_overrides"] = {
+            BuildCategory(k).value: v for k, v in data["category_overrides"].items()
+        }
+    if "choices" in data:
+        data["choices"] = {str(k): v for k, v in data["choices"].items()}
+    for key in ("blacklist_add", "blacklist_remove"):
+        if key in data:
+            _check_types(data[key])
+            data[key] = sorted(set(data[key]))
+    for field, value in data.items():
+        setattr(p, field, value)
+    p.save()
+    return _out(p)
+
+
+@router.put("/plans/{plan_id}/lines", response=PlanOut)
+def put_lines(request: HttpRequest, plan_id: int, lines: list[LineIO]):
+    p = _plan(request, plan_id)
+    with transaction.atomic():
+        _set_lines(p, lines)
+        p.save(update_fields=["updated_at"])
+    return _out(p)
+
+
+@router.post("/plans/{plan_id}/activate", response=PlanOut)
+def activate(request: HttpRequest, plan_id: int):
+    """Make this the account's one active plan; the tracker attributes new jobs to it."""
+    p = _plan(request, plan_id)
+    with transaction.atomic():
+        Plan.objects.filter(user=p.user, is_active=True).exclude(pk=p.pk).update(is_active=False)
+        if not p.is_active:
+            p.is_active = True
+            p.activated_at = timezone.now()
+            p.save(update_fields=["is_active", "activated_at", "updated_at"])
+    return _out(p)
+
+
+@router.post("/plans/{plan_id}/deactivate", response=PlanOut)
+def deactivate(request: HttpRequest, plan_id: int):
+    p = _plan(request, plan_id)
+    p.is_active = False
+    p.save(update_fields=["is_active", "updated_at"])
+    return _out(p)
+
+
+@router.delete("/plans/{plan_id}", response={204: None})
+def delete_plan(request: HttpRequest, plan_id: int):
+    _plan(request, plan_id).delete()
+    return Status(204, None)
+
+
+@router.get("/plans/{plan_id}/result")
+def plan_result(request: HttpRequest, plan_id: int):
+    """The engine's result for this plan, with the assets other plans reserve."""
+    p = _plan(request, plan_id)
+    run = reservation.run_plans(_user(request), [p])[p.pk]
+    rules = run.rules
+    return {
+        "plan_id": p.pk,
+        "error": run.error,
+        "result": asdict(run.result) if run.result else None,
+        "effective_rules": {
+            "item_blacklist": sorted(rules.item_blacklist) if rules else [],
+            "buy_categories": sorted(c.value for c in rules.buy_categories) if rules else [],
+            "overrides": {
+                "blacklist_add": p.blacklist_add,
+                "blacklist_remove": p.blacklist_remove,
+                "categories": p.category_overrides,
+            },
+        },
+        "reservation": {
+            "reserves": p.reserve_assets,
+            "claims": run.claims,
+            "held_elsewhere": {t: [asdict(h) for h in hs] for t, hs in run.held_elsewhere.items()},
+        },
+    }
