@@ -261,7 +261,20 @@ Done:
   - Live run (2026-11-03, one Director in one corp): 9 feeds in 4.3 s; corp 2,887 assets, 509 blueprints, 42 jobs, 7 divisions; every asset resolved to a station or structure. Public: 16,064 prices, 32,910 cost indices in 3.8 s.
   - `/markets/prices` average price is not a buy price. The shopping list's unit price still needs a source (Janice, or ESI regional orders).
 
-Next: account-scoped stations (from corp structures in the asset list and `/universe/structures`) and build rules, a builder that turns esidata rows into `PlanInput`, cron entries for `sync_esi`, and a Celery task for "refresh now".
+- Stations and build rules (`apps/planning`, 2026-11-03):
+  - `Station` belongs to the account. Discovery (`POST /api/stations/discover`) adds every structure or NPC station where the account's characters or readable corps have industry jobs, and every structure holding their assets. NPC stations that only hold assets are reported, not added.
+  - Rigs can't be discovered for structures the corp doesn't own: corp assets list a structure's rigs and service modules only for owned structures, and the live corp owns none (its D-JVGJ structures belong to an alliance corp). So rigs and facility tax are set per station; `tax_confirmed` stays false until tax is set.
+  - Name, hull and system come from `/universe/structures` (needs docking access; 403 means "unresolved") or `/universe/stations` (public).
+  - Default activities are the ones seen in jobs there, plus what the hull offers (engineering complex: manufacturing, copying, invention; refinery: reactions) or, for NPC stations, the `factory` / `labratory` services.
+  - Live discovery: 8 structures added (Raitarus, Azbel, Tatara, Fortizars, Astrahus), 4 unresolved (no docking access), 10 asset-only NPC stations reported.
+  - `BuildRules` holds account defaults (item blacklist, buy categories); plan overrides are step 3.
+- Plan input (`apps/planning/inputs.py`) and `POST /api/plan/preview` run the engine on the account's real data:
+  - Inputs: SDE game data, enabled stations, linked characters' skills, owned blueprints and assets of characters and readable corps, CCP adjusted and average prices, cost indices, build rules.
+  - Available assets: at the plan's stations, in a personal hangar, corp division or deliveries, and not assembled.
+  - Live: 10 Ishtar + 50 Hulk in 1.5 s (102 jobs).
+  - Open: every character is treated as omega and allowed every activity until per-character settings exist; `unit_price` is CCP's average price until a buy-price source exists.
+
+Next: cron entries for `sync_esi` and a Celery task for "refresh now". Then step 3 (plans, asset reservation, per-plan rule overrides).
 
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
