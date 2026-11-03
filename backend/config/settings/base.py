@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.accounts",
     "apps.sde",
+    "apps.esidata",
 ]
 
 MIDDLEWARE = [
