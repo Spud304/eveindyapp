@@ -232,7 +232,16 @@ Done:
 
 - Verified live (2026-11-03): login, character linking (all 11 scopes granted), a real token refresh, and authenticated ESI calls (skills, corp roles). Dev uses the existing EVE application (callback `http://localhost:5050/callback`, served by the `/callback` route), credentials in gitignored `backend/.env`. EVE returned the same refresh token on refresh; the code stores whichever comes back.
 
-Next: character and corp fetch services (skills, assets, blueprints, jobs, roles, divisions), `CorpDataSource`, account-scoped stations and build rules, adjusted prices and cost indices, cron commands.
+- ESI sync (`apps/esidata`, `manage.py sync_esi --account N | --character N | --all | --public`):
+  - Character feeds: skills, corp roles, assets, blueprints, industry jobs. Corp feeds: assets, blueprints, hangar divisions (need Director), industry jobs (Factory_Manager or Director). Public: `/markets/prices` (adjusted and average price) and `/industry/systems` cost indices. Response fields checked against ESI's OpenAPI spec.
+  - Each corp feed uses the first linked character in that corp whose last roles fetch (from the same corp) has the role and whose token has the scope. `FeedStatus` records per owner and feed: ok/error, row count, last success, and which character supplied a corp feed. This replaces the sketch's `CorpDataSource`.
+  - One feed failing (missing role or scope, rejected token, ESI error) is recorded and the rest still run.
+  - Assets and blueprints are replaced per owner on each sync. Each row gets `root_location_id` (station, structure or system, after walking up through containers, ships and corp offices) and `hangar_flag` (e.g. `CorpSAG3` for an item in a container in division 3). Jobs are upserted by job id and never deleted, because ESI drops old completed jobs and the tracker needs them.
+  - Corp data access: an account may read a corp feed only if one of its characters holds the feed's role in that corp (`access.readable_corp_feeds`).
+  - Live run (2026-11-03, one Director in one corp): 9 feeds in 4.3 s; corp 2,887 assets, 509 blueprints, 42 jobs, 7 divisions; every asset resolved to a station or structure. Public: 16,064 prices, 32,910 cost indices in 3.8 s.
+  - `/markets/prices` average price is not a buy price. The shopping list's unit price still needs a source (Janice, or ESI regional orders).
+
+Next: account-scoped stations (from corp structures in the asset list and `/universe/structures`) and build rules, a builder that turns esidata rows into `PlanInput`, cron entries for `sync_esi`, and a Celery task for "refresh now".
 
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
