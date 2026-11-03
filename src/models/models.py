@@ -92,6 +92,15 @@ class CachedMarketData(db.Model):
     cached_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class CachedSellPrice(db.Model):
+    __bind_key__ = "base"
+    __tablename__ = "cached_sell_prices"
+
+    type_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sell_price: Mapped[float] = mapped_column(Float, nullable=False)
+    cached_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class CachedBlueprint(db.Model):
     __bind_key__ = "base"
     __tablename__ = "cached_blueprints"

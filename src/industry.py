@@ -48,6 +48,11 @@ from src.industry_utils import (
     load_sde_invention_data,
     load_decryptor_data,
     load_invention_times,
+    load_sde_reaction_data,
+    build_reaction_toggle_map,
+    load_reaction_rig_data,
+    classify_reaction_for_rig,
+    pick_best_reaction_station,
 )
 
 
@@ -131,21 +136,33 @@ class IndustryBlueprint(Blueprint):
             < BLUEPRINT_CACHE_MAX_AGE
         )
 
-        if not cache_fresh:
-            # Kick off background fetch
+        just_refreshed = request.args.get("refreshed") == "1"
+        if not cache_fresh and not just_refreshed:
+            # Kick off background fetch (skip if we just landed from a
+            # successful refresh to avoid an infinite dispatch loop)
             task = self._start_blueprint_task(char_id)
             refreshing = task is not None
 
         if not has_cache:
-            # No cache at all — show loading page
-            task_id = request.args.get("task_id") or (task.id if refreshing else None)
+            # No cache at all — show loading page.
+            # Only poll if we just dispatched a task (not a redirect back from
+            # a completed task that yielded no data — avoids infinite loop).
+            incoming_task_id = request.args.get("task_id")
+            if incoming_task_id:
+                # We were redirected here with an explicit task_id — use it
+                poll_task_id = incoming_task_id
+            elif refreshing:
+                # First visit with no cache — poll the newly dispatched task
+                poll_task_id = task.id
+            else:
+                poll_task_id = None
             return render_template(
                 "blueprints.html",
                 blueprints=[],
                 cached_at=None,
                 now_utc=now,
                 loading=True,
-                task_id=task_id,
+                task_id=poll_task_id,
             )
 
         # Serve from cache (possibly stale while refreshing)
@@ -241,14 +258,47 @@ class IndustryBlueprint(Blueprint):
             load_sde_manufacturing_data()
         )
 
+        # Merge reaction data based on user config
+        config = load_user_config(current_user.character_id)
+        blacklist = set(config.get("blacklist", []))
+        type_to_group, _group_to_cat = load_type_group_category_maps()
+        reaction_materials_raw, reaction_products_raw = load_sde_reaction_data()
+        reaction_toggle_map = build_reaction_toggle_map(
+            reaction_products_raw, reaction_materials_raw, type_to_group
+        )
+        reaction_config = {
+            k: config.get(k, False)
+            for k in (
+                "react_intermediates",
+                "react_composites",
+                "react_hybrid",
+                "react_biochemical",
+                "react_molecular_forged",
+            )
+        }
+        combined_materials = dict(materials_by_bp)
+        combined_products = dict(products_by_product)
+        enabled_reaction_formula_ids = set()
+        for product_id, (formula_id, qty) in reaction_products_raw.items():
+            toggle = reaction_toggle_map.get(product_id)
+            if toggle and reaction_config.get(toggle, False):
+                combined_products[product_id] = (formula_id, qty)
+                enabled_reaction_formula_ids.add(formula_id)
+        for formula_id in enabled_reaction_formula_ids:
+            if formula_id in reaction_materials_raw:
+                combined_materials[formula_id] = reaction_materials_raw[formula_id]
+
         # Discover all blueprints in the build tree
         tree_bp_ids = _discover_blueprints(
-            type_id, set(), materials_by_bp, products_by_product
+            type_id, set(), combined_materials, combined_products, blacklist
         )
 
         # Parse ME values from query params (me_<type_id>=<value>)
         me_levels = {}
         for bp_id in tree_bp_ids:
+            if bp_id in enabled_reaction_formula_ids:
+                me_levels[bp_id] = 0
+                continue
             val = request.args.get(f"me_{bp_id}", 0, type=int)
             me_levels[bp_id] = max(0, min(10, val))
 
@@ -275,7 +325,12 @@ class IndustryBlueprint(Blueprint):
         )
 
         raw_materials = _resolve_material_tree(
-            type_id, {}, me_levels, materials_by_bp, products_by_product
+            type_id,
+            {},
+            me_levels,
+            combined_materials,
+            combined_products,
+            blacklist,
         )
 
         # Scale raw materials by top-level run count
@@ -284,7 +339,12 @@ class IndustryBlueprint(Blueprint):
 
         # Compute runs needed per blueprint in the tree
         runs_needed = _compute_runs_needed(
-            type_id, me_levels, runs, materials_by_bp, products_by_product
+            type_id,
+            me_levels,
+            runs,
+            combined_materials,
+            combined_products,
+            blacklist,
         )
 
         # Build BPC info list (only for blueprints set to BPC mode)
@@ -374,6 +434,7 @@ class IndustryBlueprint(Blueprint):
         copy_skill_reqs = {}
         if use_char_skills:
             from src.user import get_linked_character_ids
+            from src.config import get_character_roles
 
             char_ids = get_linked_character_ids(current_user)
             char_skills_map = load_character_skills(char_ids)
@@ -382,16 +443,20 @@ class IndustryBlueprint(Blueprint):
             for cid in char_ids:
                 skills = char_skills_map.get(cid, {})
                 caps = compute_character_capabilities(skills)
+                roles = get_character_roles(config, cid)
                 characters.append(
                     {
                         "char_id": cid,
                         "char_name": char_names.get(cid, f"Character {cid}"),
                         "skills": skills,
+                        "roles": roles,
                         **caps,
                     }
                 )
-            build_slots = sum(c["mfg_slots"] for c in characters)
-            copy_slots = sum(c["copy_slots"] for c in characters)
+            mfg_characters = [c for c in characters if c["roles"]["manufacturing"]]
+            copy_characters = [c for c in characters if c["roles"]["copying"]]
+            build_slots = sum(c["mfg_slots"] for c in mfg_characters)
+            copy_slots = sum(c["copy_slots"] for c in copy_characters)
             industry_level = max((c["industry_level"] for c in characters), default=5)
             adv_industry_level = max(
                 (c["adv_industry_level"] for c in characters), default=5
@@ -470,12 +535,47 @@ class IndustryBlueprint(Blueprint):
         # Load rig data from SDE
         rig_data = load_rig_data()
 
-        # Load activity times (mfg + copy) from SDE
+        # Load activity times (mfg + copy + reaction) from SDE
         activity_times = load_activity_times()
 
-        # Discover full blueprint tree (respecting blacklist)
+        # --- Reaction support: merge enabled reaction data into DFS dicts ---
+        reaction_materials_raw, reaction_products_raw = load_sde_reaction_data()
+        reaction_toggle_map = build_reaction_toggle_map(
+            reaction_products_raw, reaction_materials_raw, type_to_group
+        )
+        reaction_config = {
+            k: config.get(k, False)
+            for k in (
+                "react_intermediates",
+                "react_composites",
+                "react_hybrid",
+                "react_biochemical",
+                "react_molecular_forged",
+            )
+        }
+
+        # Build combined lookup dicts with enabled reactions merged in
+        combined_materials = dict(materials_by_bp)
+        combined_products = dict(products_by_product)
+        combined_bp_to_product = dict(bp_to_product)
+        enabled_reaction_formula_ids = set()
+
+        for product_id, (formula_id, qty) in reaction_products_raw.items():
+            toggle = reaction_toggle_map.get(product_id)
+            if toggle and reaction_config.get(toggle, False):
+                combined_products[product_id] = (formula_id, qty)
+                combined_bp_to_product[formula_id] = product_id
+                enabled_reaction_formula_ids.add(formula_id)
+
+        for formula_id in enabled_reaction_formula_ids:
+            if formula_id in reaction_materials_raw:
+                combined_materials[formula_id] = reaction_materials_raw[formula_id]
+
+        reaction_rig_data = load_reaction_rig_data()
+
+        # Discover full blueprint tree (respecting blacklist), including reaction chains
         tree_bp_ids = _discover_blueprints(
-            top_bp_id, set(), materials_by_bp, products_by_product, blacklist
+            top_bp_id, set(), combined_materials, combined_products, blacklist
         )
 
         # Build structure_me_by_bp and structure_te_by_bp: classify each blueprint's product, pick best station
@@ -484,26 +584,43 @@ class IndustryBlueprint(Blueprint):
         bp_rig_categories = {}
         bp_station_assignments = {}
         for bp_id in tree_bp_ids:
-            prod_id = bp_to_product.get(bp_id)
-            if prod_id:
-                rig_cat = classify_product_for_rig(
-                    prod_id, type_to_group, group_to_category
-                )
+            if bp_id in enabled_reaction_formula_ids:
+                # Reaction formula — use reaction rig handling
+                rig_cat = classify_reaction_for_rig(bp_id, type_to_group)
+                bp_rig_categories[bp_id] = rig_cat
+                if rig_cat and stations:
+                    best_station, best_me, best_te = pick_best_reaction_station(
+                        stations, rig_cat, system_securities, reaction_rig_data
+                    )
+                    structure_me_by_bp[bp_id] = best_me
+                    structure_te_by_bp[bp_id] = best_te
+                    bp_station_assignments[bp_id] = best_station
+                else:
+                    structure_me_by_bp[bp_id] = 0
+                    structure_te_by_bp[bp_id] = 1.0
+                    bp_station_assignments[bp_id] = None
             else:
-                rig_cat = None
-            bp_rig_categories[bp_id] = rig_cat
+                # Manufacturing blueprint — existing logic
+                prod_id = combined_bp_to_product.get(bp_id)
+                if prod_id:
+                    rig_cat = classify_product_for_rig(
+                        prod_id, type_to_group, group_to_category
+                    )
+                else:
+                    rig_cat = None
+                bp_rig_categories[bp_id] = rig_cat
 
-            if rig_cat and stations:
-                best_station, best_me, best_te = pick_best_station(
-                    stations, rig_cat, system_securities, rig_data
-                )
-                structure_me_by_bp[bp_id] = best_me
-                structure_te_by_bp[bp_id] = best_te
-                bp_station_assignments[bp_id] = best_station
-            else:
-                structure_me_by_bp[bp_id] = 0
-                structure_te_by_bp[bp_id] = 1.0
-                bp_station_assignments[bp_id] = None
+                if rig_cat and stations:
+                    best_station, best_me, best_te = pick_best_station(
+                        stations, rig_cat, system_securities, rig_data
+                    )
+                    structure_me_by_bp[bp_id] = best_me
+                    structure_te_by_bp[bp_id] = best_te
+                    bp_station_assignments[bp_id] = best_station
+                else:
+                    structure_me_by_bp[bp_id] = 0
+                    structure_te_by_bp[bp_id] = 1.0
+                    bp_station_assignments[bp_id] = None
 
         # Query user's cached blueprints for these types
         cached_bps = (
@@ -529,6 +646,9 @@ class IndustryBlueprint(Blueprint):
         # T2 invented BPCs can have negative ME, so allow -10 to 10 range
         me_levels = {}
         for bp_id in tree_bp_ids:
+            if bp_id in enabled_reaction_formula_ids:
+                me_levels[bp_id] = 0  # Reactions have no ME research
+                continue
             override = request.args.get(f"me_{bp_id}", None, type=int)
             if override is not None:
                 me_levels[bp_id] = max(-10, min(10, override))
@@ -556,8 +676,8 @@ class IndustryBlueprint(Blueprint):
             top_bp_id,
             me_levels,
             top_runs,
-            materials_by_bp,
-            products_by_product,
+            combined_materials,
+            combined_products,
             blacklist,
             structure_me_by_bp,
         )
@@ -567,8 +687,8 @@ class IndustryBlueprint(Blueprint):
             top_bp_id,
             {},
             me_levels,
-            materials_by_bp,
-            products_by_product,
+            combined_materials,
+            combined_products,
             blacklist,
             structure_me_by_bp,
         )
@@ -621,7 +741,7 @@ class IndustryBlueprint(Blueprint):
             bp_times = activity_times.get(bp_id, (0, 0))
             mfg_time_per_run = bp_times[0]
             copy_time_per_run = bp_times[1]
-            bp_mats = materials_by_bp.get(bp_id, [])
+            bp_mats = combined_materials.get(bp_id, [])
             strategy = _compute_build_strategy(
                 runs_needed=needed,
                 max_prod_limit=max_prod,
@@ -676,7 +796,7 @@ class IndustryBlueprint(Blueprint):
         # Also need adjusted prices for EIV computation (base qty materials for each BP)
         eiv_material_ids = set()
         for bp_id in tree_bp_ids:
-            for mat_id, _ in materials_by_bp.get(bp_id, []):
+            for mat_id, _ in combined_materials.get(bp_id, []):
                 eiv_material_ids.add(mat_id)
         all_price_ids = all_material_ids | eiv_material_ids
 
@@ -731,7 +851,7 @@ class IndustryBlueprint(Blueprint):
 
             # EIV = sum of (adjusted_price * base_qty) for ME 0 materials
             eiv_per_run = 0.0
-            for mat_id, base_qty in materials_by_bp.get(bp_id, []):
+            for mat_id, base_qty in combined_materials.get(bp_id, []):
                 eiv_per_run += adjusted_prices.get(mat_id, 0.0) * base_qty
             bp["eiv_per_run"] = eiv_per_run
             bp["job_cost"] = (
@@ -854,8 +974,8 @@ class IndustryBlueprint(Blueprint):
                         top_bp_id,
                         me_levels,
                         top_runs,
-                        materials_by_bp,
-                        products_by_product,
+                        combined_materials,
+                        combined_products,
                         blacklist,
                         structure_me_by_bp,
                     )
@@ -863,8 +983,8 @@ class IndustryBlueprint(Blueprint):
                         top_bp_id,
                         {},
                         me_levels,
-                        materials_by_bp,
-                        products_by_product,
+                        combined_materials,
+                        combined_products,
                         blacklist,
                         structure_me_by_bp,
                     )
@@ -920,7 +1040,7 @@ class IndustryBlueprint(Blueprint):
 
         # Compute blueprint depths for phase-aware timing
         depths = _compute_blueprint_depths(
-            top_bp_id, materials_by_bp, products_by_product, blacklist
+            top_bp_id, combined_materials, combined_products, blacklist
         )
         for bp in bp_statuses:
             bp["depth"] = depths.get(bp["type_id"], 0)
@@ -950,7 +1070,7 @@ class IndustryBlueprint(Blueprint):
                             mfg_time_per_run=bp_times[0],
                             copy_time_per_run=bp_times[1],
                             mfg_slots=build_slots,
-                            bp_materials=materials_by_bp.get(bp["type_id"], []),
+                            bp_materials=combined_materials.get(bp["type_id"], []),
                             me=bp["me"],
                             struct_me=bp["structure_me"],
                             timeframe_seconds=timeframe_seconds,
@@ -977,7 +1097,7 @@ class IndustryBlueprint(Blueprint):
                     continue
                 # Assign manufacturing jobs
                 unassignable = assign_jobs_to_characters(
-                    phase_bps, characters, mfg_skill_reqs, job_type="mfg"
+                    phase_bps, mfg_characters, mfg_skill_reqs, job_type="mfg"
                 )
                 unassignable_warnings.extend(unassignable)
 
@@ -990,7 +1110,7 @@ class IndustryBlueprint(Blueprint):
                 ]
                 if copy_bps:
                     assign_jobs_to_characters(
-                        copy_bps, characters, copy_skill_reqs, job_type="copy"
+                        copy_bps, copy_characters, copy_skill_reqs, job_type="copy"
                     )
 
             # Recompute strategy using assigned character's skill levels
@@ -1009,7 +1129,7 @@ class IndustryBlueprint(Blueprint):
                             mfg_time_per_run=bp_times[0],
                             copy_time_per_run=bp_times[1],
                             mfg_slots=char["mfg_slots"],
-                            bp_materials=materials_by_bp.get(bp["type_id"], []),
+                            bp_materials=combined_materials.get(bp["type_id"], []),
                             me=bp["me"],
                             struct_me=bp["structure_me"],
                             timeframe_seconds=timeframe_seconds,
@@ -1432,11 +1552,15 @@ def _compute_invention_cost(
     invention_probabilities,
     invention_times,
     prices,
+    char_skills=None,
+    invention_skill_reqs=None,
 ):
     """Compute invention cost and BPC stats for a given decryptor choice.
 
     Args:
         decryptor: dict with prob_mult, me_mod, te_mod, run_mod, type_id, name (or None for no decryptor)
+        char_skills: optional {skill_id: level} for skill-based probability bonus
+        invention_skill_reqs: optional {t1_bp_id: {"encryption_skill": id, "science_skills": [ids]}}
 
     Returns dict with base_probability, effective_probability, attempts, costs, BPC stats, and times.
     """
@@ -1450,12 +1574,16 @@ def _compute_invention_cost(
     te_mod = decryptor["te_mod"] if decryptor else 0
     run_mod = decryptor["run_mod"] if decryptor else 0
 
-    # Skill modifier would normally be:
-    #   base_prob * (1 + encryption/40) * (1 + (sci1 + sci2) / 30)
-    # We don't currently derive the relevant invention skills from the character's
-    # actual skills and industryActivitySkills. To avoid an optimistic assumption,
-    # we apply no skill bonus here. The UI labels this as excluding skill bonuses.
-    skill_modifier = 1.0
+    # Skill modifier: (1 + encryption/40) * (1 + (sci1 + sci2) / 30)
+    if char_skills is not None and invention_skill_reqs is not None:
+        reqs = invention_skill_reqs.get(t1_bp_id, {})
+        enc_id = reqs.get("encryption_skill")
+        sci_ids = reqs.get("science_skills", [])
+        enc_level = char_skills.get(enc_id, 0) if enc_id else 0
+        sci_sum = sum(char_skills.get(sid, 0) for sid in sci_ids)
+        skill_modifier = (1 + enc_level / 40) * (1 + sci_sum / 30)
+    else:
+        skill_modifier = 1.0
 
     effective_probability = base_prob * prob_mult * skill_modifier
     effective_probability = min(effective_probability, 1.0)
@@ -1512,6 +1640,8 @@ def _build_decryptor_comparison(
     invention_times,
     decryptors,
     prices,
+    char_skills=None,
+    invention_skill_reqs=None,
 ):
     """Build comparison table for no-decryptor + each decryptor option.
 
@@ -1531,6 +1661,8 @@ def _build_decryptor_comparison(
             invention_probabilities,
             invention_times,
             prices,
+            char_skills=char_skills,
+            invention_skill_reqs=invention_skill_reqs,
         )
 
         bpc_runs = info["t2_bpc_runs"]

@@ -12,7 +12,7 @@ from src.models.models import (
     EveType,
     BlueprintActivityMaterial,
 )
-from src.industry_constants import ALL_ME_RIG_GROUPS
+from src.industry_constants import ALL_ENGINEERING_RIG_GROUPS, ALL_REACTION_RIG_GROUPS
 from src.utils import search_systems as _search_systems
 
 
@@ -25,6 +25,22 @@ DEFAULT_CONFIG = {
     "industry_level": 5,
     "adv_industry_level": 5,
     "use_character_skills": False,
+    "character_roles": {},
+    "sales_tax": 3.6,
+    "broker_fee": 2.0,
+    "react_intermediates": False,
+    "react_composites": False,
+    "react_hybrid": False,
+    "react_biochemical": False,
+    "react_molecular_forged": False,
+}
+
+# Default roles for a character (all enabled)
+DEFAULT_CHARACTER_ROLES = {
+    "manufacturing": True,
+    "copying": True,
+    "invention": True,
+    "blueprints": True,
 }
 
 
@@ -52,11 +68,27 @@ def load_user_config(character_id):
         "industry_level",
         "adv_industry_level",
         "use_character_skills",
+        "character_roles",
+        "sales_tax",
+        "broker_fee",
+        "react_intermediates",
+        "react_composites",
+        "react_hybrid",
+        "react_biochemical",
+        "react_molecular_forged",
     ):
         if key in stored:
             config[key] = stored[key]
 
     return config
+
+
+def get_character_roles(config, character_id):
+    """Get roles for a character, defaulting to all enabled."""
+    roles = config.get("character_roles", {}).get(str(character_id), {})
+    result = dict(DEFAULT_CHARACTER_ROLES)
+    result.update(roles)
+    return result
 
 
 class ConfigBlueprint(Blueprint):
@@ -122,6 +154,12 @@ class ConfigBlueprint(Blueprint):
             login_required(self.settings_update),
             methods=["POST"],
         )
+        self.add_url_rule(
+            "/config/character_roles/update",
+            "character_roles_update",
+            login_required(self.character_roles_update),
+            methods=["POST"],
+        )
 
     def get_config(self):
         config = load_user_config(current_user.character_id)
@@ -177,6 +215,7 @@ class ConfigBlueprint(Blueprint):
                         "char_id": cid,
                         "name": char_names.get(cid, f"Character {cid}"),
                         "has_skills": bool(skills),
+                        "roles": get_character_roles(config, cid),
                         **caps,
                     }
                 )
@@ -220,13 +259,17 @@ class ConfigBlueprint(Blueprint):
 
         # Filter groups by rig size
         size_to_groups = {2: set(), 3: set(), 4: set()}
-        for group_id in ALL_ME_RIG_GROUPS:
-            if group_id <= 1840:
+        for group_id in ALL_ENGINEERING_RIG_GROUPS:
+            if group_id <= 1849:
                 size_to_groups[2].add(group_id)
-            elif group_id <= 1862:
+            elif group_id <= 1866:
                 size_to_groups[3].add(group_id)
             else:
                 size_to_groups[4].add(group_id)
+        # Reaction rigs are M-Set (size 2) but also fit in L-Set (size 3) structures
+        for group_id in ALL_REACTION_RIG_GROUPS:
+            size_to_groups[2].add(group_id)
+            size_to_groups[3].add(group_id)
 
         allowed_groups = set()
         if rig_size in size_to_groups:
@@ -377,6 +420,22 @@ class ConfigBlueprint(Blueprint):
             config["adv_industry_level"] = max(0, min(5, val))
         if "use_character_skills" in data:
             config["use_character_skills"] = bool(data["use_character_skills"])
+        if "sales_tax" in data:
+            val = float(data["sales_tax"])
+            config["sales_tax"] = max(0, min(15, val))
+        if "broker_fee" in data:
+            val = float(data["broker_fee"])
+            config["broker_fee"] = max(0, min(15, val))
+
+        for react_key in (
+            "react_intermediates",
+            "react_composites",
+            "react_hybrid",
+            "react_biochemical",
+            "react_molecular_forged",
+        ):
+            if react_key in data:
+                config[react_key] = bool(data[react_key])
 
         self._save_config_json(char_id, config)
         return jsonify(
@@ -387,8 +446,36 @@ class ConfigBlueprint(Blueprint):
                 "industry_level": config["industry_level"],
                 "adv_industry_level": config["adv_industry_level"],
                 "use_character_skills": config["use_character_skills"],
+                "sales_tax": config["sales_tax"],
+                "broker_fee": config["broker_fee"],
+                "react_intermediates": config["react_intermediates"],
+                "react_composites": config["react_composites"],
+                "react_hybrid": config["react_hybrid"],
+                "react_biochemical": config["react_biochemical"],
+                "react_molecular_forged": config["react_molecular_forged"],
             }
         )
+
+    def character_roles_update(self):
+        char_id = current_user.character_id
+        data = request.json
+        if not data or "character_id" not in data:
+            return jsonify({"error": "character_id required"}), 400
+
+        target_char_id = str(data["character_id"])
+        roles = data.get("roles", {})
+
+        config = load_user_config(char_id)
+        char_roles = config.get("character_roles", {})
+        existing = char_roles.get(target_char_id, dict(DEFAULT_CHARACTER_ROLES))
+        for role in ("manufacturing", "copying", "invention", "blueprints"):
+            if role in roles:
+                existing[role] = bool(roles[role])
+        char_roles[target_char_id] = existing
+        config["character_roles"] = char_roles
+
+        self._save_config_json(char_id, config)
+        return jsonify({"ok": True, "roles": existing})
 
     def _save_config_json(self, char_id, config):
         row = db.session.execute(

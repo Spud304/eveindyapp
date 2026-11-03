@@ -9,7 +9,13 @@ from flask_login import current_user
 from sqlalchemy import select
 from datetime import datetime, timedelta
 
-from src.models.models import db, EveType, CachedMarketData, CachedLocations
+from src.models.models import (
+    db,
+    EveType,
+    CachedMarketData,
+    CachedLocations,
+    CachedSellPrice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +134,41 @@ def batch_market_info(type_ids: set[int]) -> tuple[dict[int, float], dict[int, f
 
     db.session.commit()
     return avg_result, adj_result
+
+
+THE_FORGE_REGION_ID = 10000002
+
+
+def get_jita_sell_price(type_id: int) -> float | None:
+    """Fetch the lowest sell order price in The Forge (Jita) for a type.
+
+    Caches result for 1 hour. Returns None if no sell orders found.
+    """
+    cached = db.session.get(CachedSellPrice, type_id)
+    if cached and cached.cached_at > datetime.now() - timedelta(hours=1):
+        return cached.sell_price
+
+    url = (
+        f"https://esi.evetech.net/latest/markets/{THE_FORGE_REGION_ID}/orders/"
+        f"?type_id={type_id}&order_type=sell&datasource=tranquility"
+    )
+    status, data = esi_get(url, headers={"Content-Type": "application/json"})
+    if status != 200 or not isinstance(data, list) or not data:
+        logger.warning(
+            "Failed to fetch sell orders for type %s: status %s", type_id, status
+        )
+        return cached.sell_price if cached else None
+
+    best_price = min(
+        order["price"] for order in data if not order.get("is_buy_order", False)
+    )
+
+    now = datetime.now()
+    db.session.merge(
+        CachedSellPrice(type_id=type_id, sell_price=best_price, cached_at=now)
+    )
+    db.session.commit()
+    return best_price
 
 
 def search_systems(query: str, limit: int = 15) -> list[dict]:
@@ -249,8 +290,22 @@ def get_manufacturing_cost_index(system_id: int) -> float:
 
     Uses CachedLocations to avoid repeated calls. Returns 0.0 if not found.
     """
+    return get_industry_cost_index(system_id, "manufacturing")
+
+
+def get_industry_cost_index(system_id: int, activity: str = "manufacturing") -> float:
+    """Fetch a cost index for a solar system and activity from ESI.
+
+    activity: one of "manufacturing", "invention", "copying",
+              "researching_time_efficiency", "researching_material_efficiency", "reaction".
+    Uses CachedLocations to cache the manufacturing index. For other activities,
+    the value is extracted from the same ESI call but not persisted to DB.
+    """
     cached = db.session.get(CachedLocations, system_id)
-    if cached and cached.location_cost_index is not None:
+    is_mfg = activity == "manufacturing"
+
+    # For manufacturing, check DB cache first
+    if is_mfg and cached and cached.location_cost_index is not None:
         if (
             cached.location_cost_index_last_updated
             and cached.location_cost_index_last_updated
@@ -262,33 +317,36 @@ def get_manufacturing_cost_index(system_id: int) -> float:
     status, data = esi_get(url, headers={"Content-Type": "application/json"})
     if status != 200 or not isinstance(data, list):
         logger.warning("Failed to fetch industry systems: status %s", status)
-        return (
-            cached.location_cost_index
-            if cached and cached.location_cost_index is not None
-            else 0.0
-        )
+        if is_mfg and cached and cached.location_cost_index is not None:
+            return cached.location_cost_index
+        return 0.0
 
-    cost_index = 0.0
+    mfg_cost_index = 0.0
+    result_cost_index = 0.0
     for system in data:
         if system.get("solar_system_id") == system_id:
-            for activity in system.get("cost_indices", []):
-                if activity.get("activity") == "manufacturing":
-                    cost_index = activity.get("cost_index", 0.0)
-                    break
+            for act in system.get("cost_indices", []):
+                act_name = act.get("activity", "")
+                if act_name == activity:
+                    result_cost_index = act.get("cost_index", 0.0)
+                if act_name == "manufacturing":
+                    mfg_cost_index = act.get("cost_index", 0.0)
             break
 
+    # Always cache the manufacturing index when we fetch
     now = datetime.now()
     if cached:
-        cached.location_cost_index = cost_index
+        cached.location_cost_index = mfg_cost_index
         cached.location_cost_index_last_updated = now
     else:
         db.session.add(
             CachedLocations(
                 location_id=system_id,
                 location_name="",
-                location_cost_index=cost_index,
+                location_cost_index=mfg_cost_index,
                 location_cost_index_last_updated=now,
             )
         )
     db.session.commit()
-    return cost_index
+
+    return result_cost_index

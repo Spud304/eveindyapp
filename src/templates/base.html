@@ -442,6 +442,12 @@
                             <a href="{{ url_for('industry.calculator') }}" class="navbar-item {{ 'is-active' if request.endpoint and request.endpoint.startswith('industry.calculator') }}">
                                 Calculator
                             </a>
+                            <a href="{{ url_for('invention.invention') }}" class="navbar-item {{ 'is-active' if request.endpoint and request.endpoint.startswith('invention.') }}">
+                                Invention
+                            </a>
+                            <a href="{{ url_for('production.production') }}" class="navbar-item {{ 'is-active' if request.endpoint and request.endpoint.startswith('production.') }}">
+                                Production
+                            </a>
                             <a href="{{ url_for('config.config') }}" class="navbar-item {{ 'is-active' if request.endpoint and request.endpoint.startswith('config.') }}">
                                 Config
                             </a>

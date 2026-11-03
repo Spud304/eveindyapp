@@ -1,0 +1,637 @@
+{% extends "base.html" %}
+{% block title %}Invention Planner{% endblock %}
+{% block head %}
+<style>
+    .nc-search-panel {
+        contain: none;
+        overflow: visible;
+    }
+    .nc-search-wrap {
+        position: relative;
+        max-width: 400px;
+    }
+    .nc-search-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--nc-panel-light);
+        border: 1px solid var(--nc-border-bright);
+        border-top: none;
+        z-index: 101;
+        max-height: 300px;
+        overflow-y: auto;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    }
+    .nc-search-dropdown .nc-search-item {
+        padding: 0.5em 0.8em;
+        font-family: var(--nc-font-mono);
+        font-size: 0.8rem;
+        color: var(--nc-text);
+        cursor: pointer;
+        border-bottom: 1px solid rgba(0, 200, 255, 0.04);
+    }
+    .nc-search-dropdown .nc-search-item:hover,
+    .nc-search-dropdown .nc-search-item.nc-active {
+        background: var(--nc-row-hover);
+        color: var(--nc-text-bright);
+    }
+    .nc-search-dropdown .nc-search-empty {
+        padding: 0.5em 0.8em;
+        font-family: var(--nc-font-mono);
+        font-size: 0.75rem;
+        color: var(--nc-text-dim);
+    }
+    .nc-calc-form {
+        display: flex;
+        gap: 0.8rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+    }
+    .nc-calc-form .nc-field {
+        flex-shrink: 0;
+    }
+    .nc-calc-form .nc-field-search {
+        flex: 1;
+        min-width: 250px;
+    }
+    .nc-price-input {
+        width: 160px;
+    }
+    .nc-pipeline {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        font-family: var(--nc-font-mono);
+        font-size: 0.8rem;
+        margin-bottom: 1rem;
+    }
+    .nc-pipeline-step {
+        padding: 0.5rem 0.8rem;
+        border: 1px solid var(--nc-border);
+        background: rgba(0, 200, 255, 0.03);
+    }
+    .nc-pipeline-arrow {
+        color: var(--nc-teal);
+        font-size: 1rem;
+    }
+    .nc-pipeline-step strong {
+        color: var(--nc-text-bright);
+    }
+    .nc-pipeline-step .nc-dim {
+        color: var(--nc-text-dim);
+        font-size: 0.7rem;
+    }
+    .nc-datacore-list {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.5rem;
+    }
+    .nc-datacore-item {
+        font-family: var(--nc-font-mono);
+        font-size: 0.8rem;
+        padding: 0.4rem 0.7rem;
+        border: 1px solid var(--nc-border);
+        background: rgba(0, 200, 255, 0.02);
+    }
+    .nc-datacore-item strong {
+        color: var(--nc-text-bright);
+    }
+    .nc-datacore-item .nc-dim {
+        color: var(--nc-text-dim);
+        font-size: 0.7rem;
+    }
+    .nc-profit-positive { color: var(--nc-teal); }
+    .nc-profit-negative { color: var(--nc-red); }
+    .nc-optimal-row {
+        background: rgba(0, 200, 255, 0.06) !important;
+    }
+    .nc-char-can { color: var(--nc-teal); }
+    .nc-char-blocked { color: var(--nc-red); }
+    .nc-skill-gap {
+        font-family: var(--nc-font-mono);
+        font-size: 0.75rem;
+        padding: 0.3rem 0.6rem;
+        border-left: 2px solid var(--nc-red);
+        margin-bottom: 0.3rem;
+        color: var(--nc-text-dim);
+    }
+    .nc-skill-gap .nc-skill-name { color: var(--nc-text-bright); }
+    .nc-supply-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 0.8rem;
+        font-family: var(--nc-font-mono);
+        font-size: 0.8rem;
+    }
+    .nc-supply-stat {
+        padding: 0.5rem 0.7rem;
+        border: 1px solid var(--nc-border);
+        background: rgba(0, 200, 255, 0.02);
+    }
+    .nc-supply-stat .nc-stat-label {
+        font-size: 0.65rem;
+        color: var(--nc-text-dim);
+        margin-bottom: 0.2rem;
+    }
+    .nc-supply-stat .nc-stat-value {
+        color: var(--nc-text-bright);
+        font-size: 0.9rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="nc-header nc-animate">
+    <h1 class="nc-title">Invention Planner</h1>
+    <p class="nc-subtitle">T2 BPC invention cost analysis</p>
+</div>
+
+{% if error is defined and error %}
+<div class="nc-notice nc-animate nc-animate-d1" style="font-family: var(--nc-font-mono); font-size: 0.8rem; color: var(--nc-gold); padding: 0.8rem 1rem; border: 1px dashed var(--nc-gold-dim); margin-bottom: 1.5rem;">{{ error }}</div>
+{% endif %}
+
+<form method="GET" action="{{ url_for('invention.invention') }}" id="inventionForm">
+    <div class="nc-panel nc-search-panel nc-animate nc-animate-d1">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Search T2 Item</div>
+        <div class="nc-calc-form">
+            <div class="nc-field nc-field-search">
+                <label class="nc-field-label">Item</label>
+                <div class="nc-search-wrap">
+                    <input class="nc-input" type="text" id="itemSearch" autocomplete="off"
+                           placeholder="Search for a T2 item..."
+                           value="{{ product.name if product else '' }}"
+                           style="width: 100%;">
+                    <input type="hidden" name="product_type_id" id="productTypeId"
+                           value="{{ product.type_id if product else '' }}">
+                    <div class="nc-search-dropdown" id="searchDropdown" style="display:none;"></div>
+                </div>
+            </div>
+            <div class="nc-field">
+                <label class="nc-field-label">T2 BPC Sell Price (ISK)</label>
+                <input class="nc-input nc-price-input nc-comma-input" type="text" id="bpcSellPriceDisplay" autocomplete="off"
+                       value="{{ '{:,.0f}'.format(bpc_sell_price) if bpc_sell_price else '' }}"
+                       placeholder="Optional">
+                <input type="hidden" name="bpc_sell_price" id="bpcSellPriceHidden"
+                       value="{{ bpc_sell_price }}">
+                <div style="font-family: var(--nc-font-mono); font-size: 0.6rem; color: var(--nc-text-dim); margin-top: 0.25rem;">
+                    Contract price for profit calc
+                </div>
+            </div>
+            <div class="nc-field">
+                <button type="submit" class="nc-btn">Analyze</button>
+            </div>
+        </div>
+    </div>
+
+{% if product %}
+
+    <!-- Invention Pipeline -->
+    <div class="nc-panel nc-animate nc-animate-d2">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Invention Pipeline</div>
+        <div class="nc-pipeline">
+            <div class="nc-pipeline-step">
+                <strong>{{ t1_bp_name }}</strong>
+                <div class="nc-dim">T1 BPO</div>
+            </div>
+            <div class="nc-pipeline-arrow">&rarr;</div>
+            <div class="nc-pipeline-step">
+                <strong>Copy</strong>
+                <div class="nc-dim">{{ copy_time_fmt }} per copy</div>
+            </div>
+            <div class="nc-pipeline-arrow">&rarr;</div>
+            <div class="nc-pipeline-step">
+                <strong>T1 BPC</strong>
+                <div class="nc-dim">{{ base_runs }} max runs</div>
+            </div>
+            <div class="nc-pipeline-arrow">&rarr;</div>
+            <div class="nc-pipeline-step">
+                <strong>Invent</strong>
+                <div class="nc-dim">{{ invention_time_fmt }} per attempt &middot; {{ "%.1f"|format(base_probability * 100) }}% base</div>
+            </div>
+            <div class="nc-pipeline-arrow">&rarr;</div>
+            <div class="nc-pipeline-step">
+                <strong>{{ product.name }} BPC</strong>
+                <div class="nc-dim">T2 Blueprint Copy</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Character Capability Matrix -->
+    {% if has_characters %}
+    <div class="nc-panel nc-animate nc-animate-d2">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Character Capabilities</div>
+        <div style="overflow-x: auto;">
+        <table class="nc-table" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>Character</th>
+                    <th>Can Invent</th>
+                    <th>Success Rate</th>
+                    <th>Lab Slots</th>
+                    <th>Mfg Slots</th>
+                    <th>Skill Gaps</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for char in characters %}
+                <tr>
+                    <td style="color: var(--nc-text-bright);">{{ char.char_name }}</td>
+                    <td>
+                        {% if char.can_invent %}
+                        <span class="nc-char-can">Yes</span>
+                        {% else %}
+                        <span class="nc-char-blocked">No</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if char.can_invent %}
+                        {{ "%.1f"|format(char.success_rate * 100) }}%
+                        {% else %}
+                        <span style="color: var(--nc-text-dim);">&mdash;</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ char.lab_slots }}</td>
+                    <td>{{ char.mfg_slots }}</td>
+                    <td>
+                        {% if char.missing_skills %}
+                        {% for ms in char.missing_skills %}
+                        <div class="nc-skill-gap">
+                            <span class="nc-skill-name">{{ ms.name }}</span>
+                            {{ ms.current }}/{{ ms.required }} &mdash; {{ ms.impact }}
+                        </div>
+                        {% endfor %}
+                        {% else %}
+                        <span style="color: var(--nc-teal); font-size: 0.75rem;">All trained</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Datacores Required -->
+    <div class="nc-panel nc-animate nc-animate-d3">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Datacores Per Attempt</div>
+        <div class="nc-datacore-list">
+            {% for dc in datacores %}
+            <div class="nc-datacore-item">
+                <strong>{{ dc.quantity }}x</strong> {{ dc.name }}
+                <div class="nc-dim">{{ "{:,.0f}".format(dc.unit_price) }} ISK each &middot; {{ "{:,.0f}".format(dc.unit_price * dc.quantity) }} ISK</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Decryptor Comparison -->
+    <div class="nc-panel nc-animate nc-animate-d4">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Decryptor Comparison</div>
+        {% if not has_sell_price %}
+        <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim); margin-bottom: 1rem;">
+            Sorted by invention cost per unit{% if has_characters %} (using best character's skills){% endif %}. Enter a BPC sell price above to see profit analysis.
+        </div>
+        {% else %}
+        <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim); margin-bottom: 1rem;">
+            Sorted by profit per BPC (highest first). BPC sell price: <span style="color: var(--nc-text-bright);">{{ "{:,.0f}".format(bpc_sell_price) }} ISK</span>
+        </div>
+        {% endif %}
+        <div style="overflow-x: auto;">
+        <table class="nc-table" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Decryptor</th>
+                    <th>Prob.</th>
+                    <th>ME</th>
+                    <th>TE</th>
+                    <th>Runs</th>
+                    <th>Attempts</th>
+                    <th>Datacore Cost</th>
+                    <th>Decrypt Cost</th>
+                    <th>Total Cost</th>
+                    <th>Cost/BPC</th>
+                    {% if invention_job_cost_per_run is defined and invention_job_cost_per_run > 0 %}
+                    <th>Job Cost</th>
+                    {% endif %}
+                    {% if has_sell_price %}
+                    <th>Profit/BPC</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for opt in decryptor_comparison %}
+                <tr class="{{ 'nc-optimal-row' if opt.optimal }}">
+                    <td>
+                        {% if opt.optimal %}
+                        <span class="nc-tag nc-tag-active" style="font-size: 0.6rem;">BEST</span>
+                        {% endif %}
+                    </td>
+                    <td style="color: var(--nc-text-bright);">{{ opt.decryptor_name }}</td>
+                    <td>{{ "%.1f"|format(opt.probability * 100) }}%</td>
+                    <td>{{ opt.me|abs }}</td>
+                    <td>{{ opt.te|abs }}</td>
+                    <td>{{ opt.runs_per_bpc }}</td>
+                    <td>{{ "%.1f"|format(opt.expected_attempts) }}</td>
+                    <td>{{ "{:,.0f}".format(opt.datacore_cost) }}</td>
+                    <td>{{ "{:,.0f}".format(opt.decryptor_cost) }}</td>
+                    <td>{{ "{:,.0f}".format(opt.total_cost) }}</td>
+                    <td>{{ "{:,.0f}".format(opt.invention_cost_per_bpc if opt.invention_cost_per_bpc is defined else opt.cost_per_unit * opt.runs_per_bpc) }}</td>
+                    {% if invention_job_cost_per_run is defined and invention_job_cost_per_run > 0 %}
+                    <td>{{ "{:,.0f}".format(opt.job_cost_per_bpc if opt.job_cost_per_bpc is defined else 0) }}</td>
+                    {% endif %}
+                    {% if has_sell_price %}
+                    <td class="{{ 'nc-profit-positive' if opt.profit_per_bpc > 0 else 'nc-profit-negative' }}">
+                        {{ "{:,.0f}".format(opt.profit_per_bpc) }} ISK
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </div>
+
+    <!-- T1 BPC Supply Chain -->
+    <!-- Optimal Slot Split & Supply Chain -->
+    {% if supply_chain %}
+    <div class="nc-panel nc-animate nc-animate-d4">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Optimal Slot Split &amp; BPO Requirements</div>
+        <div style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text-dim); margin-bottom: 1rem;">
+            Lab slots are shared between copying and inventing. Optimal split keeps invention slots fed continuously.
+        </div>
+        <div class="nc-supply-grid">
+            <div class="nc-supply-stat">
+                <div class="nc-stat-label">Copy Time Per Run</div>
+                <div class="nc-stat-value">{{ supply_chain.copy_time_fmt }}</div>
+            </div>
+            <div class="nc-supply-stat">
+                <div class="nc-stat-label">Invention Time Per Attempt</div>
+                <div class="nc-stat-value">{{ supply_chain.invention_time_fmt }}</div>
+            </div>
+            <div class="nc-supply-stat">
+                <div class="nc-stat-label">Total Lab Slots</div>
+                <div class="nc-stat-value">{{ supply_chain.total_lab_slots }}</div>
+            </div>
+            <div class="nc-supply-stat">
+                <div class="nc-stat-label">Invention Slots</div>
+                <div class="nc-stat-value" style="color: var(--nc-teal);">{{ supply_chain.total_invention_slots }}</div>
+            </div>
+            <div class="nc-supply-stat">
+                <div class="nc-stat-label">Copy Slots</div>
+                <div class="nc-stat-value" style="color: var(--nc-gold);">{{ supply_chain.total_copy_slots }}</div>
+            </div>
+            <div class="nc-supply-stat">
+                <div class="nc-stat-label">T1 BPOs Needed</div>
+                <div class="nc-stat-value" style="color: var(--nc-text-bright); font-size: 1.1rem;">{{ supply_chain.total_bpos_needed }}</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Slot Allocation & Projections -->
+    {% if slot_allocation %}
+    <div class="nc-panel nc-animate nc-animate-d4">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Slot Allocation &amp; Projections ({{ slot_allocation.decryptor_name }} decryptor)</div>
+        <div style="overflow-x: auto;">
+        <table class="nc-table" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>Character</th>
+                    <th>Lab Slots</th>
+                    <th>Invent</th>
+                    <th>Copy</th>
+                    <th>BPOs</th>
+                    <th>Success Rate</th>
+                    <th>Attempts/Day</th>
+                    <th>BPCs/Day</th>
+                    <th>Cost/Day</th>
+                    {% if slot_allocation.total_daily_profit is not none %}
+                    <th>Profit/Day</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for alloc in slot_allocation.allocations %}
+                <tr>
+                    <td style="color: var(--nc-text-bright);">{{ alloc.char_name }}</td>
+                    <td>{{ alloc.lab_slots }}</td>
+                    <td style="color: var(--nc-teal);">{{ alloc.invention_slots }}</td>
+                    <td style="color: var(--nc-gold);">{{ alloc.copy_slots }}</td>
+                    <td>{{ alloc.bpos_needed }}</td>
+                    <td>{{ "%.1f"|format(alloc.success_rate * 100) }}%</td>
+                    <td>{{ "%.1f"|format(alloc.daily_attempts) }}</td>
+                    <td>{{ "%.1f"|format(alloc.daily_bpcs) }}</td>
+                    <td>{{ "{:,.0f}".format(alloc.daily_cost) }} ISK</td>
+                    {% if slot_allocation.total_daily_profit is not none %}
+                    <td class="{{ 'nc-profit-positive' if alloc.daily_profit > 0 else 'nc-profit-negative' }}">
+                        {{ "{:,.0f}".format(alloc.daily_profit) }} ISK
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr style="font-weight: bold;">
+                    <td style="color: var(--nc-text-bright);">Total</td>
+                    <td>{{ slot_allocation.total_lab_slots }}</td>
+                    <td style="color: var(--nc-teal);">{{ slot_allocation.total_invention_slots }}</td>
+                    <td style="color: var(--nc-gold);">{{ slot_allocation.total_copy_slots }}</td>
+                    <td>{{ slot_allocation.total_bpos_needed }}</td>
+                    <td></td>
+                    <td></td>
+                    <td>{{ "%.1f"|format(slot_allocation.total_daily_bpcs) }}</td>
+                    <td>{{ "{:,.0f}".format(slot_allocation.total_daily_cost) }} ISK</td>
+                    {% if slot_allocation.total_daily_profit is not none %}
+                    <td class="{{ 'nc-profit-positive' if slot_allocation.total_daily_profit > 0 else 'nc-profit-negative' }}">
+                        {{ "{:,.0f}".format(slot_allocation.total_daily_profit) }} ISK/day
+                    </td>
+                    {% endif %}
+                </tr>
+                {% if slot_allocation.total_monthly_profit is not none %}
+                <tr>
+                    <td style="color: var(--nc-text-dim);">Monthly (30d)</td>
+                    <td colspan="8"></td>
+                    <td class="{{ 'nc-profit-positive' if slot_allocation.total_monthly_profit > 0 else 'nc-profit-negative' }}">
+                        {{ "{:,.0f}".format(slot_allocation.total_monthly_profit) }} ISK
+                    </td>
+                </tr>
+                {% endif %}
+            </tfoot>
+        </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Datacore Consumption -->
+    {% if datacore_consumption %}
+    <div class="nc-panel nc-animate nc-animate-d4">
+        <div class="nc-panel-title"><span class="nc-icon"></span>Datacore Consumption (total across all invention slots)</div>
+        <div style="overflow-x: auto;">
+        <table class="nc-table" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>Datacore</th>
+                    <th>Daily Usage</th>
+                    <th>Daily Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for dc in datacore_consumption.datacores %}
+                <tr>
+                    <td style="color: var(--nc-text-bright);">{{ dc.name }}</td>
+                    <td>{{ "%.1f"|format(dc.daily_qty) }}</td>
+                    <td>{{ "{:,.0f}".format(dc.daily_cost) }} ISK</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td style="color: var(--nc-text-bright);">Total</td>
+                    <td></td>
+                    <td style="color: var(--nc-text-bright);">{{ "{:,.0f}".format(datacore_consumption.daily_total_cost) }} ISK/day</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--nc-text-dim);">Monthly (30d)</td>
+                    <td></td>
+                    <td style="color: var(--nc-text-dim);">{{ "{:,.0f}".format(datacore_consumption.monthly_total_cost) }} ISK</td>
+                </tr>
+            </tfoot>
+        </table>
+        </div>
+    </div>
+    {% endif %}
+
+{% endif %}
+</form>
+
+<script>
+(function() {
+    var input = document.getElementById('itemSearch');
+    var dropdown = document.getElementById('searchDropdown');
+    var hidden = document.getElementById('productTypeId');
+    var debounceTimer = null;
+    var activeIndex = -1;
+    var dropdownOpen = false;
+
+    function blockOutsideClicks(e) {
+        if (!e.target.closest('.nc-search-wrap')) {
+            e.preventDefault();
+            e.stopPropagation();
+            hideDropdown();
+        }
+    }
+
+    function showDropdown() {
+        dropdown.style.display = 'block';
+        if (!dropdownOpen) document.addEventListener('click', blockOutsideClicks, true);
+        dropdownOpen = true;
+    }
+    function hideDropdown() {
+        dropdown.style.display = 'none';
+        document.removeEventListener('click', blockOutsideClicks, true);
+        dropdownOpen = false;
+    }
+
+    input.addEventListener('input', function() {
+        clearTimeout(debounceTimer);
+        var q = input.value.trim();
+        if (q.length < 2) {
+            hideDropdown();
+            return;
+        }
+        debounceTimer = setTimeout(function() {
+            fetch('{{ url_for("invention.invention_search") }}?q=' + encodeURIComponent(q))
+                .then(function(r) { return r.json(); })
+                .then(function(items) {
+                    activeIndex = -1;
+                    if (!items.length) {
+                        dropdown.innerHTML = '<div class="nc-search-empty">No T2 items found</div>';
+                        showDropdown();
+                        return;
+                    }
+                    dropdown.innerHTML = items.map(function(item) {
+                        return '<div class="nc-search-item" data-id="' + item.type_id + '">' + item.name + '</div>';
+                    }).join('');
+                    showDropdown();
+                });
+        }, 250);
+    });
+
+    input.addEventListener('keydown', function(e) {
+        var items = dropdown.querySelectorAll('.nc-search-item');
+        if (!items.length) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeIndex = Math.min(activeIndex + 1, items.length - 1);
+            updateActive(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIndex = Math.max(activeIndex - 1, 0);
+            updateActive(items);
+        } else if (e.key === 'Enter' && activeIndex >= 0) {
+            e.preventDefault();
+            selectItem(items[activeIndex]);
+        }
+    });
+
+    function updateActive(items) {
+        items.forEach(function(el, i) {
+            el.classList.toggle('nc-active', i === activeIndex);
+        });
+    }
+
+    function selectItem(el) {
+        hidden.value = el.getAttribute('data-id');
+        input.value = el.textContent;
+        hideDropdown();
+    }
+
+    dropdown.addEventListener('click', function(e) {
+        var item = e.target.closest('.nc-search-item');
+        if (item) selectItem(item);
+    });
+})();
+
+// Comma-formatted number inputs
+document.querySelectorAll('.nc-comma-input').forEach(function(display) {
+    var hiddenId = display.id.replace('Display', 'Hidden');
+    var hidden = document.getElementById(hiddenId);
+    if (!hidden) return;
+
+    function formatWithCommas(n) {
+        return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    display.addEventListener('input', function() {
+        var raw = display.value.replace(/,/g, '');
+        var num = parseInt(raw, 10);
+        hidden.value = isNaN(num) ? '' : num;
+        if (raw && !isNaN(num)) {
+            var pos = display.selectionStart;
+            var oldLen = display.value.length;
+            display.value = formatWithCommas(num);
+            var newLen = display.value.length;
+            display.setSelectionRange(pos + (newLen - oldLen), pos + (newLen - oldLen));
+        }
+    });
+
+    display.addEventListener('blur', function() {
+        var raw = display.value.replace(/,/g, '');
+        var num = parseInt(raw, 10);
+        if (!isNaN(num) && num > 0) {
+            display.value = formatWithCommas(num);
+            hidden.value = num;
+        } else {
+            display.value = '';
+            hidden.value = '';
+        }
+    });
+});
+</script>
+
+{% endblock %}

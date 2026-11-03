@@ -275,7 +275,9 @@
             </div>
             <div class="nc-field">
                 <label class="nc-field-label">Quantity</label>
-                <input class="nc-input nc-qty-input" type="number" name="quantity" min="1"
+                <input class="nc-input nc-qty-input nc-comma-input" type="text" id="qtyDisplay" autocomplete="off"
+                       value="{{ '{:,}'.format(desired_qty) if desired_qty is defined and desired_qty else '1' }}">
+                <input type="hidden" name="quantity" id="qtyHidden"
                        value="{{ desired_qty if desired_qty is defined else 1 }}">
             </div>
             <div class="nc-field">
@@ -1053,6 +1055,42 @@ if (decSelect) {
         form.submit();
     });
 }
+
+// Comma-formatted number inputs
+document.querySelectorAll('.nc-comma-input').forEach(function(display) {
+    var hiddenId = display.id.replace('Display', 'Hidden');
+    var hidden = document.getElementById(hiddenId);
+    if (!hidden) return;
+
+    function formatWithCommas(n) {
+        return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    display.addEventListener('input', function() {
+        var raw = display.value.replace(/,/g, '');
+        var num = parseInt(raw, 10);
+        hidden.value = isNaN(num) ? '' : num;
+        if (raw && !isNaN(num)) {
+            var pos = display.selectionStart;
+            var oldLen = display.value.length;
+            display.value = formatWithCommas(num);
+            var newLen = display.value.length;
+            display.setSelectionRange(pos + (newLen - oldLen), pos + (newLen - oldLen));
+        }
+    });
+
+    display.addEventListener('blur', function() {
+        var raw = display.value.replace(/,/g, '');
+        var num = parseInt(raw, 10);
+        if (!isNaN(num) && num > 0) {
+            display.value = formatWithCommas(num);
+            hidden.value = num;
+        } else {
+            display.value = '';
+            hidden.value = '';
+        }
+    });
+});
 </script>
 
 {% endblock %}

@@ -34,8 +34,21 @@
 </div>
 
 {% if loading %}
-<div class="nc-empty nc-animate nc-animate-d1">
+<div class="nc-empty nc-animate nc-animate-d1" id="loading-message">
     <p>Loading blueprints for the first time. This may take a moment...</p>
+</div>
+<div id="load-error" style="display: none;" class="nc-animate nc-animate-d1">
+    <div style="background: rgba(255, 80, 80, 0.08); border: 1px solid rgba(255, 80, 80, 0.2); padding: 1.2rem; margin-bottom: 1rem;">
+        <div style="font-family: var(--nc-font-display); font-weight: 600; font-size: 0.85rem; color: var(--nc-red); margin-bottom: 0.5rem;">Blueprint Fetch Failed</div>
+        <p style="font-family: var(--nc-font-mono); font-size: 0.75rem; color: var(--nc-text); margin-bottom: 0.8rem;" id="load-error-detail">An unknown error occurred.</p>
+        <p style="font-family: var(--nc-font-mono); font-size: 0.7rem; color: var(--nc-text-dim); margin-bottom: 0.8rem;">
+            This usually means your EVE SSO token has expired. Try logging out and back in, or re-linking the character.
+        </p>
+        <a href="{{ url_for('auth.login') }}" class="nc-btn nc-btn-sm">Re-login</a>
+        <form method="POST" action="{{ url_for('industry.blueprints_refresh') }}" style="display: inline;">
+            <button type="submit" class="nc-btn nc-btn-sm nc-btn-dim" style="margin-left: 0.5rem;">Retry</button>
+        </form>
+    </div>
 </div>
 {% elif blueprints %}
 <div class="nc-card-grid nc-animate nc-animate-d1">
@@ -74,11 +87,22 @@
             .then(function(data) {
                 if (data.state === 'SUCCESS') {
                     clearInterval(interval);
-                    window.location.href = {{ url_for('industry.blueprints')|tojson }};
+                    window.location.href = {{ url_for('industry.blueprints')|tojson }} + '?refreshed=1';
                 } else if (data.state === 'FAILURE') {
                     clearInterval(interval);
+                    var errMsg = data.error || 'unknown error';
+                    // Loading page (first load): show full error panel
+                    var loadErr = document.getElementById('load-error');
+                    var loadMsg = document.getElementById('loading-message');
+                    if (loadErr) {
+                        loadErr.style.display = '';
+                        var detail = document.getElementById('load-error-detail');
+                        if (detail) detail.textContent = errMsg;
+                        if (loadMsg) loadMsg.style.display = 'none';
+                    }
+                    // Cached data page: update inline status
                     var el = document.getElementById('refresh-status');
-                    if (el) el.textContent = 'Refresh failed: ' + (data.error || 'unknown error');
+                    if (el) el.textContent = 'Refresh failed: ' + errMsg;
                 }
             })
             .catch(function() {});

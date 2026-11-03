@@ -33,6 +33,8 @@ from src.auth import AuthBlueprint
 from src.user import UserBlueprint
 from src.industry import IndustryBlueprint
 from src.config import ConfigBlueprint
+from src.invention import InventionBlueprint
+from src.production import ProductionBlueprint
 
 
 def _seed_static_data():
@@ -251,6 +253,8 @@ def create_test_app():
     app.register_blueprint(UserBlueprint("user", "src"))
     app.register_blueprint(IndustryBlueprint("industry", "src"))
     app.register_blueprint(ConfigBlueprint("config", "src"))
+    app.register_blueprint(InventionBlueprint("invention", "src"))
+    app.register_blueprint(ProductionBlueprint("production", "src"))
 
     with app.app_context():
         db.create_all()

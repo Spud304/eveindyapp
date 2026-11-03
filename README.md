@@ -7,10 +7,13 @@ A web application for tracking and planning manufacturing in EVE Online. Authent
 - **Blueprint Library** -- View all blueprints owned by your character, with type names and location names resolved automatically. Data is cached for 24 hours with a manual refresh option via async Celery tasks.
 - **Material Calculator** -- Select a manufacturable item and quantity, then get a full recursive bill of materials broken down to raw materials. Supports per-blueprint Material Efficiency (ME) overrides and BPC run planning. Skill-aware build time calculations using cached character skills.
 - **Blueprint Ownership Status** -- The calculator cross-references your cached blueprints to show which BPOs/BPCs you own, which are missing, and how many copy jobs you need.
+- **Invention Planner** -- Search any T2 item to see the full invention pipeline: T1 BPO → copy → T1 BPC → invent → T2 BPC. Per-character capability matrix showing who can invent, success rates using the skill-aware formula, and skill gap tracking. Computes optimal lab slot split between copying and inventing with total BPO requirements. Decryptor comparison table with cost and profit analysis. Datacore consumption projections (daily/monthly).
+- **Production Planner** -- Continuous production profit analysis for any manufacturable item (T1 or T2). For T2 items: computes the full invention pipeline plus manufacturing throughput and material costs. For T1 items: compares BPO-direct build vs copy-and-build strategies and recommends the higher-throughput option. Auto-fetches Jita sell prices from ESI regional market orders with manual override. Shows monthly projections for units produced, revenue, costs, and profit with bottleneck identification.
+- **Multi-Character Support** -- Link alt characters via EVE SSO. Per-character role toggles (manufacturing, copying, invention, blueprints) in config. Skill-aware job assignment across alts with slot optimization.
 - **Industry Jobs** -- View your character's active industry jobs from ESI.
-- **Station Configuration** -- Configure manufacturing stations with structure type, facility tax, and up to 3 rigs per station. The calculator automatically picks the best station for each product based on rig ME bonuses.
+- **Station Configuration** -- Configure manufacturing stations with structure type, facility tax, and up to 3 engineering rigs per station (manufacturing ME, invention, and blueprint copy rigs). The calculator automatically picks the best station for each product based on rig ME bonuses.
 - **Material Blacklist** -- Exclude specific materials from the recursive BOM breakdown (e.g., buy intermediates instead of building them).
-- **Build Settings** -- Configure build/copy slot counts, industry skill levels, and toggle between manual skill levels or character-fetched skills.
+- **Build Settings** -- Configure build/copy slot counts, industry skill levels, sales tax/broker fee percentages, character role assignments, and toggle between manual skill levels or character-fetched skills.
 
 ## Requirements
 
@@ -103,8 +106,10 @@ src/
   auth.py               -- EVE SSO login/callback/logout
   user.py               -- Character info page
   industry.py           -- Blueprints, materials DFS, calculator, jobs
+  invention.py          -- Invention planner (T2 BPC analysis, character skills, decryptors)
+  production.py         -- Production planner (continuous T1/T2 profit analysis)
   config.py             -- Station/blacklist/settings CRUD (AJAX endpoints)
-  utils.py              -- ESI request helpers, token generation
+  utils.py              -- ESI request helpers, token generation, market data
   constants.py          -- ESI base URL
   industry_constants.py -- Structure ME/TE, rig groups, ship classifications, skill IDs
   industry_utils.py     -- DFS helpers, rig selection, skill handling
@@ -120,9 +125,11 @@ src/
 
 ## TODO
 
+- Reactions support -- add reaction formula support to the production planner, with moon goo → intermediate → composite material chains, refinery structure types (Athanor/Tatara), and reaction rig configuration
+- Invention scanner -- bulk scan all T2 items a character can invent, rank by profit per slot per hour to find the most profitable invention targets
 - Job notifications -- alert when industry jobs complete
 - Search improvements -- support partial matching and category filtering on the calculator search
-- Project planner -- allow users to save and share build plans with specific items, quantities, and ME levels, and track progress as they acquire materials and complete jobs
-- Reactions support -- add a section for chemical reactions in refineries, with similar DFS material breakdowns and job planning
+- T3 support -- strategic cruiser and Triglavian invention from ancient relics
 - Corporation support -- allow users to link corporation accounts and view corporation-owned blueprints and jobs, with appropriate permission checks
+- Market data improvements -- historical price tracking, price alerts, volume analysis
 - maybe at some point ill rewrite the frontend in react

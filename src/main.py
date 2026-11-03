@@ -14,6 +14,8 @@ from src.auth import AuthBlueprint
 from src.user import UserBlueprint
 from src.industry import IndustryBlueprint
 from src.config import ConfigBlueprint
+from src.invention import InventionBlueprint
+from src.production import ProductionBlueprint
 
 load_dotenv()
 
@@ -102,6 +104,13 @@ app.register_blueprint(industry_blueprint)
 
 config_blueprint = ConfigBlueprint("config", __name__)
 app.register_blueprint(config_blueprint)
+
+invention_blueprint = InventionBlueprint("invention", __name__)
+app.register_blueprint(invention_blueprint)
+
+production_blueprint = ProductionBlueprint("production", __name__)
+app.register_blueprint(production_blueprint)
+
 
 if __name__ == "__main__":
     app.run(debug=False, host="localhost", port=5050)

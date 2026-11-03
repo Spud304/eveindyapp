@@ -71,6 +71,31 @@ RIG_GROUP_TO_CATEGORIES = {
 # All rig group IDs (for querying dgmTypeAttributes)
 ALL_ME_RIG_GROUPS = set(RIG_GROUP_TO_CATEGORIES.keys())
 
+# Invention rig groups
+INVENTION_RIG_GROUPS = {
+    # M-Set (rig size 2)
+    1842,  # Invention Cost Optimization
+    1843,  # Invention Accelerator
+    # L-Set (rig size 3)
+    1863,  # Invention Optimization
+    # XL-Set (rig size 4)
+    1870,  # Laboratory Optimization (covers invention + copy + research)
+}
+
+# Blueprint copy rig groups
+COPY_RIG_GROUPS = {
+    # M-Set (rig size 2)
+    1848,  # Blueprint Copy Cost Optimization
+    1849,  # Blueprint Copy Accelerator
+    # L-Set (rig size 3)
+    1866,  # Blueprint Copy Optimization
+    # XL-Set (rig size 4)
+    1870,  # Laboratory Optimization (covers invention + copy + research)
+}
+
+# All engineering rig groups (ME + invention + copy)
+ALL_ENGINEERING_RIG_GROUPS = ALL_ME_RIG_GROUPS | INVENTION_RIG_GROUPS | COPY_RIG_GROUPS
+
 # Structure base TE multipliers (from SDE attr 2602)
 # 0.7 = 30% time reduction, 1.0 = no reduction
 STRUCTURE_BASE_TE = {
@@ -104,6 +129,53 @@ ATTR_INVENTION_ME_MOD = 1113
 ATTR_INVENTION_TE_MOD = 1114
 ATTR_INVENTION_RUN_MOD = 1124
 
+# Encryption method skill type IDs
+ENCRYPTION_SKILL_IDS = {
+    3408,  # Sleeper Encryption Methods
+    21790,  # Caldari Encryption Methods
+    21791,  # Minmatar Encryption Methods
+    23087,  # Amarr Encryption Methods
+    23121,  # Gallente Encryption Methods
+    52308,  # Triglavian Encryption Methods
+    55025,  # Upwell Encryption Methods
+}
+
 # Base T2 BPC stats (before decryptor modifiers)
 T2_BASE_ME = -2
 T2_BASE_TE = -4
+
+# --- Reaction constants ---
+
+# Reaction rig ME attribute ID (different from manufacturing rigs)
+ATTR_REACTION_ME_BONUS = 2714
+
+# Reaction rig group IDs -> reaction rig categories they apply to
+REACTION_RIG_GROUP_TO_CATEGORIES = {
+    1934: {
+        "composite_reaction"
+    },  # Composite Reactor ME rigs (intermediates + composites)
+    1936: {"hybrid_reaction"},  # Hybrid Reactor ME rigs (polymer/fullerene)
+    1938: {
+        "biochemical_reaction"
+    },  # Biochemical Reactor ME rigs (biochem + molecular-forged)
+}
+
+# Reaction formula groupID -> rig category
+REACTION_FORMULA_GROUP_TO_RIG_CATEGORY = {
+    1888: "composite_reaction",  # Composite Reaction Formulas (both intermediate and final)
+    1889: "hybrid_reaction",  # Polymer Reaction Formulas
+    4097: "biochemical_reaction",  # Molecular-Forged Reaction Formulas
+    1890: "biochemical_reaction",  # Biochemical Reaction Formulas
+}
+
+# All reaction rig group IDs
+ALL_REACTION_RIG_GROUPS = set(REACTION_RIG_GROUP_TO_CATEGORIES.keys())
+
+# Structures that can run reactions
+REACTION_CAPABLE_STRUCTURES = {"athanor", "tatara"}
+
+# Tatara reaction TE bonus (role bonus, not in SDE) — 25% time reduction
+TATARA_REACTION_TE_BONUS = 0.75
+
+# Reactions skill ID
+SKILL_REACTIONS = 45746

@@ -154,7 +154,7 @@ def fetch_blueprints_task(self, character_id):
     """
     user = _ensure_fresh_token(character_id)
     if user is None:
-        raise self.retry(exc=Exception(f"User {character_id} not found"))
+        raise Exception(f"Character {character_id} not found. Try logging in again.")
 
     access_token = user.access_token
     headers = {
@@ -170,7 +170,18 @@ def fetch_blueprints_task(self, character_id):
         status, data = esi_get(url, headers=headers, params={"page": page})
         if status != 200 or data is None:
             if page == 1:
-                raise self.retry(exc=Exception(f"ESI returned {status} on page 1"))
+                if status in (401, 403):
+                    raise self.retry(
+                        exc=Exception(
+                            f"ESI authentication failed (HTTP {status}). "
+                            "Your SSO token may have expired — try logging in again."
+                        )
+                    )
+                raise self.retry(
+                    exc=Exception(
+                        f"ESI returned HTTP {status}. The EVE API may be down — try again later."
+                    )
+                )
             break
         all_bps.extend(data)
         if len(data) < 1000:
@@ -180,30 +191,36 @@ def fetch_blueprints_task(self, character_id):
     now = datetime.now(timezone.utc)
 
     # --- Cache blueprints ---
-    db.session.execute(
-        CachedBlueprint.__table__.delete().where(
-            CachedBlueprint.character_id == character_id
+    # Only replace cache if ESI returned data; keep stale cache rather than
+    # wiping it when ESI returns empty (avoids infinite refresh loop).
+    if all_bps:
+        db.session.execute(
+            CachedBlueprint.__table__.delete().where(
+                CachedBlueprint.character_id == character_id
+            )
         )
-    )
-
-    new_rows = [
-        CachedBlueprint(
-            character_id=character_id,
-            item_id=bp["item_id"],
-            type_id=bp["type_id"],
-            location_id=bp["location_id"],
-            location_flag=bp["location_flag"],
-            quantity=bp["quantity"],
-            runs=bp["runs"],
-            material_efficiency=bp["material_efficiency"],
-            time_efficiency=bp["time_efficiency"],
-            cached_at=now,
-        )
-        for bp in all_bps
-    ]
-    if new_rows:
+        new_rows = [
+            CachedBlueprint(
+                character_id=character_id,
+                item_id=bp["item_id"],
+                type_id=bp["type_id"],
+                location_id=bp["location_id"],
+                location_flag=bp["location_flag"],
+                quantity=bp["quantity"],
+                runs=bp["runs"],
+                material_efficiency=bp["material_efficiency"],
+                time_efficiency=bp["time_efficiency"],
+                cached_at=now,
+            )
+            for bp in all_bps
+        ]
         db.session.add_all(new_rows)
-    db.session.commit()
+        db.session.commit()
+    else:
+        logger.warning(
+            "ESI returned 0 blueprints for character %s — keeping existing cache",
+            character_id,
+        )
 
     # --- Resolve location names ---
     location_ids = {bp["location_id"] for bp in all_bps if bp.get("location_id")}

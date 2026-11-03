@@ -117,7 +117,9 @@
         <div class="nc-field nc-runs-input" style="margin-bottom: 1rem;">
             <label class="nc-field-label">Runs</label>
             <div class="control">
-                <input class="nc-input" type="number" name="runs" value="{{ runs }}" min="1" style="width: 100%;">
+                <input class="nc-input nc-comma-input" type="text" id="runsDisplay" autocomplete="off"
+                       value="{{ '{:,}'.format(runs) }}" style="width: 100%;">
+                <input type="hidden" name="runs" id="runsHidden" value="{{ runs }}">
             </div>
         </div>
 
@@ -235,6 +237,42 @@ function copyMultibuy(btn) {
         setTimeout(function() { msg.classList.remove('nc-show'); }, 2000);
     });
 }
+
+// Comma-formatted number inputs
+document.querySelectorAll('.nc-comma-input').forEach(function(display) {
+    var hiddenId = display.id.replace('Display', 'Hidden');
+    var hidden = document.getElementById(hiddenId);
+    if (!hidden) return;
+
+    function formatWithCommas(n) {
+        return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    display.addEventListener('input', function() {
+        var raw = display.value.replace(/,/g, '');
+        var num = parseInt(raw, 10);
+        hidden.value = isNaN(num) ? '' : num;
+        if (raw && !isNaN(num)) {
+            var pos = display.selectionStart;
+            var oldLen = display.value.length;
+            display.value = formatWithCommas(num);
+            var newLen = display.value.length;
+            display.setSelectionRange(pos + (newLen - oldLen), pos + (newLen - oldLen));
+        }
+    });
+
+    display.addEventListener('blur', function() {
+        var raw = display.value.replace(/,/g, '');
+        var num = parseInt(raw, 10);
+        if (!isNaN(num) && num > 0) {
+            display.value = formatWithCommas(num);
+            hidden.value = num;
+        } else {
+            display.value = '';
+            hidden.value = '';
+        }
+    });
+});
 </script>
 
 {% endblock %}

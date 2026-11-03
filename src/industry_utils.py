@@ -270,7 +270,7 @@ def load_activity_times():
     """
     engine = db.engines["static"]
     sql = text(
-        "SELECT blueprintTypeID, activityName, time FROM BlueprintActivityType WHERE activityName IN ('manufacturing', 'copying')"
+        "SELECT blueprintTypeID, activityName, time FROM BlueprintActivityType WHERE activityName IN ('manufacturing', 'copying', 'reaction')"
     )
     with engine.connect() as conn:
         rows = conn.execute(sql).all()
@@ -280,7 +280,10 @@ def load_activity_times():
         times.setdefault(type_id, {})[activity_name] = time_val
 
     return {
-        type_id: (acts.get("manufacturing", 0), acts.get("copying", 0))
+        type_id: (
+            acts.get("manufacturing", acts.get("reaction", 0)),
+            acts.get("copying", 0),
+        )
         for type_id, acts in times.items()
     }
 
@@ -414,6 +417,44 @@ def get_character_names(character_ids):
         )
     ).all()
     return {r.character_id: r.character_name for r in rows}
+
+
+def load_invention_skill_requirements():
+    """Load invention skill requirements from SDE, separating encryption from science skills.
+
+    Returns {t1_bp_id: {"encryption_skill": skill_id or None,
+                        "science_skills": [skill_id, ...],
+                        "all_skills": [(skill_id, min_level), ...]}}.
+    Cached after first call.
+    """
+    from src.industry_constants import ENCRYPTION_SKILL_IDS
+
+    key = "invention_skill_reqs"
+    if key in _sde_cache:
+        return _sde_cache[key]
+
+    engine = db.engines["static"]
+    sql = text(
+        "SELECT parentTypeId, typeID, level FROM BlueprintSkill WHERE activityName = 'invention'"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql).all()
+
+    result = {}
+    for bp_id, skill_id, level in rows:
+        entry = result.setdefault(
+            bp_id,
+            {"encryption_skill": None, "science_skills": [], "all_skills": []},
+        )
+        entry["all_skills"].append((skill_id, level))
+        if skill_id in ENCRYPTION_SKILL_IDS:
+            entry["encryption_skill"] = skill_id
+        else:
+            entry["science_skills"].append(skill_id)
+
+    with _sde_cache_lock:
+        _sde_cache[key] = result
+    return result
 
 
 def load_sde_invention_data():
@@ -614,3 +655,204 @@ def assign_jobs_to_characters(phase_bps, characters, skill_reqs, job_type="mfg")
             unassignable.append(bp)
 
     return unassignable
+
+
+def load_sde_reaction_data():
+    """Load reaction activity materials and products into dicts. Cached after first call.
+
+    Returns:
+        reaction_materials: {formula_type_id: [(materialTypeID, quantity), ...]}
+        reaction_products: {product_type_id: (formula_type_id, output_quantity)}
+    """
+    key = "reaction_data"
+    if key in _sde_cache:
+        return _sde_cache[key]
+
+    reaction_materials = {}
+    for row in db.session.execute(
+        select(BlueprintActivityMaterial).where(
+            BlueprintActivityMaterial.activityID == "reaction"
+        )
+    ).scalars():
+        reaction_materials.setdefault(row.typeID, []).append(
+            (row.materialTypeID, row.quantity)
+        )
+
+    reaction_products = {}
+    for row in db.session.execute(
+        select(BlueprintProduct).where(BlueprintProduct.activityID == "reaction")
+    ).scalars():
+        reaction_products[row.productTypeID] = (row.typeID, row.quantity)
+
+    result = (reaction_materials, reaction_products)
+    with _sde_cache_lock:
+        _sde_cache[key] = result
+    return result
+
+
+def build_reaction_toggle_map(reaction_products, reaction_materials, type_to_group):
+    """Build mapping from product type ID to reaction toggle key.
+
+    Returns {product_type_id: toggle_key} where toggle_key is one of:
+    'react_intermediates', 'react_composites', 'react_hybrid',
+    'react_biochemical', 'react_molecular_forged'.
+    """
+    # Find all material type IDs used as inputs to reactions
+    all_reaction_inputs = set()
+    for formula_id, mats in reaction_materials.items():
+        for mat_id, _ in mats:
+            all_reaction_inputs.add(mat_id)
+
+    toggle_map = {}
+    for product_id, (formula_id, _) in reaction_products.items():
+        group_id = type_to_group.get(formula_id)
+        if group_id == 1888:
+            # Composite group — distinguish intermediate vs final
+            if product_id in all_reaction_inputs:
+                toggle_map[product_id] = "react_intermediates"
+            else:
+                toggle_map[product_id] = "react_composites"
+        elif group_id == 1889:
+            toggle_map[product_id] = "react_hybrid"
+        elif group_id == 1890:
+            toggle_map[product_id] = "react_biochemical"
+        elif group_id == 4097:
+            toggle_map[product_id] = "react_molecular_forged"
+
+    return toggle_map
+
+
+def load_reaction_rig_data():
+    """Load reaction rig ME bonus + security multipliers from dgmTypeAttributes.
+
+    Returns {typeID: {'me_bonus': float, 'sec_mult': {'hs': ..., 'ls': ..., 'ns': ...}, 'group_id': int}}
+    """
+    from src.industry_constants import ALL_REACTION_RIG_GROUPS, ATTR_REACTION_ME_BONUS
+
+    key = "reaction_rig_data"
+    if key in _sde_cache:
+        return _sde_cache[key]
+
+    rig_rows = db.session.execute(
+        select(EveType.typeID, EveType.groupID)
+        .where(EveType.groupID.in_(ALL_REACTION_RIG_GROUPS))
+        .where(EveType.published == 1)
+    ).all()
+
+    if not rig_rows:
+        with _sde_cache_lock:
+            _sde_cache[key] = {}
+        return {}
+
+    rig_type_ids = {r.typeID for r in rig_rows}
+    type_to_rig_group = {r.typeID: r.groupID for r in rig_rows}
+
+    type_list = ",".join(str(t) for t in rig_type_ids)
+    attr_ids = f"{ATTR_REACTION_ME_BONUS},{ATTR_HIGHSEC_MODIFIER},{ATTR_LOWSEC_MODIFIER},{ATTR_NULLSEC_MODIFIER}"
+    attrs_sql = text(f"""
+        SELECT typeID, attributeID, value
+        FROM TypeDogmaAttribute
+        WHERE typeID IN ({type_list}) AND attributeID IN ({attr_ids})
+    """)
+    engine = db.engines["static"]
+    with engine.connect() as conn:
+        attr_rows = conn.execute(attrs_sql).all()
+
+    type_attrs = {}
+    for type_id, attr_id, value in attr_rows:
+        type_attrs.setdefault(type_id, {})[attr_id] = value
+
+    rig_data = {}
+    for type_id in rig_type_ids:
+        attrs = type_attrs.get(type_id, {})
+        me_bonus = abs(attrs.get(ATTR_REACTION_ME_BONUS, 0.0))
+        rig_data[type_id] = {
+            "me_bonus": me_bonus,
+            "sec_mult": {
+                "hs": attrs.get(ATTR_HIGHSEC_MODIFIER, 1.0),
+                "ls": attrs.get(ATTR_LOWSEC_MODIFIER, 1.0),
+                "ns": attrs.get(ATTR_NULLSEC_MODIFIER, 1.1),
+            },
+            "group_id": type_to_rig_group[type_id],
+        }
+
+    with _sde_cache_lock:
+        _sde_cache[key] = rig_data
+    return rig_data
+
+
+def classify_reaction_for_rig(formula_type_id, type_to_group):
+    """Classify a reaction formula into a reaction rig category.
+
+    Returns one of: 'composite_reaction', 'hybrid_reaction', 'biochemical_reaction', or None.
+    """
+    from src.industry_constants import REACTION_FORMULA_GROUP_TO_RIG_CATEGORY
+
+    group_id = type_to_group.get(formula_type_id)
+    return REACTION_FORMULA_GROUP_TO_RIG_CATEGORY.get(group_id)
+
+
+def _compute_reaction_station_me(
+    station, reaction_rig_cat, system_security, reaction_rig_data
+):
+    """Compute effective ME% for a reaction station given a reaction rig category."""
+    from src.industry_constants import (
+        REACTION_CAPABLE_STRUCTURES,
+        REACTION_RIG_GROUP_TO_CATEGORIES,
+    )
+
+    structure_type = station.get("structure_type", "")
+    if structure_type not in REACTION_CAPABLE_STRUCTURES:
+        return 0.0
+
+    best_rig_effective = 0.0
+    sec_class = _get_security_class(system_security)
+
+    for rig_id in station.get("rigs", []):
+        if rig_id is None:
+            continue
+        rig = reaction_rig_data.get(rig_id)
+        if not rig:
+            continue
+        categories_covered = REACTION_RIG_GROUP_TO_CATEGORIES.get(
+            rig["group_id"], set()
+        )
+        if reaction_rig_cat not in categories_covered:
+            continue
+        rig_effective = rig["me_bonus"] * rig["sec_mult"].get(sec_class, 1.0) / 100
+        best_rig_effective = max(best_rig_effective, rig_effective)
+
+    return best_rig_effective * 100
+
+
+def pick_best_reaction_station(
+    stations, reaction_rig_cat, system_securities, reaction_rig_data
+):
+    """Find best station for a reaction category. Only Athanor/Tatara can run reactions.
+
+    Returns (station_dict, effective_me_percent, effective_te_multiplier) or (None, 0, 1.0).
+    """
+    from src.industry_constants import (
+        REACTION_CAPABLE_STRUCTURES,
+        TATARA_REACTION_TE_BONUS,
+    )
+
+    best_station = None
+    best_me = 0.0
+    best_te = 1.0
+
+    for station in stations:
+        structure_type = station.get("structure_type", "")
+        if structure_type not in REACTION_CAPABLE_STRUCTURES:
+            continue
+        sec = system_securities.get(station.get("system_id"))
+        me = _compute_reaction_station_me(
+            station, reaction_rig_cat, sec, reaction_rig_data
+        )
+        te = TATARA_REACTION_TE_BONUS if structure_type == "tatara" else 1.0
+        if best_station is None or me > best_me:
+            best_me = me
+            best_te = te
+            best_station = station
+
+    return best_station, best_me, best_te
