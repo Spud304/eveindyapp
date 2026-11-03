@@ -141,11 +141,13 @@ Pure package (no Django imports) inside the Django project; imported as `engine`
   - Schedule: dependency-aware list scheduling, longest ready job first, onto the eligible character slot that finishes it earliest. Replaces the depth-phase timeline.
 - Fixed from the old calculator: bugs 1, 2, 8, 9, 10, 11 (tests in `backend/tests/engine/`). Bug 3 is a form bug; the engine takes ME override and decryptor as separate inputs, so the new UI cannot reproduce it. Invention chance changed from the old multiplicative skill formula to the additive one under Industry formulas.
 - Checked against build 3667080: 10 Ishtar + 50 Hulk plans in 0.01 s (game data loads in 0.5 s); Vexor/Covetor invention base 0.26 from the SDE gives 0.671 with science 5/5, encryption 4 and Attainment, matching the formula by hand. Not yet compared with in-game job windows.
-- Not modelled yet (stated in reasons/warnings where they apply). Gaps against the [client] formulas are marked:
-  - **[client]** Max runs per job: a BPO job is one job for all runs, but the client caps a job at 30 days of time (copying and invention at 500 runs).
-  - **[client]** Required-skill time modifier (attr 1982, −1%/level per required skill) on manufacturing time.
-  - **[client]** Copy and invention fees (fee is `None`); the formula is now known.
-  - **[client]** Safe-sec 5% industry security tax (security ≥ 0.95), blueprint cost multiplier (attr 1954), per-component rounding to whole ISK. The facility `sccTaxModifier` and faction cost modifier come from the server and have no SDE source.
+- Matched to the [client] formulas (2026-11-03):
+  - Jobs on an original (owned BPO, reaction formula, or a BPO not yet owned) are split at the 30-day limit, computed without character skills, so every planned job stays valid whoever runs it. Copying and invention jobs are capped at 500 runs and 30 days. Invention copies are sized so one copy feeds one invention job. Live check: 285 Crystalline Carbonide reaction runs became 240 + 45.
+  - Manufacturing time includes the required-skill bonus (attr 1982 on 26 skills, −1%/level). Job time is rounded to whole seconds.
+  - Fees for every activity, split as in the client: base (EIV × runs; × 2% × runs per copy × copies for copying with the T1 product's EIV; × 2% × attempts for invention with the T2 product's EIV), then job cost (base × cost index × hull/rig cost modifiers × blueprint attr 1954, + 0.25% of base if alpha), facility tax, SCC 4% and the 5% safe-sec tax (security ≥ 0.95). Each part rounded half up to whole ISK, as Python 2 does.
+- Not modelled yet (stated in reasons/warnings where they apply):
+  - Facility `sccTaxModifier` and faction cost modifier: server-side values with no SDE source.
+  - EIV is ME-0 materials × CCP adjusted price ([community]); the client receives EIV from the server, so it can't be checked in client code.
   - Implants (they feed the same character time attributes as skills).
   - Copying-activity materials in the SDE (T2 BPO copy datacores; not used for T1 invention copies).
   - Structure restrictions (e.g. which hulls a Raitaru can build); stations declare activities only.
