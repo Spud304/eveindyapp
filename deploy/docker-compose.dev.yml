@@ -1,0 +1,23 @@
+# Local development for the new stack: only the stateful services. Run Django natively.
+# Ports differ from the AT Tool's dev stack (5433/6380) so both can run at once.
+name: eveindy-dev
+
+services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_DB: eveindy
+      POSTGRES_USER: eveindy
+      POSTGRES_PASSWORD: eveindy
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6381:6379"
+
+volumes:
+  pgdata_dev:

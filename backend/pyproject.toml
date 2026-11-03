@@ -1,0 +1,39 @@
+[project]
+name = "eveindy-backend"
+version = "0.1.0"
+description = "EVE industry planner backend (Django + django-ninja)"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=5.2,<5.3",
+    "django-ninja>=1.4",
+    "uvicorn[standard]>=0.34",
+    "httpx>=0.28",
+    "pyjwt[crypto]>=2.10",
+    "psycopg[binary,pool]>=3.2",
+    "environs>=14",
+    "cryptography>=44",
+    "whitenoise>=6.9",
+    "redis>=5.2",
+    "dj-database-url>=3.1.2",
+]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.170.14",
+    "pytest>=8.3",
+    "pytest-django>=4.10",
+    "ruff>=0.11",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
