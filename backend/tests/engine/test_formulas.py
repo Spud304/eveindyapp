@@ -5,10 +5,19 @@ from engine.types import Activity, Material, SecurityClass
 
 from .data import (
     ADV_COMPONENT_TE_RIG,
+    COMP_A,
+    COMPOSITE,
+    COMPOSITE_ME_RIG,
+    COPY_TIME_RIG,
+    HULL,
     MEDIUM_SHIP_ME_RIG,
+    T2_MOD,
+    TYPES,
+    athanor,
     azbel,
     character,
     raitaru,
+    tatara,
 )
 
 
@@ -42,36 +51,51 @@ def test_job_materials_ignores_float_noise():
 
 
 def test_station_me_rig_applies_security_multiplier():
-    mat, time, _ = f.station_bonuses(
-        azbel((MEDIUM_SHIP_ME_RIG,)),
-        Activity.MANUFACTURING,
-        "basic_medium_ship",
-        SecurityClass.LOW,
+    b = f.station_bonuses(
+        azbel((MEDIUM_SHIP_ME_RIG,)), Activity.MANUFACTURING, TYPES[HULL], SecurityClass.LOW
     )
-    assert mat == pytest.approx(0.99 * (1 - 0.038))
-    assert time == pytest.approx(0.80)
+    assert b.material == pytest.approx(0.99 * (1 - 0.038))
+    assert b.time == pytest.approx(0.80)
+    assert b.cost == pytest.approx(0.96)
 
 
 def test_station_m_set_te_rig_is_counted():
-    mat, time, desc = f.station_bonuses(
-        raitaru((ADV_COMPONENT_TE_RIG,)),
-        Activity.MANUFACTURING,
-        "adv_component",
-        SecurityClass.HIGH,
+    b = f.station_bonuses(
+        raitaru((ADV_COMPONENT_TE_RIG,)), Activity.MANUFACTURING, TYPES[COMP_A], SecurityClass.HIGH
     )
-    assert mat == pytest.approx(0.99)
-    assert time == pytest.approx(0.85 * 0.8)
-    assert "TE rig" in desc
+    assert b.material == pytest.approx(0.99)
+    assert b.time == pytest.approx(0.85 * 0.8)
+    assert "time -20.00% (Components)" in b.description
 
 
-def test_rig_for_other_category_is_ignored():
-    mat, _, _ = f.station_bonuses(
-        azbel((MEDIUM_SHIP_ME_RIG,)),
-        Activity.MANUFACTURING,
-        "equipment",
-        SecurityClass.LOW,
+def test_rig_outside_its_target_filter_is_ignored():
+    b = f.station_bonuses(
+        azbel((MEDIUM_SHIP_ME_RIG,)), Activity.MANUFACTURING, TYPES[T2_MOD], SecurityClass.LOW
     )
-    assert mat == pytest.approx(0.99)
+    assert b.material == pytest.approx(0.99)
+
+
+def test_structure_modifiers_only_for_their_activity():
+    b = f.station_bonuses(raitaru(), Activity.REACTION, TYPES[COMPOSITE], SecurityClass.LOW)
+    assert (b.material, b.time, b.cost) == (1.0, 1.0, 1.0)
+
+
+def test_engineering_complex_time_and_copy_rig_apply_to_copying():
+    b = f.station_bonuses(raitaru((COPY_TIME_RIG,)), Activity.COPYING, None, SecurityClass.HIGH)
+    assert b.time == pytest.approx(0.85 * 0.8)
+    assert b.cost == pytest.approx(0.97)
+
+
+def test_tatara_reaction_time():
+    b = f.station_bonuses(tatara(), Activity.REACTION, TYPES[COMPOSITE], SecurityClass.NULL)
+    assert b.time == pytest.approx(0.75)
+
+
+def test_reactor_rig_has_no_highsec_multiplier_entry_defaults_to_one():
+    b = f.station_bonuses(
+        athanor((COMPOSITE_ME_RIG,)), Activity.REACTION, TYPES[COMPOSITE], SecurityClass.HIGH
+    )
+    assert b.material == pytest.approx(0.98)
 
 
 def test_job_fee_uses_scc_4pct_and_structure_cost_bonus():

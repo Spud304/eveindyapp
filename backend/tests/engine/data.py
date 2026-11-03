@@ -1,7 +1,7 @@
 """Small synthetic SDE + account fixtures for engine tests.
 
-IDs are made up except where the engine keys on real ones (group IDs for rig
-and build-rule classification, skill IDs)."""
+Item and blueprint IDs are made up; group IDs used by build rules and rig
+target filters, skill IDs and structure/rig values are the real SDE ones."""
 
 from engine.types import (
     Activity,
@@ -11,16 +11,20 @@ from engine.types import (
     GameData,
     ItemType,
     Material,
+    ModifierKind,
     OwnedBlueprint,
     PlanInput,
     PlanLine,
     Recipe,
     Rig,
+    RigBonus,
     SecurityClass,
     SkillRequirement,
     SolarSystem,
     Station,
     Structure,
+    StructureModifier,
+    TargetFilter,
 )
 
 TRIT, PYE, MEX = 34, 35, 36
@@ -132,9 +136,21 @@ def game(decryptors=()):
     return GameData(types=TYPES, blueprints=BLUEPRINTS, decryptors=tuple(decryptors))
 
 
-RAITARU = Structure(35825, "Raitaru", 0.99, 0.85, 0.97)
-AZBEL = Structure(35826, "Azbel", 0.99, 0.80, 0.96)
+def _complex(type_id, name, te, cost):
+    """Engineering complex modifiers as in SDE industryModifierSources (2600/2601/2602)."""
+    mods = [StructureModifier(Activity.MANUFACTURING, ModifierKind.MATERIAL, 0.99)]
+    for act in (Activity.MANUFACTURING, Activity.COPYING, Activity.INVENTION):
+        mods.append(StructureModifier(act, ModifierKind.TIME, te))
+        mods.append(StructureModifier(act, ModifierKind.COST, cost))
+    return Structure(type_id, name, tuple(mods))
+
+
+RAITARU = _complex(35825, "Raitaru", 0.85, 0.97)
+AZBEL = _complex(35826, "Azbel", 0.80, 0.96)
 ATHANOR = Structure(35835, "Athanor")
+TATARA = Structure(
+    35836, "Tatara", (StructureModifier(Activity.REACTION, ModifierKind.TIME, 0.75),)
+)
 
 HS_SYSTEM, LS_SYSTEM, NS_SYSTEM = 30000001, 30000002, 30000003
 SYSTEMS = {
@@ -150,9 +166,37 @@ SEC_ENGINEERING = {
 }
 SEC_REACTOR = {SecurityClass.LOW: 1.0, SecurityClass.NULL: 1.1}
 
-MEDIUM_SHIP_ME_RIG = Rig(37150, 1826, me_bonus=2.0, security_multipliers=SEC_ENGINEERING)
-ADV_COMPONENT_TE_RIG = Rig(37160, 1837, te_bonus=20.0, security_multipliers=SEC_ENGINEERING)
-COMPOSITE_ME_RIG = Rig(46486, 1934, me_bonus=2.0, security_multipliers=SEC_REACTOR)
+# Filters copied from SDE industryTargetFilters 7, 14, 18.
+MEDIUM_T1_SHIPS = TargetFilter(
+    7, "Medium T1 Ships", group_ids=frozenset({26, 28, 419, 463, 1201, 4902, 5087})
+)
+COMPONENTS = TargetFilter(14, "Components", group_ids=frozenset({332, 334, 716, 964}))
+COMPOSITE_REACTIONS = TargetFilter(18, "Composite Reactions", group_ids=frozenset({428, 429, 4932}))
+
+MEDIUM_SHIP_ME_RIG = Rig(
+    37146,
+    "M-Set Basic Medium Ship ME I",
+    (RigBonus(Activity.MANUFACTURING, ModifierKind.MATERIAL, 2.0, MEDIUM_T1_SHIPS),),
+    SEC_ENGINEERING,
+)
+ADV_COMPONENT_TE_RIG = Rig(
+    37165,
+    "M-Set Advanced Component TE I",
+    (RigBonus(Activity.MANUFACTURING, ModifierKind.TIME, 20.0, COMPONENTS),),
+    SEC_ENGINEERING,
+)
+COMPOSITE_ME_RIG = Rig(
+    46486,
+    "M-Set Composite Reactor ME I",
+    (RigBonus(Activity.REACTION, ModifierKind.MATERIAL, 2.0, COMPOSITE_REACTIONS),),
+    SEC_REACTOR,
+)
+COPY_TIME_RIG = Rig(
+    43891,
+    "M-Set Blueprint Copy Accelerator I",
+    (RigBonus(Activity.COPYING, ModifierKind.TIME, 20.0),),
+    SEC_ENGINEERING,
+)
 
 MFG = frozenset({Activity.MANUFACTURING})
 
@@ -167,6 +211,16 @@ def azbel(rigs=()):
 
 def athanor(rigs=()):
     return Station(3, "Athanor NS", NS_SYSTEM, ATHANOR, 0.0, frozenset({Activity.REACTION}), rigs)
+
+
+def tatara(rigs=()):
+    return Station(4, "Tatara NS", NS_SYSTEM, TATARA, 0.0, frozenset({Activity.REACTION}), rigs)
+
+
+def lab(rigs=()):
+    """A Raitaru running copying and invention only."""
+    acts = frozenset({Activity.COPYING, Activity.INVENTION})
+    return Station(5, "Lab HS", HS_SYSTEM, RAITARU, 0.0, acts, tuple(rigs))
 
 
 def bpo(type_id, me=0, te=0, item_id=None):

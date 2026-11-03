@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from . import constants as c
 from .types import (
@@ -12,7 +13,7 @@ from .types import (
     Character,
     ItemType,
     Material,
-    Rig,
+    ModifierKind,
     SecurityClass,
     Station,
     TypeId,
@@ -32,95 +33,48 @@ def security_class(security: float | None) -> SecurityClass:
     return SecurityClass.NULL
 
 
-def classify_manufacturing(product: ItemType | None) -> str | None:
-    """Rig category for a manufactured product, or None if no rig applies."""
-    if product is None:
-        return None
-    g, cat = product.group_id, product.category_id
-    if cat == 7:
-        return "equipment"
-    if cat == 8:
-        return "ammunition"
-    if cat in (18, 87):
-        return "drone_fighter"
-    if cat == 6:
-        for groups, name in (
-            (c.BASIC_SMALL_SHIP_GROUPS, "basic_small_ship"),
-            (c.BASIC_MEDIUM_SHIP_GROUPS, "basic_medium_ship"),
-            (c.BASIC_LARGE_SHIP_GROUPS, "basic_large_ship"),
-            (c.ADV_SMALL_SHIP_GROUPS, "adv_small_ship"),
-            (c.ADV_MEDIUM_SHIP_GROUPS, "adv_medium_ship"),
-            (c.ADV_LARGE_SHIP_GROUPS, "adv_large_ship"),
-            (c.CAPITAL_SHIP_GROUPS, "capital_ship"),
-        ):
-            if g in groups:
-                return name
-        return None
-    if cat == 17:
-        if g in (334, 964):
-            return "adv_component"
-        if g in (873, 913):
-            return "basic_capital_component"
-        if g == 536:
-            return "structure"
-        return None
-    if cat == 65:
-        return "structure"
-    return None
+@dataclass(frozen=True, slots=True)
+class StationBonuses:
+    """Combined multipliers for one activity and product at one station.
+    `material` excludes blueprint ME; `time` excludes blueprint TE and skills;
+    `cost` multiplies the system cost index."""
 
-
-def classify_reaction(formula: ItemType | None) -> str | None:
-    if formula is None:
-        return None
-    return c.REACTION_FORMULA_RIG_CATEGORY.get(formula.group_id)
-
-
-def _rig_effect(rig: Rig, bonus: float, sec: SecurityClass) -> float:
-    """Rig bonus as a fraction after the security multiplier."""
-    return bonus * rig.security_multipliers.get(sec, 1.0) / 100
-
-
-def best_rig(
-    station: Station, activity: Activity, rig_category: str | None, sec: SecurityClass
-) -> tuple[float, float, Rig | None, Rig | None]:
-    """Best ME and TE rig fractions that cover `rig_category`, and the rigs."""
-    coverage = c.RIG_CATEGORIES_BY_ACTIVITY.get(activity, {})
-    best_me, best_te = 0.0, 0.0
-    me_rig = te_rig = None
-    if rig_category is None:
-        return best_me, best_te, me_rig, te_rig
-    for rig in station.rigs:
-        if rig_category not in coverage.get(rig.group_id, frozenset()):
-            continue
-        me = _rig_effect(rig, rig.me_bonus, sec)
-        te = _rig_effect(rig, rig.te_bonus, sec)
-        if me > best_me:
-            best_me, me_rig = me, rig
-        if te > best_te:
-            best_te, te_rig = te, rig
-    return best_me, best_te, me_rig, te_rig
+    material: float
+    time: float
+    cost: float
+    description: str
 
 
 def station_bonuses(
-    station: Station, activity: Activity, rig_category: str | None, sec: SecurityClass
-) -> tuple[float, float, str]:
-    """(material multiplier, time multiplier, description) for a job type at a
-    station. Material multiplier excludes blueprint ME."""
-    rig_me, rig_te, me_rig, te_rig = best_rig(station, activity, rig_category, sec)
-    s = station.structure
-    if activity == Activity.REACTION:
-        mat = 1 - rig_me
-        time = s.reaction_te_multiplier * (1 - rig_te)
-    else:
-        mat = s.me_multiplier * (1 - rig_me)
-        time = s.te_multiplier * (1 - rig_te)
-    parts = [s.name]
-    if me_rig:
-        parts.append(f"ME rig {me_rig.type_id} ({rig_me * 100:.2f}%)")
-    if te_rig:
-        parts.append(f"TE rig {te_rig.type_id} ({rig_te * 100:.2f}%)")
+    station: Station, activity: Activity, product: ItemType | None, sec: SecurityClass
+) -> StationBonuses:
+    """Apply every structure modifier for `activity`, and every rig bonus for
+    `activity` whose target filter matches `product`, multiplicatively. This
+    is CCP's industryModifierSources model; overlapping rigs of the same kind
+    cannot be fitted together, so stacking only combines hull with rig."""
+    mult = {kind: 1.0 for kind in ModifierKind}
+    parts = [station.structure.name]
+    for m in station.structure.modifiers:
+        if m.activity == activity:
+            mult[m.kind] *= m.multiplier
+    for rig in station.rigs:
+        sec_mult = rig.security_multipliers.get(sec, 1.0)
+        for b in rig.bonuses:
+            if b.activity != activity:
+                continue
+            if b.target is not None and not b.target.matches(product):
+                continue
+            effect = b.percent * sec_mult / 100
+            mult[b.kind] *= 1 - effect
+            target = f" ({b.target.name})" if b.target else ""
+            parts.append(f"{rig.name}: {b.kind.value} -{effect * 100:.2f}%{target}")
     parts.append(sec.value + "sec")
-    return mat, time, ", ".join(parts)
+    return StationBonuses(
+        mult[ModifierKind.MATERIAL],
+        mult[ModifierKind.TIME],
+        mult[ModifierKind.COST],
+        ", ".join(parts),
+    )
 
 
 def job_materials(

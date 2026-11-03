@@ -22,6 +22,7 @@ from .data import (
     COMP_A,
     COMPOSITE,
     COMPOSITE_ME_RIG,
+    COPY_TIME_RIG,
     DATACORE,
     DECRYPTOR,
     ENCRYPTION,
@@ -44,6 +45,7 @@ from .data import (
     bpo,
     character,
     game,
+    lab,
     make_input,
     raitaru,
 )
@@ -380,6 +382,20 @@ def test_invention_without_t1_blueprint_warns():
     assert any("T1 copy runs" in w.text for w in r.warnings)
     inv_jobs = jobs_for(r, BP_T1_MOD, Activity.INVENTION)
     assert inv_jobs[0].source == BlueprintSource.MISSING
+
+
+def test_copy_and_invention_use_lab_station_time_bonuses():
+    r = plan(t2_input(stations=(lab((COPY_TIME_RIG,)),)))
+    copy = jobs_for(r, BP_T1_MOD, Activity.COPYING)[0]
+    inv = jobs_for(r, BP_T1_MOD, Activity.INVENTION)[0]
+    assert copy.station_id == inv.station_id == 5
+    # 600 s x 5 runs x Raitaru 0.85 x rig 0.8 (no skills)
+    assert copy.schedule.end_seconds - copy.schedule.start_seconds == pytest.approx(
+        600 * 5 * 0.85 * 0.8
+    )
+    # 3600 s x 5 attempts x Raitaru 0.85 (copy rig does not apply to invention)
+    assert inv.schedule.end_seconds - inv.schedule.start_seconds == pytest.approx(3600 * 5 * 0.85)
+    assert inv.cost.fee is None and inv.cost.reason.code == ReasonCode.FEE_NOT_MODELLED
 
 
 # --- schedule ------------------------------------------------------------------

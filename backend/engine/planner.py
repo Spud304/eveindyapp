@@ -80,6 +80,7 @@ class _JobMeta:
     product_type_id: TypeId | None
     product_quantity: int
     eiv_materials: tuple[Material, ...]  # recipe materials for EIV (ME 0)
+    cost_multiplier: float = 1.0  # structure and rig cost modifiers on the cost index
 
 
 class _Planner:
@@ -258,53 +259,43 @@ class _Planner:
 
     # -- station -------------------------------------------------------------
 
-    def choose_station(self, prod: _Producer, product_type_id: TypeId):
-        activity = prod.activity
-        if activity == Activity.REACTION:
-            rig_cat = f.classify_reaction(self.types.get(prod.blueprint_type_id))
-        else:
-            rig_cat = f.classify_manufacturing(self.types.get(product_type_id))
+    def choose_station(self, activity: Activity, product_type_id: TypeId | None, bp_id: TypeId):
+        """Best station for one activity and product: (station, bonuses, choice)."""
+        product = self.types.get(product_type_id) if product_type_id is not None else None
         candidates = [s for s in self.inp.stations if activity in s.activities]
         if not candidates:
             self.warn(
                 ReasonCode.STATION_NONE,
-                f"No station offers {activity.value}; {self.name(prod.blueprint_type_id)} "
+                f"No station offers {activity.value}; {self.name(bp_id)} "
                 "planned with no structure bonuses and no job fee.",
             )
-            return (
-                None,
-                1.0,
-                1.0,
-                StationChoice(
-                    None,
-                    0.0,
-                    1.0,
-                    Reason(ReasonCode.STATION_NONE, f"No station offers {activity.value}."),
-                ),
-            )
+            none = f.StationBonuses(1.0, 1.0, 1.0, "no station")
+            reason = Reason(ReasonCode.STATION_NONE, f"No station offers {activity.value}.")
+            return None, none, StationChoice(None, 0.0, 1.0, reason)
 
         scored = []
         for s in candidates:
             system = self.inp.systems.get(s.system_id)
             sec = f.security_class(system.security if system else None)
-            mat, time, desc = f.station_bonuses(s, activity, rig_cat, sec)
+            bonuses = f.station_bonuses(s, activity, product, sec)
             index = system.cost_indices.get(activity, 0.0) if system else 0.0
-            fee_rate = index * s.structure.cost_multiplier + s.facility_tax / 100
-            scored.append(((mat, time, fee_rate, s.station_id), s, mat, time, desc))
+            fee_rate = index * bonuses.cost + s.facility_tax / 100
+            key = (bonuses.material, bonuses.time, fee_rate, s.station_id)
+            scored.append((key, s, bonuses))
         scored.sort(key=lambda x: x[0])
-        _, best, mat, time, desc = scored[0]
+        _, best, bonuses = scored[0]
         text = (
-            f"{best.name}: {desc}; material x{mat:.4f}, time x{time:.4f}. "
-            f"Lowest materials, then time, then fee rate, of {len(candidates)} "
-            f"station(s) offering {activity.value}."
+            f"{best.name}: {bonuses.description}; material x{bonuses.material:.4f}, "
+            f"time x{bonuses.time:.4f}, cost x{bonuses.cost:.4f}. Lowest materials, then time, "
+            f"then fee rate, of {len(candidates)} station(s) offering {activity.value}."
         )
         choice = StationChoice(
             best.station_id,
-            (1 - mat) * 100,
-            time,
+            (1 - bonuses.material) * 100,
+            bonuses.time,
             Reason(ReasonCode.STATION_BEST, text),
         )
-        return best, mat, time, choice
+        return best, bonuses, choice
 
     # -- 3. jobs -------------------------------------------------------------
 
@@ -347,7 +338,10 @@ class _Planner:
 
     def plan_blueprint(self, prod: _Producer, product_type_id: TypeId, runs: int) -> None:
         bp_id = prod.blueprint_type_id
-        station, mat_mult, time_mult, station_choice = self.choose_station(prod, product_type_id)
+        station, bonuses, station_choice = self.choose_station(
+            prod.activity, product_type_id, bp_id
+        )
+        mat_mult, time_mult = bonuses.material, bonuses.time
         choice = self.inp.choices.get(bp_id, BlueprintChoice())
         owned = self.owned.get(bp_id, [])
         bpos = [b for b in owned if not b.is_copy]
@@ -474,6 +468,7 @@ class _Planner:
                     product_type_id=product_type_id,
                     product_quantity=r * (prod.recipe.product_quantity or 1),
                     eiv_materials=prod.recipe.materials,
+                    cost_multiplier=bonuses.cost,
                 ),
             )
             job_ids.append(job_id)
@@ -618,6 +613,7 @@ class _Planner:
         copy_job_id = None
         if t1_bpos and t1 and t1.copying:
             copy_job_id = f"copying:{t1_bp_id}:for:{t2_bp_id}"
+            copy_station, copy_bonuses, _ = self.choose_station(Activity.COPYING, None, t1_bp_id)
             self.add_job(
                 WorkJob(
                     job_id=copy_job_id,
@@ -626,7 +622,7 @@ class _Planner:
                     runs=per_copy if len(copy_runs) > 1 else copy_runs[0],
                     copies=len(copy_runs),
                     time_per_run=t1.copying.time_seconds,
-                    time_multiplier=1.0,
+                    time_multiplier=copy_bonuses.time,
                     skills=t1.copying.skills,
                 ),
                 _JobMeta(
@@ -634,7 +630,7 @@ class _Planner:
                     te=0,
                     me_reason=Reason(ReasonCode.SOURCE_BPO, "Copy of owned T1 BPO for invention."),
                     source=BlueprintSource.BPO,
-                    station=None,
+                    station=copy_station,
                     materials=(),
                     product_type_id=t1_bp_id,
                     product_quantity=len(copy_runs),
@@ -651,6 +647,7 @@ class _Planner:
                 f"{self.name(t1_bp_id)}; no T1 BPO to copy and owned T1 BPCs fall short.",
             )
 
+        inv_station, inv_bonuses, _ = self.choose_station(Activity.INVENTION, None, t1_bp_id)
         for i, r in enumerate(copy_runs, 1):
             mats = [Material(m.type_id, m.quantity * r) for m in inv.materials]
             if dec:
@@ -672,7 +669,7 @@ class _Planner:
                     blueprint_type_id=t1_bp_id,
                     runs=r,
                     time_per_run=inv.time_seconds,
-                    time_multiplier=1.0,
+                    time_multiplier=inv_bonuses.time,
                     skills=inv.skills,
                     depends_on=[copy_job_id] if copy_job_id else [],
                 ),
@@ -681,7 +678,7 @@ class _Planner:
                     te=0,
                     me_reason=Reason(ReasonCode.SOURCE_INVENTION, f"{r} attempts."),
                     source=t1_source,
-                    station=None,
+                    station=inv_station,
                     materials=tuple(mats),
                     product_type_id=t2_bp_id,
                     product_quantity=0,
@@ -812,9 +809,9 @@ class _Planner:
         system = self.inp.systems.get(station.system_id)
         index = system.cost_indices.get(job.activity, 0.0) if system else 0.0
         alpha = bool(job.character and job.character.is_alpha)
-        fee = f.job_fee(eiv, index, station.structure.cost_multiplier, station.facility_tax, alpha)
+        fee = f.job_fee(eiv, index, meta.cost_multiplier, station.facility_tax, alpha)
         text = (
-            f"EIV {eiv:,.0f} x (SCI {index:.4f} x {station.structure.cost_multiplier} "
+            f"EIV {eiv:,.0f} x (SCI {index:.4f} x {meta.cost_multiplier:.4f} "
             f"+ tax {station.facility_tax}% + SCC {c.SCC_SURCHARGE:.0%}"
             + (f" + alpha {c.ALPHA_CLONE_TAX:.2%}" if alpha else "")
             + ")."

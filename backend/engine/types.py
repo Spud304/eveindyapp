@@ -173,29 +173,68 @@ class GameData:
 # ---------------------------------------------------------------------------
 
 
+class ModifierKind(StrEnum):
+    MATERIAL = "material"
+    TIME = "time"
+    COST = "cost"
+
+
+@dataclass(frozen=True, slots=True)
+class TargetFilter:
+    """Which products a rig bonus applies to (SDE industryTargetFilters): a
+    product matches if its category or its group is listed."""
+
+    filter_id: int
+    name: str
+    category_ids: frozenset[int] = frozenset()
+    group_ids: frozenset[int] = frozenset()
+
+    def matches(self, item: ItemType | None) -> bool:
+        if item is None:
+            return False
+        return item.category_id in self.category_ids or item.group_id in self.group_ids
+
+
+@dataclass(frozen=True, slots=True)
+class RigBonus:
+    """One entry of a rig's SDE industryModifierSources record. `percent` is
+    the rig's bonus made positive (engineering rigs: attrs 2594 material,
+    2593 time, 2595 cost; reactor rigs: 2714 material, 2713 time). `target`
+    None means every product."""
+
+    activity: Activity
+    kind: ModifierKind
+    percent: float
+    target: TargetFilter | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StructureModifier:
+    """One entry of a structure hull's industryModifierSources record, with
+    the multiplier read from its own dogma (e.g. Raitaru 2600 = 0.99)."""
+
+    activity: Activity
+    kind: ModifierKind
+    multiplier: float
+
+
 @dataclass(frozen=True, slots=True)
 class Rig:
-    """A fitted rig. Bonuses are the SDE values made positive: engineering
-    rigs use attrs 2594 (ME) / 2593 (TE); reactor rigs 2714 / 2713."""
-
     type_id: TypeId
-    group_id: int
-    me_bonus: float = 0.0
-    te_bonus: float = 0.0
+    name: str
+    bonuses: tuple[RigBonus, ...] = ()
+    # attrs 2355 / 2356 / 2357; a missing class means 1.0
     security_multipliers: Mapping[SecurityClass, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class Structure:
-    """Structure hull bonuses from the SDE. Defaults mean no bonus (NPC
-    station, refinery for manufacturing attributes)."""
+    """A structure hull. No modifiers means no bonus (NPC station, or an
+    activity the hull does not bonus)."""
 
     type_id: TypeId
     name: str
-    me_multiplier: float = 1.0  # attr 2600
-    te_multiplier: float = 1.0  # attr 2602
-    cost_multiplier: float = 1.0  # attr 2601
-    reaction_te_multiplier: float = 1.0  # attr 2721
+    modifiers: tuple[StructureModifier, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
