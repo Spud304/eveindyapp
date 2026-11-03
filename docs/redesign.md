@@ -126,27 +126,28 @@ Data needed, with the ESI role it requires:
 - `PlanShare` (plan, principal: corp / link token / user, role: viewer / editor)
 
 ### Planning engine (`backend/engine/`, steps 0–1 done 2026-11-03)
-Package with relative imports only, no framework imports, so it moves into the Django project unchanged. Imported as `backend.engine` for now; tests in `tests/unit/engine/`.
+Pure package (no Django imports) inside the Django project; imported as `engine`, tests in `backend/tests/engine/`. `apps/sde/gamedata.py` builds its static inputs from the imported SDE.
 
 - `types.py`: `PlanInput` (lines, SDE `GameData`, stations, systems with cost indices, characters, owned blueprints, assets after reservation, prices, effective `BuildRules`, per-blueprint `BlueprintChoice`) → `PlanResult` (items, blueprints, jobs, shopping list, costs, total time, warnings). Every decision carries a `Reason(code, text)`.
 - `plan()` algorithm: decide build/buy per item → order BUILD items consumers-first → walk once, so each item's runs are computed on the merged demand of all lines and each job's materials are rounded per job → leftover BUY demand minus assets is the shopping list → schedule → fees.
+- **Structure and rig bonuses come from CCP's data, not hardcoded maps** (2026-11-03). `industryModifierSources` lists, per hull and rig type, which activity and kind (material / time / cost) it modifies and, for rigs, the `industryTargetFilters` entry (category and group sets) of products it applies to. Hull values are the hull's own attributes (2600/2601/2602, Tatara 2721); rig values are the rig's bonus attributes (engineering 2594/2593/2595, reactor 2714/2713) times its security multiplier (2355–2357, missing = 1.0). All matching modifiers multiply. [SDE] This replaced the old rig-group and product-class maps, which disagreed with CCP's filters (e.g. haulers and mining barges are "Medium T1 Ships"; fuel blocks are "Structures"; reaction rigs filter on the product group).
 - Decisions made in the engine:
   - Assets reduce input demand only, never a plan line's own quantity (a line means "build this").
   - A plan line is always built, even if a rule would buy its category.
   - Blueprint source per blueprint: owned BPO (one job, all runs) → owned BPCs (best ME first, one job each) → invention for T2 → "missing" at ME 0 / TE 0 with a warning. Splitting BPO runs across idle slots is step 6.
-  - Station: among stations offering the activity, lowest material multiplier, then time, then fee rate.
-  - Decryptor `auto`: lowest invention inputs + direct T2 job materials at market price (not invention cost alone, which ignores what the ME bonus saves).
+  - Station: among stations offering the activity, lowest material multiplier, then time, then fee rate. Copy and invention jobs pick a station too, so hull and lab-rig time bonuses apply to them.
+  - Decryptor `auto`: lowest invention inputs + direct T2 job materials at market price (not invention cost alone, which ignores what the ME bonus saves). With no prices it says so and takes the fewest attempts.
   - Invention chance uses the best eligible inventor's skills; attempts = ceil(BPCs / chance).
   - Schedule: dependency-aware list scheduling, longest ready job first, onto the eligible character slot that finishes it earliest. Replaces the depth-phase timeline.
-- Fixed from the old calculator: bugs 1, 2, 8, 9, 10, 11 (tests in `tests/unit/engine/`). Bug 3 is a form bug; the engine takes ME override and decryptor as separate inputs, so the new UI cannot reproduce it. Invention chance changed from the old multiplicative skill formula to the additive one under Industry formulas.
+- Fixed from the old calculator: bugs 1, 2, 8, 9, 10, 11 (tests in `backend/tests/engine/`). Bug 3 is a form bug; the engine takes ME override and decryptor as separate inputs, so the new UI cannot reproduce it. Invention chance changed from the old multiplicative skill formula to the additive one under Industry formulas.
+- Checked against build 3667080: 10 Ishtar + 50 Hulk plans in 0.01 s (game data loads in 0.5 s); Vexor/Covetor invention base 0.26 from the SDE gives 0.671 with science 5/5, encryption 4 and Attainment, matching the formula by hand. Not yet compared with in-game job windows.
 - Not modelled yet (stated in reasons/warnings where they apply):
   - Copy and invention job fees (fee is `None`).
-  - Structure and rig time bonuses for copying/invention; copy/invention rigs.
   - Copying-activity materials in the SDE (T2 BPO copy datacores; not used for T1 invention copies).
   - Whether Advanced Industry applies to reactions (not applied).
   - Structure restrictions (e.g. which hulls a Raitaru can build); stations declare activities only.
   - Per-line cost attribution of shared components (Cost tab "per line").
-- Assumed, not verified: invention consumes one T1 copy run per attempt; T1 copies for invention are made from an owned T1 BPO at the copy's max runs; molecular-forged reactions use biochemical reactor rigs (carried over from the old code); the L-set reactor rig (group 1939) covers all three reaction rig categories (from its SDE description).
+- Assumed, not verified: invention consumes one T1 copy run per attempt; T1 copies for invention are made from an owned T1 BPO at the copy's max runs; only Generic Decryptor (group 1304) decryptors are offered.
 
 ## Known bugs to fix in the engine extraction
 1. ME rounding applied per single run then multiplied — overcounts; must be applied to the whole job (`max(runs, ceil(base * runs * ME multipliers))`). `_resolve_material_tree` and `_compute_runs_needed` currently disagree.
@@ -154,7 +155,7 @@ Package with relative imports only, no framework imports, so it moves into the D
 3. Recalculate forms pin `me_<top_bp>` as an override, so changing decryptor afterwards doesn't change ME.
 4. Config keyed by logged-in character, not account.
 5. Blueprints/jobs only for the logged-in character.
-6. Token refresh window (5 min) shorter than beat interval (15 min) → tokens expire between runs; web requests never refresh synchronously.
+6. Token refresh window (5 min) shorter than beat interval (15 min) → tokens expire between runs; web requests never refresh synchronously. Fixed in the new stack: tokens refresh on demand (see Step 2 progress).
 7. `jsonify(response)` on failed SSO token exchange (`auth.py`) crashes.
 8. T2 BPC base is ME 2 / TE 4 (positive, i.e. 2% fewer materials). Code uses `T2_BASE_ME = -2`, `T2_BASE_TE = -4` and adds decryptor mods (`industry.py:1609`), so invented T2 jobs are computed at ME -2: about 4% too many materials with no decryptor.
 9. SCC surcharge is 4% (since Feb 2024), code uses 1.5% (`industry.py` `SCC_SURCHARGE`).
@@ -219,10 +220,22 @@ This app needs periodic work (token refresh, character + corp job / asset / blue
 1. **Cron only, like the AT Tool**: management commands on a schedule; on-demand refresh writes a request row that a once-a-minute `sync_pending` command processes. One mechanism, up to ~1 min delay on "refresh now".
 2. Cron for periodic + a task queue (Celery or RQ on the existing Redis) for on-demand. Immediate refresh, one more service and worker to run.
 
+## Step 2 progress (2026-11-03)
+Done:
+- Django project in `backend/` (`manage.py`, `config/`, `apps/`), Python 3.12, own `pyproject.toml`. Dev Postgres 16 + Redis from `deploy/docker-compose.dev.yml` on ports 5434 / 6381 (the AT Tool's dev stack uses 5433 / 6380). Tests run on Postgres.
+- Ported from the AT Tool: SSO (PKCE, discovery, offline JWT), ESI client (compatibility date, ETags, rate-limit logging, breaker), SDE JSONL import (zip / folder / drop folder / `--check-latest`), advisory lock, import reports.
+- Not ported: team membership, roles, invites, admission rules, audit. Anyone with an EVE account can sign up.
+- SDE import now keeps every type (the AT Tool kept fitting categories only) and derives blueprints (activities, materials, products with invention probability, skills) and solar systems. typeDogma, typeMaterials, compressibleTypes, industryModifierSources, industryTargetFilters, dogmaAttributes and marketGroups stay raw. Build 3667080 imports in 32 s.
+- Accounts: `User` (account, main character) → `EveCharacter`. Login uses `publicData` only. "Link character" requests the industry scopes and stores an `EsiToken` (refresh and access tokens Fernet-encrypted, key from `TOKEN_ENCRYPTION_KEY` or derived from `SECRET_KEY`). Access tokens refresh on demand under a row lock when within 2 minutes of expiry; a rejected refresh marks the token so the UI can ask for a relink. A changed owner hash detaches the character and drops its token.
+- ESI client: authenticated calls, ETag cache keyed by character (one character's cached response is never served to another), `X-Pages` paging.
+- Scopes and routes checked against ESI's live OpenAPI spec (2026-11-03): skills, assets, blueprints, character and corp industry jobs, corp roles, corp assets, corp blueprints, divisions, structures.
+
+Next: character and corp fetch services (skills, assets, blueprints, jobs, roles, divisions), `CorpDataSource`, account-scoped stations and build rules, adjusted prices and cost indices, cron commands.
+
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
 1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
-2. **Account + data layer** — account-scoped config, all-character + corp fetches (assets, blueprints, jobs, divisions), role detection, token fix, Postgres.
+2. **Account + data layer** — account-scoped config, all-character + corp fetches (assets, blueprints, jobs, divisions), role detection, token fix, Postgres. In progress; see Step 2 progress.
 3. **Plans** — model + JSON API, asset reservation.
 4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard.
 5. **Tracker** — active-plan job matching, progress tab, reservation release.
