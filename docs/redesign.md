@@ -110,7 +110,8 @@ Data needed, with the ESI role it requires:
 
 - **Planning engine**: pure Python module, no Flask/DB access. Input: plan lines, characters (skills, slots, roles), stations/rigs, blueprints, assets (after reservation), prices, build rules, BPO/BPC choices. Output: the full plan result (materials, jobs, schedule, costs). Heavily unit-tested. Every view reads from this one result, so tabs can't disagree.
 - **Backend**: Flask as a JSON API. Celery for ESI fetches (character + corp assets, blueprints, jobs, skills) and token refresh.
-- **Frontend**: React (Vite + TypeScript), fresh build — not a port of the Jinja templates. Edit the plan in place; recompute only when inputs change.
+- **Frontend**: React (Vite + TypeScript), fresh build — not a port of the Jinja templates. Edit the plan in place; recompute only when inputs change. Visual style and frontend structure: `docs/ui-design.md` (copies the AT Tool style).
+- **Explanations in engine output**: the UI shows the reason for every derived value, so engine results carry a reason with each decision (ME source, station chosen and why, bought vs built and which rule, BPC vs BPO choice).
 - **Database**: move to **Postgres** (multi-user, shared plans, concurrent Celery writers). SDE stays SQLite, read-only.
 - **Account model**: config, stations, plans belong to the **account** (main character), not the logged-in character.
 
@@ -132,9 +133,63 @@ Data needed, with the ESI role it requires:
 5. Blueprints/jobs only for the logged-in character.
 6. Token refresh window (5 min) shorter than beat interval (15 min) → tokens expire between runs; web requests never refresh synchronously.
 7. `jsonify(response)` on failed SSO token exchange (`auth.py`) crashes.
+8. T2 BPC base is ME 2 / TE 4 (positive, i.e. 2% fewer materials). Code uses `T2_BASE_ME = -2`, `T2_BASE_TE = -4` and adds decryptor mods (`industry.py:1609`), so invented T2 jobs are computed at ME -2: about 4% too many materials with no decryptor.
+9. SCC surcharge is 4% (since Feb 2024), code uses 1.5% (`industry.py` `SCC_SURCHARGE`).
+10. Job cost ignores the engineering complex cost bonus (Raitaru 3%, Azbel 4%, Sotiyo 5%; SDE attribute 2601 = 0.97/0.96/0.95) and the alpha clone tax (0.25%, alpha only).
+11. M-set TE rigs (groups 1819, 1821, …, 1841) and reactor TE/L rigs (1933, 1935, 1937, 1939) are not in the rig group maps, so their bonuses are ignored.
+12. Security class uses raw security (`> 0.0` = lowsec). EVE rounds to one decimal, so a system at 0.04 is nullsec in game but lowsec here. (Rounding rule recalled, not verified.)
+
+## Groundwork findings (2026-11-03)
+
+Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or live CCP endpoint; **[community]** EVE University wiki / EVE Ref / third-party repo; **[code]** read in this repo or the AT Tool repo; **[unverified]**.
+
+### Game data (SDE)
+- The local `src/instance/sqlite-latest.sqlite` (2025-04-29) is the old Fuzzwork layout (`invTypes`, `industryActivityMaterials`…). Since commit 6fd2cff the code queries a different schema (`EveType`, `BlueprintProduct`, `TypeDogmaAttribute`…). The app cannot run against the file on this machine. [SDE][code]
+- That schema comes from maphillips1/EveOnline_StaticDataExport_Converter (C#). Its newest release is 2026-06-10; the official SDE is at build 3667080 (2026-11-03). Depending on it means stale data. [community]
+- The 151 unit tests pass against a fake SDE built in `tests/conftest.py`, so they do not catch schema mismatches. [code]
+- CCP publishes the SDE as JSONL (recommended) or YAML. Latest build pointer: `https://developers.eveonline.com/static-data/tranquility/latest.jsonl`; zip: `.../eve-online-static-data-latest-jsonl.zip` (redirects to a build-numbered file). Files needed: `types`, `groups`, `categories`, `marketGroups`, `blueprints`, `typeMaterials`, `typeDogma`, `mapSolarSystems`, `compressibleTypes`. Names are embedded in records. [official][community]
+- **Decision: load CCP's JSONL directly into our own tables**, keyed by build number, with an import command. The AT Tool already has this (`backend/apps/sde/`: `download.py` reads `latest.jsonl`, `jsonl.py`, `loader.py`, `import_sde` command); extend it with blueprints, typeMaterials, typeDogma, mapSolarSystems, compressibleTypes. [code]
+- All hardcoded group / skill / attribute IDs in `industry_constants.py` exist with the expected names in the 2025 SDE. Recheck after the JSONL import. [SDE]
+- Tatara reaction time bonus is in the SDE (attribute 2721 = 0.75), not only hardcoded. [SDE] Tatara 25% reaction time, Athanor none. [community]
+
+### ESI
+- Base `https://esi.evetech.net`, no `/latest/` or `?datasource=`; send `X-Compatibility-Date` (newest date 2026-08-18). Without it ESI serves the oldest behaviour (2020-01-01). `/latest/*` still answers; no removal date announced. [official]
+- Rate limits are per-group floating-window token buckets (2xx costs 2, 4xx costs 5); `X-Ratelimit-*` headers and `Retry-After` on 429. Legacy error limit still applies to unmigrated routes. [official]
+- Corp routes: assets, blueprints, divisions need Director; industry jobs needs Factory_Manager (Director implies it). Assets / blueprints / corp jobs use `X-Pages`; character industry jobs is not paginated. [official]
+- The AT Tool's `apps/esi/client.py` already does compatibility date, ETags, rate-limit logging and a circuit breaker. Reuse it. [code]
+
+### SSO
+- Use the metadata document `https://login.eveonline.com/.well-known/oauth-authorization-server`; validate the access token JWT offline against `jwks_uri`, character ID from `sub` (`CHARACTER:EVE:<id>`). Don't use `login.eveonline.com/oauth/verify` (not the documented endpoint). [official]
+- Refresh tokens are long-lived; store the refresh token returned by every refresh. Access token lifetime ~20 min is from older docs. [official][community]
+- The AT Tool's `apps/accounts/sso.py` already does PKCE + discovery + JWKS validation. Reuse it. [code]
+
+### Industry formulas
+- Job cost = EIV × (SCI × structure cost bonus + facility tax + SCC 4% [+ alpha 0.25%]); EIV = ME0 material quantities × adjusted price. SCC for ME/TE research is 2% since 2025-07-17. [community][official]
+- Engineering complexes: ME 1%, TE 15/20/30%, cost 3/4/5% — matches SDE attributes 2600/2602/2601. [community][SDE]
+- Rig security multipliers: high 1.0, low 1.9, null/WH 2.1. [community]
+- Invention chance = base × (1 + (sci1 + sci2)/30 + encryption/40) × (1 + decryptor%). T2 BPC base ME 2 / TE 4; 10 runs modules, 1 run ships/rigs (before decryptors). Decryptor stats come from SDE attributes 1112/1113/1114/1124. [community]
+- 2026 changes: unrefined mineral reactions 3600s → 360s (comes from the SDE); +5% install fees in Exordium starter space only. No slot, rig or SCC changes found through patch 24.01. [official]
+
+### Reprocessing / compression (compressed ore calculator)
+- Compression is 1:1 since patch 20.03; compressed ore reprocesses in batches of `portionSize` (100). Outputs in `typeMaterials`, raw↔compressed mapping in `compressibleTypes`. [community][SDE]
+- Yield = (50 + rig) × (1 + sec) × (1 + structure) × (1 + 0.03·Reprocessing) × (1 + 0.02·Reprocessing Efficiency) × (1 + 0.02·ore skill) × (1 + implant). Rig T1 1 / T2 3; sec high 0, low 0.06, null/WH 0.12; Athanor 0.02, Tatara 0.055; implants 1/2/4%. Wiki page flagged possibly outdated. [community]
+- Reprocessing rig groups 1941–1945 present. [SDE]
+
+### Janice
+- API v2 (`https://janice.e-351.com/api/rest/v2/`), `X-ApiKey` header; key is requested via a ticket on their Discord. `POST /appraisal` (text/plain, `market`, `pricing`, `pricingVariant`) and `POST /pricer`. Rate limits undocumented. [official, Janice's swagger]
+- Paste export format: one item per line, name + quantity (tab-separated like EVE inventory copy). Accepted formats not confirmed from a primary source; test with a real paste. [unverified]
+
+## Backend stack (decision pending)
+
+The AT Tool (`G:\SpudsATTool`) is Django 5.2 + django-ninja (OpenAPI) + Postgres + Redis, frontend generated API types with `openapi-typescript` / `openapi-fetch`, Python `pytest-playwright` browser tests. It already solves SSO, ESI and SDE import for current EVE. Options:
+1. **Move to the AT Tool stack** and port its `accounts/sso`, `esi`, `sde` apps; carry over this repo's engine logic and Celery task logic.
+2. Stay on Flask: add an OpenAPI layer (e.g. APIFlask), reimplement SSO/ESI/SDE following the AT Tool code.
+
+How the AT Tool runs background work is not yet checked (no Celery in its dependencies). [code]
 
 ## Build order
-1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3, tests.
+0. **Engine types** — input/output dataclasses, including a reason on each decision.
+1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
 2. **Account + data layer** — account-scoped config, all-character + corp fetches (assets, blueprints, jobs, divisions), role detection, token fix, Postgres.
 3. **Plans** — model + JSON API, asset reservation.
 4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard.
