@@ -192,7 +192,7 @@ COMPOSITE_ME_RIG = Rig(
     SEC_REACTOR,
 )
 COPY_TIME_RIG = Rig(
-    43891,
+    9001,  # made-up id; the bonus shape matches a copy-time rig
     "M-Set Blueprint Copy Accelerator I",
     (RigBonus(Activity.COPYING, ModifierKind.TIME, 20.0),),
     SEC_ENGINEERING,

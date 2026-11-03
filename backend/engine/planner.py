@@ -593,11 +593,17 @@ class _Planner:
         if picked is None:
             picked = min(options, key=lambda o: (o[0].total_cost, o[0].attempts))
             opt = picked[0]
-            reason = Reason(
-                ReasonCode.DECRYPTOR_AUTO,
-                f"{opt.name}: lowest invention inputs ({opt.invention_input_cost:,.0f}) "
-                f"plus direct T2 materials ({opt.material_cost:,.0f}) of {len(options)} options.",
-            )
+            if all(o.total_cost == 0 for o, _ in options):
+                text = (
+                    f"{opt.name}: no prices for invention inputs or T2 materials, so the "
+                    f"fewest attempts ({opt.attempts}) of {len(options)} options."
+                )
+            else:
+                text = (
+                    f"{opt.name}: lowest invention inputs ({opt.invention_input_cost:,.0f}) "
+                    f"plus direct T2 materials ({opt.material_cost:,.0f}) of {len(options)} options."
+                )
+            reason = Reason(ReasonCode.DECRYPTOR_AUTO, text)
         else:
             reason = Reason(ReasonCode.DECRYPTOR_CHOSEN, why)
         opt, dec = picked

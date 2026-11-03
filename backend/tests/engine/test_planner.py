@@ -367,6 +367,13 @@ def test_decryptor_none_choice():
     assert len(bp(r, BP_T2_MOD).invention.options) == 2
 
 
+def test_auto_decryptor_without_prices_says_so():
+    r = plan(t2_input(game=game([ACCELERANT])))
+    inv = bp(r, BP_T2_MOD).invention
+    assert "no prices" in inv.reason.text
+    assert inv.attempts == min(o.attempts for o in inv.options)
+
+
 def test_auto_decryptor_picks_lowest_total_cost():
     prices = {DATACORE: Price(1_000_000.0, None), DECRYPTOR: Price(10.0, None)}
     r = plan(t2_input(game=game([ACCELERANT]), prices=prices))
