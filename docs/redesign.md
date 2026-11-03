@@ -179,13 +179,18 @@ Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or l
 - API v2 (`https://janice.e-351.com/api/rest/v2/`), `X-ApiKey` header; key is requested via a ticket on their Discord. `POST /appraisal` (text/plain, `market`, `pricing`, `pricingVariant`) and `POST /pricer`. Rate limits undocumented. [official, Janice's swagger]
 - Paste export format: one item per line, name + quantity (tab-separated like EVE inventory copy). Accepted formats not confirmed from a primary source; test with a real paste. [unverified]
 
-## Backend stack (decision pending)
+## Backend stack
 
-The AT Tool (`G:\SpudsATTool`) is Django 5.2 + django-ninja (OpenAPI) + Postgres + Redis, frontend generated API types with `openapi-typescript` / `openapi-fetch`, Python `pytest-playwright` browser tests. It already solves SSO, ESI and SDE import for current EVE. Options:
-1. **Move to the AT Tool stack** and port its `accounts/sso`, `esi`, `sde` apps; carry over this repo's engine logic and Celery task logic.
-2. Stay on Flask: add an OpenAPI layer (e.g. APIFlask), reimplement SSO/ESI/SDE following the AT Tool code.
+**Decided (2026-11-03): move to the AT Tool stack.** Django 5.2 + django-ninja (OpenAPI) + Postgres 16 + Redis; frontend API types generated with `openapi-typescript` / `openapi-fetch`; Python `pytest-playwright` browser tests; Docker deploy with Caddy (`deploy/` in the AT Tool). Port the AT Tool's `accounts/sso`, `esi` and `sde` apps; carry over this repo's engine and ESI fetch logic. The Flask app stays runnable until the new stack replaces it.
 
-How the AT Tool runs background work is not yet checked (no Celery in its dependencies). [code]
+Rejected: staying on Flask. Needs an OpenAPI add-on and a reimplementation of SSO / ESI / SDE code the AT Tool already has.
+
+### Background work (decision pending)
+The AT Tool has no task queue: a `scheduler` container runs supercronic with `deploy/crontab` (hourly `refresh_affiliations`, SDE `--scan-incoming` every 5 min, `--check-latest` daily, backups). [code]
+
+This app needs periodic work (token refresh, character + corp job / asset / blueprint sync, SDE check) and on-demand work ("refresh now", first fetch after linking a character; corp assets can be many pages). Options:
+1. **Cron only, like the AT Tool**: management commands on a schedule; on-demand refresh writes a request row that a once-a-minute `sync_pending` command processes. One mechanism, up to ~1 min delay on "refresh now".
+2. Cron for periodic + a task queue (Celery or RQ on the existing Redis) for on-demand. Immediate refresh, one more service and worker to run.
 
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision.
