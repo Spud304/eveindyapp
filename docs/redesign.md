@@ -70,6 +70,7 @@ Decided (2026-11-03):
 - Non-reserving plans see only what's left over (and show "X reserved by plan Y").
 - Reservations shrink as the plan consumes materials (job started → inputs are gone from assets, so the reservation for them must be released, not double-counted). The tracker drives this.
 - Location filter per plan: default = assets at the plan's build stations; user can tick other locations/hangars.
+- **Decided (2026-11-03): computed, not stored.** Each request reruns the account's reserving plans in priority order (lower number first, then id). Each claims what its engine run takes from stock (`on_hand_used`) out of a pool kept per (item, location, hangar), and only from buckets inside its own location and hangar filter. Non-reserving plans then run on the leftovers and claim nothing. Rejected: storing claims, because they would go stale whenever assets, plans, prices or rules change. Computing them costs one engine run per reserving plan (live: ~1.3 s for a two-plan account, most of it loading shared data). Claims come from remaining demand, so once the tracker (step 5) lowers demand as jobs start, they shrink without separate release logic.
 
 ### Job tracking
 - Usually one plan is in progress at a time, so matching is simple: **one plan is marked active**, and any new ESI job (character or corp) started after activation whose blueprint + activity is in the active plan is attributed to it.
@@ -287,13 +288,26 @@ Done:
     - Live: queued from the API and run by a real worker, 9 feeds in 2.6 s.
   - Deploy: `deploy/Dockerfile.backend` (from the AT Tool's, with supercronic checksum-pinned), `deploy/entrypoint.sh` (web / worker / scheduler), `deploy/docker-compose.yml` (web, worker, scheduler, Postgres 16, Redis). Image builds, `manage.py check` passes under prod settings, and supercronic validates the crontab. Redis uses `volatile-lru`, so only TTL'd cache keys are evicted, never queued tasks. Caddy and the frontend come with step 4; until then `web` listens on 127.0.0.1:8000. No backup job yet (the AT Tool's `backup.sh` was not ported).
 
-Step 2 is done apart from per-character settings (alpha clone, allowed activities) and a buy-price source. Next: step 3 (plans, asset reservation, per-plan rule overrides).
+Step 2 is done apart from per-character settings (alpha clone, allowed activities) and a buy-price source.
+
+## Step 3 progress (2026-11-03)
+- `Plan` (`apps/planning`):
+  - Fields: name, lines (`PlanLine`: type, quantity, position), `is_active` + `activated_at` (one active plan per account, enforced by a partial unique constraint), `reserve_assets`, `priority`, `visibility` (stored; enforced in step 7).
+  - Rule overrides: `blacklist_add` / `blacklist_remove` (type ids) and `category_overrides` ({BuildCategory: "buy" | "build"}) applied on top of the account's `BuildRules`.
+  - `choices` per blueprint: ME / TE override, decryptor.
+  - Asset scope: `station_ids` (empty: every enabled station), `extra_location_ids`, `hangar_flags` (empty: all hangars).
+- API:
+  - `GET/POST /api/plans`, `GET/PATCH/DELETE /api/plans/{id}`, `PUT /api/plans/{id}/lines`, `POST /api/plans/{id}/activate | deactivate`.
+  - `GET /api/plans/{id}/result` returns the engine result, the effective rules with the plan's overrides, this plan's claims, and `held_elsewhere` ({type: [{plan, quantity}]}: stock in this plan's scope held by earlier reserving plans). Plans are private to the account.
+- Reservation: see Asset reservation (computed in priority order, per item / location / hangar).
+- Live (2026-11-03): "indy 1" (10 Ishtar + 50 Hulk, priority 1) and "dreadbatch 1" (1 Phoenix, 2 Naglfar, 1 Revelation Navy Issue, priority 2), both reserving. indy 1 claims 16 items (e.g. all 3.67M Mexallon at the D-JVGJ structures); dreadbatch 1 sees them held by indy 1 and claims 50 others. Result in 1.3 s.
+- Not done: results are recomputed on every request (no cache); rule overrides are not yet shown per item in the result (the engine's reason says "rule: <category>" but not whether the plan overrode it; the response lists the overrides beside it).
 
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
 1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
 2. **Account + data layer** — account-scoped config, all-character + corp fetches (assets, blueprints, jobs, divisions), role detection, token fix, Postgres. In progress; see Step 2 progress.
-3. **Plans** — model + JSON API, asset reservation.
+3. **Plans** — model + JSON API, asset reservation. Done; see Step 3 progress.
 4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard.
 5. **Tracker** — active-plan job matching, progress tab, reservation release.
 6. **BPO/BPC trade-off** — auto-copy to fill slots, opt-in buy BPC / extra BPO with cost vs time shown.
