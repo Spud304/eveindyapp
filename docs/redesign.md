@@ -230,6 +230,8 @@ Done:
 - ESI client: authenticated calls, ETag cache keyed by character (one character's cached response is never served to another), `X-Pages` paging.
 - Scopes and routes checked against ESI's live OpenAPI spec (2026-11-03): skills, assets, blueprints, character and corp industry jobs, corp roles, corp assets, corp blueprints, divisions, structures.
 
+- Verified live (2026-11-03): login, character linking (all 11 scopes granted), a real token refresh, and authenticated ESI calls (skills, corp roles). Dev uses the existing EVE application (callback `http://localhost:5050/callback`, served by the `/callback` route), credentials in gitignored `backend/.env`. EVE returned the same refresh token on refresh; the code stores whichever comes back.
+
 Next: character and corp fetch services (skills, assets, blueprints, jobs, roles, divisions), `CorpDataSource`, account-scoped stations and build rules, adjusted prices and cost indices, cron commands.
 
 ## Build order
