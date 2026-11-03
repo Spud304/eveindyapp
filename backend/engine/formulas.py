@@ -175,9 +175,7 @@ def estimated_item_value(
     adjusted_prices: Mapping[TypeId, float | None],
 ) -> float:
     """EIV: ME 0 material quantities times CCP adjusted price."""
-    return runs * sum(
-        m.quantity * (adjusted_prices.get(m.type_id) or 0.0) for m in materials
-    )
+    return runs * sum(m.quantity * (adjusted_prices.get(m.type_id) or 0.0) for m in materials)
 
 
 def job_fee(
@@ -189,11 +187,7 @@ def job_fee(
 ) -> float:
     """EIV x (SCI x structure bonus + facility tax + SCC [+ alpha tax]).
     [community]"""
-    rate = (
-        cost_index * structure_cost_multiplier
-        + facility_tax_percent / 100
-        + c.SCC_SURCHARGE
-    )
+    rate = cost_index * structure_cost_multiplier + facility_tax_percent / 100 + c.SCC_SURCHARGE
     if is_alpha:
         rate += c.ALPHA_CLONE_TAX
     return eiv * rate

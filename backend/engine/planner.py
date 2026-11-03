@@ -103,14 +103,8 @@ class _Planner:
                 reaction_inputs.update(m.type_id for m in bp.reaction.materials)
         for bp in inp.game.blueprints.values():
             r = bp.reaction
-            if (
-                r
-                and r.product_type_id is not None
-                and r.product_type_id not in self.producers
-            ):
-                self.producers[r.product_type_id] = _Producer(
-                    bp.type_id, Activity.REACTION, r
-                )
+            if r and r.product_type_id is not None and r.product_type_id not in self.producers:
+                self.producers[r.product_type_id] = _Producer(bp.type_id, Activity.REACTION, r)
         self.reaction_inputs = reaction_inputs
 
         self.owned: dict[TypeId, list[OwnedBlueprint]] = defaultdict(list)
@@ -123,9 +117,7 @@ class _Planner:
                 raise PlanError(f"line {line.line_id}: quantity must be positive")
             self.line_qty[line.type_id] += line.quantity
 
-        self.decisions: dict[
-            TypeId, tuple[ItemDecision, Reason, BuildCategory | None]
-        ] = {}
+        self.decisions: dict[TypeId, tuple[ItemDecision, Reason, BuildCategory | None]] = {}
         self.input_qty: dict[TypeId, int] = defaultdict(int)
         self.item_rows: dict[TypeId, ItemPlan] = {}
         self.jobs: list[WorkJob] = []
@@ -172,9 +164,7 @@ class _Planner:
         t = self.types.get(type_id)
         return c.GROUP_BUILD_CATEGORY.get(t.group_id) if t else None
 
-    def decide(
-        self, type_id: TypeId
-    ) -> tuple[ItemDecision, Reason, BuildCategory | None]:
+    def decide(self, type_id: TypeId) -> tuple[ItemDecision, Reason, BuildCategory | None]:
         if type_id in self.decisions:
             return self.decisions[type_id]
         rules = self.inp.rules
@@ -289,9 +279,7 @@ class _Planner:
                     None,
                     0.0,
                     1.0,
-                    Reason(
-                        ReasonCode.STATION_NONE, f"No station offers {activity.value}."
-                    ),
+                    Reason(ReasonCode.STATION_NONE, f"No station offers {activity.value}."),
                 ),
             )
 
@@ -357,19 +345,13 @@ class _Planner:
             build_category=cat,
         )
 
-    def plan_blueprint(
-        self, prod: _Producer, product_type_id: TypeId, runs: int
-    ) -> None:
+    def plan_blueprint(self, prod: _Producer, product_type_id: TypeId, runs: int) -> None:
         bp_id = prod.blueprint_type_id
-        station, mat_mult, time_mult, station_choice = self.choose_station(
-            prod, product_type_id
-        )
+        station, mat_mult, time_mult, station_choice = self.choose_station(prod, product_type_id)
         choice = self.inp.choices.get(bp_id, BlueprintChoice())
         owned = self.owned.get(bp_id, [])
         bpos = [b for b in owned if not b.is_copy]
-        bpcs = sorted(
-            (b for b in owned if b.is_copy), key=lambda b: (-b.me, -b.te, b.item_id)
-        )
+        bpcs = sorted((b for b in owned if b.is_copy), key=lambda b: (-b.me, -b.te, b.item_id))
         is_reaction = prod.activity == Activity.REACTION
 
         # (runs, me, te, source, me_reason)
@@ -381,9 +363,7 @@ class _Planner:
 
         def me_reason(code: ReasonCode, text: str) -> Reason:
             if is_reaction:
-                return Reason(
-                    ReasonCode.ME_REACTION, "Reaction formulas have no ME/TE."
-                )
+                return Reason(ReasonCode.ME_REACTION, "Reaction formulas have no ME/TE.")
             return Reason(code, text)
 
         if bpos:
@@ -423,9 +403,7 @@ class _Planner:
                 )
                 remaining -= take
             if specs:
-                source_notes.append(
-                    f"{len(specs)} owned BPC(s) cover {runs - remaining} runs"
-                )
+                source_notes.append(f"{len(specs)} owned BPC(s) cover {runs - remaining} runs")
 
         if remaining > 0 and not is_reaction and bp_id in self.invented_from:
             invention, inv_specs, invention_job_ids = self.plan_invention(
@@ -455,9 +433,7 @@ class _Planner:
                 f"{self.name(bp_id)}: no owned blueprint for {remaining} runs.",
             )
 
-        if not is_reaction and (
-            choice.me_override is not None or choice.te_override is not None
-        ):
+        if not is_reaction and (choice.me_override is not None or choice.te_override is not None):
             overridden = []
             for r, me, te, src, why in specs:
                 new_me = choice.me_override if choice.me_override is not None else me
@@ -531,11 +507,7 @@ class _Planner:
             (s.skill_id for s in recipe.skills if s.skill_id in c.ENCRYPTION_SKILL_IDS),
             None,
         )
-        sci = tuple(
-            s.skill_id
-            for s in recipe.skills
-            if s.skill_id not in c.ENCRYPTION_SKILL_IDS
-        )
+        sci = tuple(s.skill_id for s in recipe.skills if s.skill_id not in c.ENCRYPTION_SKILL_IDS)
         base = recipe.probability or 0.0
         eligible = [
             ch
@@ -616,9 +588,7 @@ class _Planner:
             picked = next((o for o in options if o[1] is None), None)
             why = "No decryptor (your choice)."
         elif choice.decryptor != "auto":
-            picked = next(
-                (o for o in options if o[1] and o[1].type_id == choice.decryptor), None
-            )
+            picked = next((o for o in options if o[1] and o[1].type_id == choice.decryptor), None)
             why = "Decryptor set by you."
             if picked is None:
                 self.warn(
@@ -662,9 +632,7 @@ class _Planner:
                 _JobMeta(
                     me=0,
                     te=0,
-                    me_reason=Reason(
-                        ReasonCode.SOURCE_BPO, "Copy of owned T1 BPO for invention."
-                    ),
+                    me_reason=Reason(ReasonCode.SOURCE_BPO, "Copy of owned T1 BPO for invention."),
                     source=BlueprintSource.BPO,
                     station=None,
                     materials=(),
@@ -675,10 +643,7 @@ class _Planner:
             )
             job_ids.append(copy_job_id)
         t1_source = BlueprintSource.BPC
-        if (
-            copy_job_id is None
-            and sum(b.runs for b in t1_owned if b.is_copy) < opt.attempts
-        ):
+        if copy_job_id is None and sum(b.runs for b in t1_owned if b.is_copy) < opt.attempts:
             t1_source = BlueprintSource.MISSING
             self.warn(
                 ReasonCode.SOURCE_MISSING,
@@ -786,18 +751,12 @@ class _Planner:
 
         total = schedule(self.jobs, self.inp.characters)
         self.item_rows = {
-            t: row
-            for t, row in self.item_rows.items()
-            if row.line_quantity or row.input_quantity
+            t: row for t, row in self.item_rows.items() if row.line_quantity or row.input_quantity
         }
-        jobs = [
-            self.freeze(j) for j in sorted(self.jobs, key=lambda j: (j.start, j.job_id))
-        ]
+        jobs = [self.freeze(j) for j in sorted(self.jobs, key=lambda j: (j.start, j.job_id))]
         shopping = self.shopping_list()
         return PlanResult(
-            items=tuple(
-                sorted(self.item_rows.values(), key=lambda i: (i.name, i.type_id))
-            ),
+            items=tuple(sorted(self.item_rows.values(), key=lambda i: (i.name, i.type_id))),
             blueprints=tuple(sorted(self.bp_plans, key=lambda b: (b.name, b.type_id))),
             jobs=tuple(jobs),
             shopping_list=shopping,
@@ -853,9 +812,7 @@ class _Planner:
         system = self.inp.systems.get(station.system_id)
         index = system.cost_indices.get(job.activity, 0.0) if system else 0.0
         alpha = bool(job.character and job.character.is_alpha)
-        fee = f.job_fee(
-            eiv, index, station.structure.cost_multiplier, station.facility_tax, alpha
-        )
+        fee = f.job_fee(eiv, index, station.structure.cost_multiplier, station.facility_tax, alpha)
         text = (
             f"EIV {eiv:,.0f} x (SCI {index:.4f} x {station.structure.cost_multiplier} "
             f"+ tax {station.facility_tax}% + SCC {c.SCC_SURCHARGE:.0%}"

@@ -1,7 +1,7 @@
 import pytest
 
-from backend.engine import formulas as f
-from backend.engine.types import Activity, Material, SecurityClass
+from engine import formulas as f
+from engine.types import Activity, Material, SecurityClass
 
 from .data import (
     ADV_COMPONENT_TE_RIG,
@@ -38,9 +38,7 @@ def test_job_materials_never_below_one_per_run():
 
 def test_job_materials_ignores_float_noise():
     # 100 x 0.99 x 0.962 = 95.238 -> 96 regardless of float error in the product
-    assert f.job_materials((Material(34, 100),), 1, 0, 0.99 * 0.962) == (
-        Material(34, 96),
-    )
+    assert f.job_materials((Material(34, 100),), 1, 0, 0.99 * 0.962) == (Material(34, 96),)
 
 
 def test_station_me_rig_applies_security_multiplier():
@@ -88,9 +86,7 @@ def test_job_fee_adds_alpha_tax():
 
 def test_skill_time_multiplier_manufacturing():
     ch = character(skills={3380: 5, 3388: 5})
-    assert f.skill_time_multiplier(Activity.MANUFACTURING, ch) == pytest.approx(
-        0.8 * 0.85
-    )
+    assert f.skill_time_multiplier(Activity.MANUFACTURING, ch) == pytest.approx(0.8 * 0.85)
 
 
 def test_skill_time_multiplier_copying_uses_science():

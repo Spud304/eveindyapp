@@ -1,7 +1,7 @@
 import pytest
 
-from backend.engine import PlanError, plan
-from backend.engine.types import (
+from engine import PlanError, plan
+from engine.types import (
     Activity,
     BlueprintChoice,
     BlueprintSource,
@@ -153,9 +153,7 @@ def test_category_rule_buys_and_names_the_rule():
         make_input(
             [(HULL, 1)],
             blueprints=(bpo(BP_HULL),),
-            rules=BuildRules(
-                buy_categories=frozenset({BuildCategory.ADVANCED_COMPONENTS})
-            ),
+            rules=BuildRules(buy_categories=frozenset({BuildCategory.ADVANCED_COMPONENTS})),
         )
     )
     row = item(r, COMP_A)
@@ -169,9 +167,7 @@ def test_plan_line_is_built_even_if_its_category_is_bought():
         make_input(
             [(COMP_A, 1)],
             blueprints=(bpo(BP_COMP_A),),
-            rules=BuildRules(
-                buy_categories=frozenset({BuildCategory.ADVANCED_COMPONENTS})
-            ),
+            rules=BuildRules(buy_categories=frozenset({BuildCategory.ADVANCED_COMPONENTS})),
         )
     )
     assert item(r, COMP_A).decision == ItemDecision.BUILD
@@ -182,9 +178,7 @@ def test_reaction_intermediate_vs_composite_categories():
         make_input(
             [(COMPOSITE, 200)],
             blueprints=(bpo(F_COMPOSITE),),
-            rules=BuildRules(
-                buy_categories=frozenset({BuildCategory.REACTION_INTERMEDIATE})
-            ),
+            rules=BuildRules(buy_categories=frozenset({BuildCategory.REACTION_INTERMEDIATE})),
         )
     )
     assert item(r, COMPOSITE).build_category == BuildCategory.REACTION_COMPOSITE
@@ -280,9 +274,7 @@ def test_job_fee_and_alpha_tax():
     alpha = plan(make_input([(HULL, 1)], characters=(character(alpha=True),), **common))
     eiv = 7 * 1000 + 100 * 5
     assert jobs_for(omega, BP_HULL)[0].cost.estimated_item_value == eiv
-    assert jobs_for(omega, BP_HULL)[0].cost.fee == pytest.approx(
-        eiv * (0.05 * 0.96 + 0.01 + 0.04)
-    )
+    assert jobs_for(omega, BP_HULL)[0].cost.fee == pytest.approx(eiv * (0.05 * 0.96 + 0.01 + 0.04))
     assert jobs_for(alpha, BP_HULL)[0].cost.fee == pytest.approx(
         eiv * (0.05 * 0.96 + 0.01 + 0.04 + 0.0025)
     )

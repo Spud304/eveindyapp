@@ -3,7 +3,7 @@
 IDs are made up except where the engine keys on real ones (group IDs for rig
 and build-rule classification, skill IDs)."""
 
-from backend.engine.types import (
+from engine.types import (
     Activity,
     BlueprintData,
     Character,
@@ -91,27 +91,17 @@ def _mfg(product, qty, mats, time=100, skills=()):
 BLUEPRINTS = {
     b.type_id: b
     for b in [
-        BlueprintData(
-            BP_COMP_A, 300, manufacturing=_mfg(COMP_A, 1, [(TRIT, 3), (PYE, 10)])
-        ),
+        BlueprintData(BP_COMP_A, 300, manufacturing=_mfg(COMP_A, 1, [(TRIT, 3), (PYE, 10)])),
         BlueprintData(
             BP_HULL,
             10,
             manufacturing=_mfg(HULL, 1, [(COMP_A, 7), (TRIT, 100)], time=1000),
         ),
-        BlueprintData(
-            BP_HULL_B, 10, manufacturing=_mfg(HULL_B, 1, [(COMP_A, 5), (MEX, 50)])
-        ),
+        BlueprintData(BP_HULL_B, 10, manufacturing=_mfg(HULL_B, 1, [(COMP_A, 5), (MEX, 50)])),
         BlueprintData(BP_FUEL, 100, manufacturing=_mfg(FUEL, 40, [(TRIT, 10)])),
-        BlueprintData(
-            F_INTERMEDIATE, 1, reaction=_mfg(INTERMEDIATE, 200, [(MOON_GOO, 100)])
-        ),
-        BlueprintData(
-            F_COMPOSITE, 1, reaction=_mfg(COMPOSITE, 200, [(INTERMEDIATE, 100)])
-        ),
-        BlueprintData(
-            BP_T2_MOD, 10, manufacturing=_mfg(T2_MOD, 1, [(TRIT, 10), (COMP_A, 2)])
-        ),
+        BlueprintData(F_INTERMEDIATE, 1, reaction=_mfg(INTERMEDIATE, 200, [(MOON_GOO, 100)])),
+        BlueprintData(F_COMPOSITE, 1, reaction=_mfg(COMPOSITE, 200, [(INTERMEDIATE, 100)])),
+        BlueprintData(BP_T2_MOD, 10, manufacturing=_mfg(T2_MOD, 1, [(TRIT, 10), (COMP_A, 2)])),
         BlueprintData(
             BP_T1_MOD,
             300,
@@ -160,12 +150,8 @@ SEC_ENGINEERING = {
 }
 SEC_REACTOR = {SecurityClass.LOW: 1.0, SecurityClass.NULL: 1.1}
 
-MEDIUM_SHIP_ME_RIG = Rig(
-    37150, 1826, me_bonus=2.0, security_multipliers=SEC_ENGINEERING
-)
-ADV_COMPONENT_TE_RIG = Rig(
-    37160, 1837, te_bonus=20.0, security_multipliers=SEC_ENGINEERING
-)
+MEDIUM_SHIP_ME_RIG = Rig(37150, 1826, me_bonus=2.0, security_multipliers=SEC_ENGINEERING)
+ADV_COMPONENT_TE_RIG = Rig(37160, 1837, te_bonus=20.0, security_multipliers=SEC_ENGINEERING)
 COMPOSITE_ME_RIG = Rig(46486, 1934, me_bonus=2.0, security_multipliers=SEC_REACTOR)
 
 MFG = frozenset({Activity.MANUFACTURING})
@@ -180,9 +166,7 @@ def azbel(rigs=()):
 
 
 def athanor(rigs=()):
-    return Station(
-        3, "Athanor NS", NS_SYSTEM, ATHANOR, 0.0, frozenset({Activity.REACTION}), rigs
-    )
+    return Station(3, "Athanor NS", NS_SYSTEM, ATHANOR, 0.0, frozenset({Activity.REACTION}), rigs)
 
 
 def bpo(type_id, me=0, te=0, item_id=None):
@@ -190,14 +174,10 @@ def bpo(type_id, me=0, te=0, item_id=None):
 
 
 def bpc(type_id, runs, me=0, te=0, item_id=None):
-    return OwnedBlueprint(
-        item_id or type_id * 10 + runs, type_id, True, runs, me, te, 99
-    )
+    return OwnedBlueprint(item_id or type_id * 10 + runs, type_id, True, runs, me, te, 99)
 
 
-def character(
-    cid=1, name="Builder", skills=None, activities=ALL_ACTIVITIES, alpha=False
-):
+def character(cid=1, name="Builder", skills=None, activities=ALL_ACTIVITIES, alpha=False):
     return Character(cid, name, skills or {}, activities, alpha)
 
 

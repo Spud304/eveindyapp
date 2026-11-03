@@ -60,9 +60,7 @@ def schedule(jobs: list[WorkJob], characters: tuple[Character, ...]) -> float:
     pending = {j.job_id for j in jobs}
     done: set[str] = set()
     while pending:
-        ready = [
-            by_id[i] for i in pending if all(d in done for d in by_id[i].depends_on)
-        ]
+        ready = [by_id[i] for i in pending if all(d in done for d in by_id[i].depends_on)]
         if not ready:
             raise ValueError("job dependency cycle")
         job = max(ready, key=lambda j: (j.duration(None), j.job_id))
@@ -76,9 +74,7 @@ def schedule(jobs: list[WorkJob], characters: tuple[Character, ...]) -> float:
 def _place(job: WorkJob, ready_at: float, characters, free) -> None:
     kind = _SLOT_KIND[job.activity]
     eligible = [
-        ch
-        for ch in characters
-        if job.activity in ch.activities and f.skills_met(ch, job.skills)
+        ch for ch in characters if job.activity in ch.activities and f.skills_met(ch, job.skills)
     ]
     best = None
     for ch in eligible:
