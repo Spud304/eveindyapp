@@ -79,8 +79,9 @@ class _JobMeta:
     materials: tuple[Material, ...]
     product_type_id: TypeId | None
     product_quantity: int
-    eiv_materials: tuple[Material, ...]  # recipe materials for EIV (ME 0)
-    cost_multiplier: float = 1.0  # structure and rig cost modifiers on the cost index
+    eiv_materials: tuple[Material, ...]  # ME 0 materials whose adjusted value is the EIV
+    cost_multiplier: float = 1.0  # hull, rig and blueprint cost modifiers on the cost index
+    base_share: float = 1.0  # base cost = EIV x runs x copies x this (2% for copy/invention)
 
 
 class _Planner:
@@ -374,7 +375,7 @@ class _Planner:
                     ),
                 )
             )
-            source_notes.append("owned BPO, one job for all runs")
+            source_notes.append("owned BPO")
             remaining = 0
         else:
             for b in bpcs:
@@ -439,6 +440,24 @@ class _Planner:
                 overridden.append((r, new_me, new_te, src, why))
             specs = overridden
 
+        # Jobs on an original (BPO, reaction formula, or a BPO you do not own yet) may not
+        # run longer than 30 days; copies are limited only by their runs. [client]
+        split_specs = []
+        for r, me, te, src, why in specs:
+            if src in (BlueprintSource.BPO, BlueprintSource.MISSING):
+                te_factor = 1.0 if is_reaction else 1 - te / 100
+                cap = f.max_runs(prod.activity, prod.recipe.time_seconds, te_factor * time_mult)
+                if r > cap:
+                    source_notes.append(
+                        f"split into jobs of at most {cap} runs (30-day job limit, before skills)"
+                    )
+                split_specs.extend((chunk, me, te, src, why) for chunk in _split(r, cap))
+            else:
+                split_specs.append((r, me, te, src, why))
+        specs = split_specs
+        bp_data = self.inp.game.blueprints.get(bp_id)
+        bp_cost_mult = bp_data.job_cost_multiplier if bp_data else 1.0
+
         job_ids = []
         for i, (r, me, te, src, why) in enumerate(specs, 1):
             job_id = f"{prod.activity.value}:{bp_id}:{i}"
@@ -453,6 +472,7 @@ class _Planner:
                 time_multiplier=te_factor * time_mult,
                 skills=prod.recipe.skills,
                 dep_items={m.type_id for m in mats},
+                skill_time_bonuses=self.inp.game.skill_time_bonuses,
             )
             if src == BlueprintSource.INVENTION:
                 work.depends_on.extend(invention_job_ids)
@@ -468,7 +488,7 @@ class _Planner:
                     product_type_id=product_type_id,
                     product_quantity=r * (prod.recipe.product_quantity or 1),
                     eiv_materials=prod.recipe.materials,
-                    cost_multiplier=bonuses.cost,
+                    cost_multiplier=bonuses.cost * bp_cost_mult,
                 ),
             )
             job_ids.append(job_id)
@@ -608,44 +628,57 @@ class _Planner:
             reason = Reason(ReasonCode.DECRYPTOR_CHOSEN, why)
         opt, dec = picked
 
-        # Invention needs T1 copies: one run per attempt, capped by the T1
-        # blueprint's max runs per copy.
+        # Invention needs T1 copies: each attempt consumes one copy run, and one invention job
+        # uses one copy. A copy holds at most the T1 blueprint's max runs, and an invention
+        # job at most 500 runs and 30 days (before skills). [client]
         t1 = self.inp.game.blueprints.get(t1_bp_id)
         t1_owned = self.owned.get(t1_bp_id, [])
         t1_bpos = [b for b in t1_owned if not b.is_copy]
-        per_copy = max(1, t1.max_production_limit if t1 else 1)
+        t1_cost_mult = t1.job_cost_multiplier if t1 else 1.0
+        t1_mfg = t1.manufacturing.materials if t1 and t1.manufacturing else ()
+        inv_station, inv_bonuses, _ = self.choose_station(Activity.INVENTION, None, t1_bp_id)
+        inv_cap = f.max_runs(Activity.INVENTION, inv.time_seconds, inv_bonuses.time)
+        per_copy = max(1, min(t1.max_production_limit if t1 else 1, inv_cap))
         copy_runs = list(_split(opt.attempts, per_copy))
         job_ids: list[str] = []
-        copy_job_id = None
+        copy_job_ids: list[str] = []
         if t1_bpos and t1 and t1.copying:
-            copy_job_id = f"copying:{t1_bp_id}:for:{t2_bp_id}"
             copy_station, copy_bonuses, _ = self.choose_station(Activity.COPYING, None, t1_bp_id)
-            self.add_job(
-                WorkJob(
-                    job_id=copy_job_id,
-                    activity=Activity.COPYING,
-                    blueprint_type_id=t1_bp_id,
-                    runs=per_copy if len(copy_runs) > 1 else copy_runs[0],
-                    copies=len(copy_runs),
-                    time_per_run=t1.copying.time_seconds,
-                    time_multiplier=copy_bonuses.time,
-                    skills=t1.copying.skills,
-                ),
-                _JobMeta(
-                    me=0,
-                    te=0,
-                    me_reason=Reason(ReasonCode.SOURCE_BPO, "Copy of owned T1 BPO for invention."),
-                    source=BlueprintSource.BPO,
-                    station=copy_station,
-                    materials=(),
-                    product_type_id=t1_bp_id,
-                    product_quantity=len(copy_runs),
-                    eiv_materials=(),
-                ),
-            )
-            job_ids.append(copy_job_id)
+            copy_cap = f.max_runs(Activity.COPYING, t1.copying.time_seconds, copy_bonuses.time)
+            # Every copy gets `per_copy` runs; the last one may have runs to spare.
+            for n, copies in enumerate(_split(len(copy_runs), copy_cap), 1):
+                copy_job_id = f"copying:{t1_bp_id}:for:{t2_bp_id}:{n}"
+                self.add_job(
+                    WorkJob(
+                        job_id=copy_job_id,
+                        activity=Activity.COPYING,
+                        blueprint_type_id=t1_bp_id,
+                        runs=per_copy if len(copy_runs) > 1 else copy_runs[0],
+                        copies=copies,
+                        time_per_run=t1.copying.time_seconds,
+                        time_multiplier=copy_bonuses.time,
+                        skills=t1.copying.skills,
+                    ),
+                    _JobMeta(
+                        me=0,
+                        te=0,
+                        me_reason=Reason(
+                            ReasonCode.SOURCE_BPO, "Copy of owned T1 BPO for invention."
+                        ),
+                        source=BlueprintSource.BPO,
+                        station=copy_station,
+                        materials=(),
+                        product_type_id=t1_bp_id,
+                        product_quantity=copies,
+                        eiv_materials=t1_mfg,
+                        cost_multiplier=copy_bonuses.cost * t1_cost_mult,
+                        base_share=c.COST_PERCENTAGE,
+                    ),
+                )
+                copy_job_ids.append(copy_job_id)
+            job_ids.extend(copy_job_ids)
         t1_source = BlueprintSource.BPC
-        if copy_job_id is None and sum(b.runs for b in t1_owned if b.is_copy) < opt.attempts:
+        if not copy_job_ids and sum(b.runs for b in t1_owned if b.is_copy) < opt.attempts:
             t1_source = BlueprintSource.MISSING
             self.warn(
                 ReasonCode.SOURCE_MISSING,
@@ -653,7 +686,6 @@ class _Planner:
                 f"{self.name(t1_bp_id)}; no T1 BPO to copy and owned T1 BPCs fall short.",
             )
 
-        inv_station, inv_bonuses, _ = self.choose_station(Activity.INVENTION, None, t1_bp_id)
         for i, r in enumerate(copy_runs, 1):
             mats = [Material(m.type_id, m.quantity * r) for m in inv.materials]
             if dec:
@@ -677,7 +709,7 @@ class _Planner:
                     time_per_run=inv.time_seconds,
                     time_multiplier=inv_bonuses.time,
                     skills=inv.skills,
-                    depends_on=[copy_job_id] if copy_job_id else [],
+                    depends_on=list(copy_job_ids),
                 ),
                 _JobMeta(
                     me=0,
@@ -688,7 +720,10 @@ class _Planner:
                     materials=tuple(mats),
                     product_type_id=t2_bp_id,
                     product_quantity=0,
-                    eiv_materials=(),
+                    # Invention cost is based on the EIV of the T2 product. [client]
+                    eiv_materials=t2_recipe.materials,
+                    cost_multiplier=inv_bonuses.cost * t1_cost_mult,
+                    base_share=c.COST_PERCENTAGE,
                 ),
             )
             job_ids.append(job_id)
@@ -795,16 +830,10 @@ class _Planner:
         )
 
     def job_cost(self, job: WorkJob, meta: _JobMeta) -> JobCost:
-        if job.activity not in (Activity.MANUFACTURING, Activity.REACTION):
-            return JobCost(
-                0.0,
-                None,
-                Reason(
-                    ReasonCode.FEE_NOT_MODELLED,
-                    f"{job.activity.value} fees are not modelled yet.",
-                ),
-            )
-        eiv = f.estimated_item_value(meta.eiv_materials, job.runs, self.adjusted())
+        """Install cost split as in the client (industry/job.py). Copying uses the T1
+        product's EIV x 2% x runs per copy x copies; invention the T2 product's EIV x 2% x
+        attempts."""
+        eiv = f.estimated_item_value(meta.eiv_materials, job.runs * job.copies, self.adjusted())
         station = meta.station
         if station is None:
             return JobCost(
@@ -815,14 +844,30 @@ class _Planner:
         system = self.inp.systems.get(station.system_id)
         index = system.cost_indices.get(job.activity, 0.0) if system else 0.0
         alpha = bool(job.character and job.character.is_alpha)
-        fee = f.job_fee(eiv, index, meta.cost_multiplier, station.facility_tax, alpha)
-        text = (
-            f"EIV {eiv:,.0f} x (SCI {index:.4f} x {meta.cost_multiplier:.4f} "
-            f"+ tax {station.facility_tax}% + SCC {c.SCC_SURCHARGE:.0%}"
-            + (f" + alpha {c.ALPHA_CLONE_TAX:.2%}" if alpha else "")
-            + ")."
+        safe = f.is_safe_sec(system.security if system else None)
+        fee = f.job_fee(
+            eiv * meta.base_share, index, meta.cost_multiplier, station.facility_tax, alpha, safe
         )
-        return JobCost(eiv, fee, Reason(ReasonCode.FEE_COMPUTED, text))
+        share = "" if meta.base_share == 1.0 else f" x {meta.base_share:.0%}"
+        text = (
+            f"Base {fee.base:,} (EIV {eiv:,.0f}{share}): job cost {fee.job_cost:,} "
+            f"(SCI {index:.4f} x modifiers {meta.cost_multiplier:.4f}"
+            + (f" + alpha {c.ALPHA_CLONE_TAX:.2%}" if alpha else "")
+            + f"), tax {fee.facility_tax:,} ({station.facility_tax}%), "
+            f"SCC {fee.scc_surcharge:,} ({c.SCC_SURCHARGE:.0%})"
+            + (f", safe-sec tax {fee.security_tax:,}" if safe else "")
+            + "."
+        )
+        return JobCost(
+            eiv,
+            float(fee.total),
+            Reason(ReasonCode.FEE_COMPUTED, text),
+            base=float(fee.base),
+            job_cost=float(fee.job_cost),
+            facility_tax=float(fee.facility_tax),
+            scc_surcharge=float(fee.scc_surcharge),
+            security_tax=float(fee.security_tax),
+        )
 
     def shopping_list(self) -> tuple[ShoppingItem, ...]:
         out = []

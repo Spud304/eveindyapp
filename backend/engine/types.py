@@ -149,6 +149,7 @@ class BlueprintData:
     reaction: Recipe | None = None
     copying: Recipe | None = None
     invention: tuple[Recipe, ...] = ()
+    job_cost_multiplier: float = 1.0  # attr 1954; multiplies the job cost of every activity
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +167,9 @@ class GameData:
     types: Mapping[TypeId, ItemType]
     blueprints: Mapping[TypeId, BlueprintData]
     decryptors: tuple[Decryptor, ...] = ()
+    # Skill attr 1982 (percent per level, e.g. -1.0): when a manufacturing recipe requires
+    # the skill, its time is multiplied by 1 + value x level / 100. [client][SDE]
+    skill_time_bonuses: Mapping[int, float] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -416,9 +420,17 @@ class BlueprintPlan:
 
 @dataclass(frozen=True, slots=True)
 class JobCost:
+    """Install cost split as the game splits it. Each part is rounded to whole ISK.
+    `base` is EIV x runs (x 2% for copying and invention); the parts are fractions of it."""
+
     estimated_item_value: float
     fee: float | None
     reason: Reason
+    base: float = 0.0
+    job_cost: float = 0.0  # base x cost index x hull/rig/blueprint cost modifiers (+ alpha)
+    facility_tax: float = 0.0
+    scc_surcharge: float = 0.0
+    security_tax: float = 0.0  # safe-sec systems only
 
 
 @dataclass(frozen=True, slots=True)

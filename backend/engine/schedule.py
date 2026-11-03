@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from . import formulas as f
@@ -22,6 +23,8 @@ class WorkJob:
     copies: int = 1
     depends_on: list[str] = field(default_factory=list)
     dep_items: set[int] = field(default_factory=set)  # resolved into depends_on
+    # Required-skill time bonuses (manufacturing only); see GameData.skill_time_bonuses
+    skill_time_bonuses: Mapping[int, float] = field(default_factory=dict)
     # Filled by schedule()
     character: Character | None = None
     start: float = 0.0
@@ -29,13 +32,18 @@ class WorkJob:
     schedule_reason: Reason | None = None
 
     def duration(self, character: Character | None) -> float:
-        return (
+        seconds = (
             self.time_per_run
             * self.runs
             * self.copies
             * self.time_multiplier
             * f.skill_time_multiplier(self.activity, character)
         )
+        if self.activity == Activity.MANUFACTURING:
+            seconds *= f.required_skill_time_multiplier(
+                self.skills, self.skill_time_bonuses, character
+            )
+        return float(f.round_half_up(seconds))  # the client rounds job time to seconds
 
 
 _SLOT_KIND = {

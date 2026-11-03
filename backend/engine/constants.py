@@ -1,21 +1,29 @@
 """Game constants the engine needs that are not passed in as data.
 
-Source tags: [SDE] checked against the local SDE (2025-04-29 build);
-[official] CCP docs; [community] wiki / third-party; see docs/redesign.md.
+Source tags: [SDE] checked against the SDE; [official] CCP docs; [client] the
+decompiled game client (industry/const.py and friends, V24.01); [community]
+wiki / third-party; see docs/redesign.md.
 """
 
 from .types import BuildCategory
 
-# --- Job fees ---------------------------------------------------------------
+# --- Job fees [client: industry/const.py, clonegrade/const.py, security/common/const.py] --
 
-# SCC surcharge on manufacturing and reaction jobs, since Feb 2024. [community]
-SCC_SURCHARGE = 0.04
-# Alpha clone tax on job installation. [community]
-ALPHA_CLONE_TAX = 0.0025
+SCC_SURCHARGE = 0.04  # SCC_SURCHARGE_RATE; halved for ME/TE research, which is not planned
+ALPHA_CLONE_TAX = 0.0025  # CLONE_STATE_INDUSTRY_TAX 1.0025, applied additively to job cost
+COST_PERCENTAGE = 0.02  # copying and invention base cost is this share of EIV
+INDUSTRY_SECURITY_TAX = 0.05  # INDUSTRY_SECURITY_TAX_RATE, safe-sec systems only
+SAFE_SEC_THRESHOLD = 0.95  # SecurityClassFromLevel: >= 0.95 is "Safe Security"
+
+# --- Run limits [client: industry/const.py, activity.py] ----------------------------------
+
+MAX_RUN_LENGTH = 2_592_000  # 30 days: an original's job may not take longer
+MAX_RUNS_HARD_CAP = 1_000_000
+MAX_SCIENCE_RUNS = 500  # copying and invention jobs
 
 # --- Invention --------------------------------------------------------------
 
-# Invented T2 BPC base ME / TE before decryptor modifiers. [community]
+# Invented T2 BPC base ME / TE before decryptor modifiers. [client: INVENTION_*_EFFICIENCY]
 T2_BASE_ME = 2
 T2_BASE_TE = 4
 

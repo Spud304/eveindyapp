@@ -4,12 +4,17 @@ from engine import PlanError, plan
 from engine.types import (
     Activity,
     BlueprintChoice,
+    BlueprintData,
     BlueprintSource,
     BuildCategory,
     BuildRules,
+    GameData,
     ItemDecision,
     Price,
     ReasonCode,
+    Recipe,
+    SkillRequirement,
+    SolarSystem,
 )
 
 from .data import (
@@ -28,6 +33,7 @@ from .data import (
     ENCRYPTION,
     F_COMPOSITE,
     F_INTERMEDIATE,
+    HS_SYSTEM,
     HULL,
     HULL_B,
     INTERMEDIATE,
@@ -37,6 +43,7 @@ from .data import (
     PYE,
     SCIENCE_1,
     SCIENCE_2,
+    SYSTEMS,
     T2_MOD,
     TRIT,
     athanor,
@@ -275,12 +282,14 @@ def test_job_fee_and_alpha_tax():
     omega = plan(make_input([(HULL, 1)], characters=(character(),), **common))
     alpha = plan(make_input([(HULL, 1)], characters=(character(alpha=True),), **common))
     eiv = 7 * 1000 + 100 * 5
-    assert jobs_for(omega, BP_HULL)[0].cost.estimated_item_value == eiv
-    assert jobs_for(omega, BP_HULL)[0].cost.fee == pytest.approx(eiv * (0.05 * 0.96 + 0.01 + 0.04))
-    assert jobs_for(alpha, BP_HULL)[0].cost.fee == pytest.approx(
-        eiv * (0.05 * 0.96 + 0.01 + 0.04 + 0.0025)
-    )
-    assert omega.costs.job_fees[Activity.MANUFACTURING] == pytest.approx(eiv * 0.098)
+    cost = jobs_for(omega, BP_HULL)[0].cost
+    assert cost.estimated_item_value == eiv
+    # 7500 x 0.05 x 0.96 = 360; tax 1% = 75; SCC 4% = 300
+    assert (cost.job_cost, cost.facility_tax, cost.scc_surcharge) == (360, 75, 300)
+    assert cost.fee == 735
+    # alpha adds 7500 x 0.25% = 18.75 to the job cost before it is rounded: 378.75 -> 379
+    assert jobs_for(alpha, BP_HULL)[0].cost.fee == 379 + 75 + 300
+    assert omega.costs.job_fees[Activity.MANUFACTURING] == 735
 
 
 def test_costs_total_shopping_and_fees():
@@ -402,7 +411,70 @@ def test_copy_and_invention_use_lab_station_time_bonuses():
     )
     # 3600 s x 5 attempts x Raitaru 0.85 (copy rig does not apply to invention)
     assert inv.schedule.end_seconds - inv.schedule.start_seconds == pytest.approx(3600 * 5 * 0.85)
-    assert inv.cost.fee is None and inv.cost.reason.code == ReasonCode.FEE_NOT_MODELLED
+    assert inv.cost.reason.code == ReasonCode.FEE_COMPUTED  # no prices, so 0
+
+
+def test_copy_and_invention_fees():
+    # T1 module EIV/run = 5 Trit x 10 = 50; T2 module EIV/run = 10 x 10 + 2 x 1000 = 2100
+    prices = {TRIT: Price(None, 10.0), COMP_A: Price(None, 1000.0)}
+    systems = {
+        **SYSTEMS,
+        HS_SYSTEM: SolarSystem(
+            HS_SYSTEM, "High", 0.9, {Activity.COPYING: 0.10, Activity.INVENTION: 0.10}
+        ),
+    }
+    r = plan(t2_input(stations=(lab(),), prices=prices, systems=systems))
+    copy = jobs_for(r, BP_T1_MOD, Activity.COPYING)[0]
+    inv = jobs_for(r, BP_T1_MOD, Activity.INVENTION)[0]
+    # copy base = 50 x 2% x 5 runs x 1 copy = 5; job cost 5 x 0.10 x Raitaru 0.97 = 0.485 -> 0
+    assert copy.cost.base == 5 and copy.cost.job_cost == 0 and copy.cost.scc_surcharge == 0
+    # invention base = 2100 x 2% x 5 attempts = 210; job cost 210 x 0.1 x 0.97 = 20.37 -> 20
+    assert inv.cost.base == 210 and inv.cost.job_cost == 20
+    assert inv.cost.scc_surcharge == 8  # 210 x 4% = 8.4
+    assert r.costs.job_fees[Activity.INVENTION] == inv.cost.fee
+
+
+def test_bpo_job_split_at_thirty_days():
+    # Hull: 1000 s/run, no TE, no station -> 2592 runs per job at most
+    r = plan(make_input([(HULL, 6000)], blueprints=(bpo(BP_HULL), bpo(BP_COMP_A))))
+    hull_jobs = jobs_for(r, BP_HULL)
+    assert [j.runs for j in hull_jobs] == [2592, 2592, 816]
+    assert "30-day job limit" in bp(r, BP_HULL).source_reason.text
+
+
+def test_invention_jobs_split_by_thirty_days():
+    # 3600 s per attempt -> 720 attempts per job; capped at 500 for invention
+    r = plan(t2_input())
+    assert all(j.runs <= 500 for j in jobs_for(r, BP_T1_MOD, Activity.INVENTION))
+
+
+def test_required_skill_shortens_manufacturing_time():
+    g = game()
+    req = SkillRequirement(3397, 1)
+    hull = g.blueprints[BP_COMP_A]
+    blueprints = dict(g.blueprints)
+    blueprints[BP_COMP_A] = BlueprintData(
+        hull.type_id,
+        hull.max_production_limit,
+        manufacturing=Recipe(
+            time_seconds=100,
+            materials=hull.manufacturing.materials,
+            skills=(req,),
+            product_type_id=COMP_A,
+            product_quantity=1,
+        ),
+    )
+    g2 = GameData(types=g.types, blueprints=blueprints, skill_time_bonuses={3397: -1.0})
+    r = plan(
+        make_input(
+            [(COMP_A, 10)],
+            game=g2,
+            blueprints=(bpo(BP_COMP_A),),
+            characters=(character(skills={3397: 5}),),
+        )
+    )
+    job = jobs_for(r, BP_COMP_A)[0]
+    assert job.schedule.end_seconds == pytest.approx(100 * 10 * 0.95)
 
 
 # --- schedule ------------------------------------------------------------------

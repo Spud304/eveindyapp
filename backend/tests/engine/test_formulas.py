@@ -1,7 +1,7 @@
 import pytest
 
 from engine import formulas as f
-from engine.types import Activity, Material, SecurityClass
+from engine.types import Activity, Material, SecurityClass, SkillRequirement
 
 from .data import (
     ADV_COMPONENT_TE_RIG,
@@ -98,14 +98,53 @@ def test_reactor_rig_has_no_highsec_multiplier_entry_defaults_to_one():
     assert b.material == pytest.approx(0.98)
 
 
-def test_job_fee_uses_scc_4pct_and_structure_cost_bonus():
-    assert f.job_fee(1000.0, 0.05, 0.96, 1.0, False) == pytest.approx(
-        1000 * (0.05 * 0.96 + 0.01 + 0.04)
+def test_job_fee_parts_as_in_the_client():
+    fee = f.job_fee(1000.0, 0.05, 0.96, 1.0, is_alpha=False, safe_sec=False)
+    assert (fee.base, fee.job_cost, fee.facility_tax, fee.scc_surcharge, fee.security_tax) == (
+        1000,
+        48,
+        10,
+        40,
+        0,
     )
+    assert fee.total == 98
 
 
-def test_job_fee_adds_alpha_tax():
-    assert f.job_fee(1000.0, 0.0, 1.0, 0.0, True) == pytest.approx(1000 * 0.0425)
+def test_job_fee_alpha_tax_is_additive_on_base():
+    # alpha adds base x 0.25% to the job cost even with no cost index
+    fee = f.job_fee(10_000.0, 0.0, 1.0, 0.0, is_alpha=True, safe_sec=False)
+    assert fee.job_cost == 25 and fee.total == 25 + 400
+
+
+def test_job_fee_safe_sec_tax():
+    fee = f.job_fee(10_000.0, 0.01, 1.0, 0.0, is_alpha=False, safe_sec=True)
+    assert fee.security_tax == 500
+
+
+def test_each_fee_part_rounds_half_up():
+    # base 12.5 -> 13; tax 13 x 10% = 1.3 -> 1; SCC 13 x 4% = 0.52 -> 1
+    fee = f.job_fee(12.5, 0.0, 1.0, 10.0, is_alpha=False, safe_sec=False)
+    assert (fee.base, fee.facility_tax, fee.scc_surcharge) == (13, 1, 1)
+    assert f.round_half_up(2.5) == 3 and f.round_half_up(3.5) == 4
+
+
+@pytest.mark.parametrize(("sec", "safe"), [(1.0, True), (0.95, True), (0.946, False), (0.5, False)])
+def test_safe_sec_threshold(sec, safe):
+    assert f.is_safe_sec(sec) is safe
+
+
+def test_max_runs_thirty_days_before_skills():
+    # 6000 s per run x TE 20% x Raitaru 0.85 = 4080 s -> ceil(2,592,000 / 4080) = 636
+    assert f.max_runs(Activity.MANUFACTURING, 6000, 0.8 * 0.85) == 636
+    assert f.max_runs(Activity.INVENTION, 60, 1.0) == 500  # science cap
+    assert f.max_runs(Activity.MANUFACTURING, 1, 1.0) == 1_000_000
+
+
+def test_required_skill_time_multiplier():
+    ch = character(skills={3397: 5, 11433: 4})
+    reqs = (SkillRequirement(3397, 1), SkillRequirement(11433, 1), SkillRequirement(3380, 1))
+    bonuses = {3397: -1.0, 11433: -1.0}  # Industry (3380) has no attr 1982
+    assert f.required_skill_time_multiplier(reqs, bonuses, ch) == pytest.approx(0.95 * 0.96)
 
 
 def test_skill_time_multiplier_manufacturing():
