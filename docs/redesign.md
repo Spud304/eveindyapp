@@ -141,13 +141,16 @@ Pure package (no Django imports) inside the Django project; imported as `engine`
   - Schedule: dependency-aware list scheduling, longest ready job first, onto the eligible character slot that finishes it earliest. Replaces the depth-phase timeline.
 - Fixed from the old calculator: bugs 1, 2, 8, 9, 10, 11 (tests in `backend/tests/engine/`). Bug 3 is a form bug; the engine takes ME override and decryptor as separate inputs, so the new UI cannot reproduce it. Invention chance changed from the old multiplicative skill formula to the additive one under Industry formulas.
 - Checked against build 3667080: 10 Ishtar + 50 Hulk plans in 0.01 s (game data loads in 0.5 s); Vexor/Covetor invention base 0.26 from the SDE gives 0.671 with science 5/5, encryption 4 and Attainment, matching the formula by hand. Not yet compared with in-game job windows.
-- Not modelled yet (stated in reasons/warnings where they apply):
-  - Copy and invention job fees (fee is `None`).
+- Not modelled yet (stated in reasons/warnings where they apply). Gaps against the [client] formulas are marked:
+  - **[client]** Max runs per job: a BPO job is one job for all runs, but the client caps a job at 30 days of time (copying and invention at 500 runs).
+  - **[client]** Required-skill time modifier (attr 1982, −1%/level per required skill) on manufacturing time.
+  - **[client]** Copy and invention fees (fee is `None`); the formula is now known.
+  - **[client]** Safe-sec 5% industry security tax (security ≥ 0.95), blueprint cost multiplier (attr 1954), per-component rounding to whole ISK. The facility `sccTaxModifier` and faction cost modifier come from the server and have no SDE source.
+  - Implants (they feed the same character time attributes as skills).
   - Copying-activity materials in the SDE (T2 BPO copy datacores; not used for T1 invention copies).
-  - Whether Advanced Industry applies to reactions (not applied).
   - Structure restrictions (e.g. which hulls a Raitaru can build); stations declare activities only.
   - Per-line cost attribution of shared components (Cost tab "per line").
-- Assumed, not verified: invention consumes one T1 copy run per attempt; T1 copies for invention are made from an owned T1 BPO at the copy's max runs; only Generic Decryptor (group 1304) decryptors are offered.
+- Confirmed from client code: Advanced Industry does not apply to reactions; invention consumes one T1 copy run per attempt; invention chance formula and encryption skill list. Still assumed: T1 copies for invention are made at the T1 blueprint's max runs per copy; only Generic Decryptor (group 1304) decryptors are offered.
 
 ## Known bugs to fix in the engine extraction
 1. ME rounding applied per single run then multiplied — overcounts; must be applied to the whole job (`max(runs, ceil(base * runs * ME multipliers))`). `_resolve_material_tree` and `_compute_runs_needed` currently disagree.
@@ -165,7 +168,7 @@ Pure package (no Django imports) inside the Django project; imported as `engine`
 
 ## Groundwork findings (2026-11-03)
 
-Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or live CCP endpoint; **[community]** EVE University wiki / EVE Ref / third-party repo; **[code]** read in this repo or the AT Tool repo; **[unverified]**.
+Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or live CCP endpoint; **[client]** decompiled game client; **[community]** EVE University wiki / EVE Ref / third-party repo; **[code]** read in this repo or the AT Tool repo; **[unverified]**.
 
 ### Game data (SDE)
 - The local `src/instance/sqlite-latest.sqlite` (2025-04-29) is the old Fuzzwork layout (`invTypes`, `industryActivityMaterials`…). Since commit 6fd2cff the code queries a different schema (`EveType`, `BlueprintProduct`, `TypeDogmaAttribute`…). The app cannot run against the file on this machine. [SDE][code]
@@ -193,6 +196,21 @@ Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or l
 - Rig security multipliers: high 1.0, low 1.9, null/WH 2.1. [community]
 - Invention chance = base × (1 + (sci1 + sci2)/30 + encryption/40) × (1 + decryptor%). T2 BPC base ME 2 / TE 4; 10 runs modules, 1 run ships/rigs (before decryptors). Decryptor stats come from SDE attributes 1112/1113/1114/1124. [community]
 - 2026 changes: unrefined mineral reactions 3600s → 360s (comes from the SDE); +5% install fees in Exordium starter space only. No slot, rig or SCC changes found through patch 24.01. [official]
+
+**Client code (2026-11-03).** Read in the decompiled client at `G:\eve projects\src` (packages built from V24.01, compiled 2026-06-18): `industry/` (job, activities, const), `eve/common/script/util/industryCommon.py` (how server data becomes modifiers), `eveuniverse/security.py`. This is what the in-game industry window computes. Tag **[client]**. It supersedes the [community] lines above where they differ.
+- Activity IDs: manufacturing 1, TE research 3, ME research 4, copying 5, invention 8, reaction 9. There is no 11. [client][SDE]
+- Materials per job: `max(runs, ceil(round(base × Π material modifiers × runs, 2)))`. Modifiers are blueprint ME, hull and rigs. Matches the engine. [client]
+- Time: `base time × runs × Π time modifiers`, rounded to whole seconds. Copying: `time × runs per copy × copies`. Modifiers are blueprint TE (manufacturing only), hull, rigs, character attributes (219 manufacturing, 387 copying, 1959 invention, 2662 reactions) and, for manufacturing, `1 + attr 1982 × level / 100` for each required skill that has attribute 1982 (26 skills, −1%/level: Advanced * Ship Construction, some science skills). [client][SDE]
+- Character attribute sources from SDE dogma effects: Industry → 219; Advanced Industry → 219, 387, 1959, 385, 398 (not reactions); Science → 387; Reactions → 2662. Implants feed the same attributes. [SDE]
+- Max runs per job: originals `ceil(30 days / (time × Π time modifiers))`, capped at 1,000,000; copies by remaining runs; copying and invention at most 500 runs. [client]
+- Cost: base = `EIV per run × runs` (manufacturing, reaction); `EIV × 2% × runs per copy × copies` (copying); `EIV of the T2 product × 2% × attempts` (invention). Then, each rounded to whole ISK:
+  - job cost = base × system cost index × hull and rig cost modifiers × faction modifier × blueprint attr 1954, + base × 0.25% if alpha (additive);
+  - facility tax = base × tax;
+  - SCC = base × 4% × the facility's `sccTaxModifier` (×0.5 for ME/TE research);
+  - industry security tax = base × 5% in "safe sec" systems (security ≥ 0.95).
+  EIV per blueprint comes from the server, so it isn't visible in client code. [client]
+- Security classes on the raw value: ≤ 0 null, < 0.45 low, < 0.95 high, ≥ 0.95 safe. [client]
+- Invention: chance = base × (1 + Σ level × 1/30 per required skill, 1/40 for skills in SDE type list 799 "LowerInventionSkillProbabilityTypes" = the seven Encryption Methods skills) × decryptor multiplier, clamped to [0, 1]. Output BPC ME 2 + decryptor, TE 4 + decryptor, runs = base + decryptor. Each attempt consumes one run of the T1 copy. [client][SDE]
 
 ### Reprocessing / compression (compressed ore calculator)
 - Compression is 1:1 since patch 20.03; compressed ore reprocesses in batches of `portionSize` (100). Outputs in `typeMaterials`, raw↔compressed mapping in `compressibleTypes`. [community][SDE]
