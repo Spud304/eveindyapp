@@ -78,6 +78,15 @@ CACHES = {
     }
 }
 
+# Celery: on-demand syncs only. Results are not stored; FeedStatus rows report outcomes.
+CELERY_BROKER_URL = env.str("CELERY_BROKER_URL", REDIS_URL.rsplit("/", 1)[0] + "/1")
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_TIME_LIMIT = 15 * 60
+# How long a queued "refresh now" blocks another one for the same account.
+SYNC_DEDUP_SECONDS = env.int("SYNC_DEDUP_SECONDS", 10 * 60)
+
 AUTH_USER_MODEL = "accounts.User"
 LOGIN_URL = "/auth/login"
 

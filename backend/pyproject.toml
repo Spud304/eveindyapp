@@ -15,6 +15,7 @@ dependencies = [
     "whitenoise>=6.9",
     "redis>=5.2",
     "dj-database-url>=3.1.2",
+    "celery[redis]>=5.4",
 ]
 
 [dependency-groups]

@@ -338,12 +338,16 @@ def corp_source(corporation_id: int, feed: CorpFeed) -> EveCharacter:
     )
 
 
-def sync_corporation(corporation_id: int, client: EsiClient | None = None) -> list[FeedStatus]:
+def sync_corporation(
+    corporation_id: int, client: EsiClient | None = None, feeds=None
+) -> list[FeedStatus]:
     client = client or get_client()
     kind = OwnerKind.CORPORATION
     _ensure_corporation(corporation_id, client)
     results = []
     for cf in CORP_FEEDS:
+        if feeds is not None and cf.feed not in feeds:
+            continue
         try:
             source = corp_source(corporation_id, cf)
         except FeedUnavailable as exc:
@@ -436,19 +440,26 @@ def refresh_affiliations(characters: list[EveCharacter], client: EsiClient) -> N
     )
 
 
-def sync_account(user: User, client: EsiClient | None = None) -> list[FeedStatus]:
-    """Every linked character of the account, then every corp they are in."""
+def sync_account(user: User, client: EsiClient | None = None, feeds=None) -> list[FeedStatus]:
+    """Every linked character of the account, then every corp they are in. `feeds` limits
+    the run (e.g. jobs only); roles are always read first when corp feeds run, because the
+    corp feed source depends on them."""
     client = client or get_client()
     characters = list(user.characters.filter(esi_token__isnull=False))
     try:
         refresh_affiliations(characters, client)
     except EsiError as exc:
         log.warning("affiliation refresh failed: %s", exc)
+    char_feeds = (
+        CHARACTER_FEEDS
+        if feeds is None
+        else tuple(f for f in CHARACTER_FEEDS if f in feeds or f == Feed.ROLES)
+    )
     results = []
     for ch in characters:
-        results.extend(sync_character(ch, client=client))
+        results.extend(sync_character(ch, feeds=char_feeds, client=client))
     for corp_id in sorted({c.corporation_id for c in characters if c.corporation_id}):
-        results.extend(sync_corporation(corp_id, client=client))
+        results.extend(sync_corporation(corp_id, client=client, feeds=feeds))
     return results
 
 

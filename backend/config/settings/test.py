@@ -21,3 +21,4 @@ SDE_DIR = INSTANCE_DIR / "sde"
 DEV_LOGIN_ENABLED = True
 EVE_CLIENT_ID = "test-client-id"
 EVE_CLIENT_SECRET = "test-client-secret"
+CELERY_TASK_ALWAYS_EAGER = True  # tasks run inline in tests

@@ -13,6 +13,7 @@ from typing import cast
 from django.conf import settings
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
+from django.db import transaction
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
 from django.urls import reverse
@@ -36,6 +37,20 @@ def _safe_next(request: HttpRequest, candidate: str | None) -> str:
 
 def _callback_uri(request: HttpRequest) -> str:
     return settings.EVE_CALLBACK_URL or request.build_absolute_uri(reverse("accounts:callback"))
+
+
+def _queue_first_sync(user_id: int) -> None:
+    """Fetch the new character's data right away. A broker outage must not fail the link;
+    the next cron sync picks the character up."""
+    from apps.esidata.tasks import enqueue_account_sync
+
+    def queue() -> None:
+        try:
+            enqueue_account_sync(user_id)
+        except Exception:
+            log.exception("could not queue the first sync for account %s", user_id)
+
+    transaction.on_commit(queue)
 
 
 def _error(message: str, status: int) -> HttpResponse:
@@ -105,6 +120,7 @@ def callback_view(request: HttpRequest) -> HttpResponse:
         if not tokens.get("refresh_token"):
             return _error("SSO returned no refresh token; link the character again", 400)
         services.store_tokens(character, tokens, identity.scopes)
+        _queue_first_sync(cast(User, request.user).pk)
         return redirect(next_url)
 
     user = services.ensure_user(character)

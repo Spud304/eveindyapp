@@ -11,4 +11,4 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 
 if SECRET_KEY in ("", "change-me", "dev-insecure-secret-key"):  # noqa: F405
-    raise RuntimeError("SECRET_KEY is not set; run `make init` to generate secrets in deploy/.env")
+    raise RuntimeError("SECRET_KEY is not set; set it in deploy/.env (see deploy/.env.example)")
