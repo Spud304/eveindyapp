@@ -43,6 +43,8 @@ from .models import (
 
 DECRYPTOR_GROUP = 1304  # Generic Decryptor; groups 728-731 and 979 are legacy
 ATTR_DECRYPTOR = {"prob": 1112, "me": 1113, "te": 1114, "runs": 1124}
+ATTR_REQUIRED_SKILL_TIME = 1982  # manufactureTimePerLevel on skills [client][SDE]
+ATTR_JOB_COST_MULTIPLIER = 1954  # jobCostMultiplier on blueprints [client][SDE]
 ATTR_SECURITY = {SecurityClass.HIGH: 2355, SecurityClass.LOW: 2356, SecurityClass.NULL: 2357}
 # Rig bonus attribute per modifier kind (values are negative percentages in the SDE).
 ATTR_ENGINEERING_RIG = {
@@ -142,6 +144,7 @@ def _game_data(build_key: int) -> GameData:
         prods = products[act.pk]
         return recipe(act, prods[0] if prods else None)
 
+    attr_values = _attribute_values((ATTR_REQUIRED_SKILL_TIME, ATTR_JOB_COST_MULTIPLIER))
     blueprints = {}
     for bp_id, limit in Blueprint.objects.filter(removed=False).values_list(
         "id", "max_production_limit"
@@ -158,6 +161,7 @@ def _game_data(build_key: int) -> GameData:
             reaction=single(a, "reaction"),
             copying=single(a, "copying"),
             invention=invention,
+            job_cost_multiplier=attr_values[ATTR_JOB_COST_MULTIPLIER].get(bp_id, 1.0),
         )
 
     decryptors = []
@@ -174,7 +178,24 @@ def _game_data(build_key: int) -> GameData:
             )
         )
     decryptors.sort(key=lambda d: d.name)
-    return GameData(types=types, blueprints=blueprints, decryptors=tuple(decryptors))
+    return GameData(
+        types=types,
+        blueprints=blueprints,
+        decryptors=tuple(decryptors),
+        skill_time_bonuses=attr_values[ATTR_REQUIRED_SKILL_TIME],
+    )
+
+
+def _attribute_values(attribute_ids: tuple[int, ...]) -> dict[int, dict[int, float]]:
+    """attribute id -> {type id: value} across all of typeDogma, for a few attributes."""
+    out: dict[int, dict[int, float]] = {a: {} for a in attribute_ids}
+    rows = SdeRawRecord.objects.filter(file="typeDogma", removed=False).values_list("key", "data")
+    for key, data in rows.iterator(chunk_size=2000):
+        for a in data.get("dogmaAttributes", []):
+            attr = int(a["attributeID"])
+            if attr in out:
+                out[attr][int(key)] = float(a["value"])
+    return out
 
 
 def _sources(type_id: int):

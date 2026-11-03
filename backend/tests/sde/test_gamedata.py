@@ -63,6 +63,8 @@ def industry_records():
         M_RIG: dogma({2355: 1.0, 2356: 1.9, 2357: 2.1, 2593: 0.0, 2594: -2.0, 2595: 0.0}),
         REACTOR_RIG: dogma({2356: 1.0, 2357: 1.1, 2713: -20.0, 2714: -2.0}),
         ACCELERANT: dogma({1112: 1.2, 1113: 2.0, 1114: 10.0, 1124: 1.0}),
+        3397: dogma({1982: -1.0}),  # Advanced Medium Ship Construction
+        691: dogma({1954: 0.0}),  # a blueprint with a job cost multiplier
     }
     r["industryModifierSources"] = {
         RAITARU: {
@@ -113,6 +115,12 @@ def test_game_data_types_and_blueprints(imported):
     assert bp.copying.time_seconds == 4800 and bp.copying.product_type_id is None
     (inv,) = bp.invention
     assert inv.product_type_id == 11371 and inv.probability == 0.3
+
+
+def test_skill_time_bonuses_and_blueprint_cost_multiplier(imported):
+    g = gamedata.game_data()
+    assert g.skill_time_bonuses == {3397: -1.0}
+    assert g.blueprints[691].job_cost_multiplier == 0.0
 
 
 def test_decryptors_from_dogma(imported):
