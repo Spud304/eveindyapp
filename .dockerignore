@@ -1,6 +1,21 @@
+# Old Flask app (root Dockerfile)
 .env
 .git
 .venv
 __pycache__
 *.pyc
 src/instance/
+
+# New stack (deploy/Dockerfile.backend). The image installs its own dependencies; a host
+# virtualenv copied in by `COPY backend/` would replace them with ones built for another machine.
+**/.venv
+**/__pycache__
+**/*.pyc
+backend/.pytest_cache
+backend/.ruff_cache
+backend/.hypothesis
+backend/instance
+backend/instance-test
+backend/staticfiles
+backend/.env
+deploy/.env

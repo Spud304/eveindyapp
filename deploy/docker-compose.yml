@@ -1,0 +1,75 @@
+# Production stack for the new backend. The frontend and Caddy (TLS) come with step 4; until
+# then `web` listens on 127.0.0.1:8000 only. Settings: deploy/.env (see .env.example).
+name: eveindy
+
+x-backend: &backend
+  image: eveindy-backend:${APP_VERSION:-dev}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile.backend
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    DATABASE_URL: postgres://eveindy:${POSTGRES_PASSWORD}@db:5432/eveindy
+    REDIS_URL: redis://redis:6379/0
+    DJANGO_SETTINGS_MODULE: config.settings.prod
+  volumes:
+    - instance:/app/instance
+
+services:
+  web:
+    <<: *backend
+    command: ["/app/deploy/entrypoint.sh", "web"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    <<: *backend
+    command: ["/app/deploy/entrypoint.sh", "worker"]
+    depends_on:
+      web:
+        condition: service_healthy  # migrations done
+
+  scheduler:
+    <<: *backend
+    command: ["/app/deploy/entrypoint.sh", "scheduler"]
+    depends_on:
+      web:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: eveindy
+      POSTGRES_USER: eveindy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eveindy -d eveindy"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # volatile-lru: only keys with a TTL (the ESI ETag cache) are evicted; Celery's queue keys
+    # have none, so queued syncs are never dropped.
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru", "--save", ""]
+
+volumes:
+  pgdata:
+  instance:
