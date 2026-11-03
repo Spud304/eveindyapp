@@ -4,7 +4,7 @@ EVE Online industry planning. A plan-centric redesign is in progress: read `docs
 
 Two codebases live here until the new stack replaces the old one:
 - `src/`: the old Flask + Celery app (still runnable).
-- `backend/`: the new Django + django-ninja project. `backend/engine/` is the pure planning engine (no Django imports), imported as `engine`. Dev Postgres and Redis: `docker compose -f deploy/docker-compose.dev.yml up -d` (ports 5434 / 6381).
+- `backend/`: the new Django + django-ninja project. `backend/engine/` is the pure planning engine (no Django imports), imported as `engine`. Dev Postgres and Redis: `docker compose -f deploy/docker-compose.dev.yml up -d` (ports 5434 / 6381). Dev server: `uv run python manage.py runserver localhost:5050` (the registered EVE callback). On-demand syncs need a worker: `uv run celery -A config worker -l INFO`. Production stack: `deploy/docker-compose.yml`.
 
 ## Commits
 - Commit directly to `master` (solo project); no feature branches unless asked.

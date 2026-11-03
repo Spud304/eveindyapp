@@ -274,7 +274,20 @@ Done:
   - Live: 10 Ishtar + 50 Hulk in 1.5 s (102 jobs).
   - Open: every character is treated as omega and allowed every activity until per-character settings exist; `unit_price` is CCP's average price until a buy-price source exists.
 
-Next: cron entries for `sync_esi` and a Celery task for "refresh now". Then step 3 (plans, asset reservation, per-plan rule overrides).
+- Sync scheduling (2026-11-03), as decided under Background work:
+  - Cron (`deploy/crontab`, supercronic in the `scheduler` container):
+    - industry jobs every 10 min (`sync_esi --all --feeds jobs`; roles are read too, because corp feed sources depend on them);
+    - everything else hourly;
+    - public prices and cost indices hourly;
+    - SDE drop folder every 5 min, CCP's latest build daily, `clearsessions` hourly.
+    - Intervals follow ESI's cache times read from live headers: jobs 5 min; assets, blueprints, roles, divisions, prices and cost indices 1 h; skills 60 s.
+    - Each `sync_esi` mode takes its own Postgres advisory lock, so a slow run is skipped by the next tick of the same line, not doubled.
+  - Celery (`worker` container, Redis DB 1, no beat, results not stored):
+    - `POST /api/sync` queues a full sync for the account; a second request within 10 minutes, or while one is running, is refused (`queued: false`). Linking a character queues one after the transaction commits; a broker outage logs and does not fail the link. `GET /api/sync/status` lists each feed's last attempt, success, row count, error and supplying character.
+    - Live: queued from the API and run by a real worker, 9 feeds in 2.6 s.
+  - Deploy: `deploy/Dockerfile.backend` (from the AT Tool's, with supercronic checksum-pinned), `deploy/entrypoint.sh` (web / worker / scheduler), `deploy/docker-compose.yml` (web, worker, scheduler, Postgres 16, Redis). Image builds, `manage.py check` passes under prod settings, and supercronic validates the crontab. Redis uses `volatile-lru`, so only TTL'd cache keys are evicted, never queued tasks. Caddy and the frontend come with step 4; until then `web` listens on 127.0.0.1:8000. No backup job yet (the AT Tool's `backup.sh` was not ported).
+
+Step 2 is done apart from per-character settings (alpha clone, allowed activities) and a buy-price source. Next: step 3 (plans, asset reservation, per-plan rule overrides).
 
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
