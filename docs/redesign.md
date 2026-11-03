@@ -125,6 +125,29 @@ Data needed, with the ESI role it requires:
 - `AssetSnapshot` (source: character / corp hangar / manual paste, location, flag, type_id, qty, fetched_at)
 - `PlanShare` (plan, principal: corp / link token / user, role: viewer / editor)
 
+### Planning engine (`backend/engine/`, steps 0–1 done 2026-11-03)
+Package with relative imports only, no framework imports, so it moves into the Django project unchanged. Imported as `backend.engine` for now; tests in `tests/unit/engine/`.
+
+- `types.py`: `PlanInput` (lines, SDE `GameData`, stations, systems with cost indices, characters, owned blueprints, assets after reservation, prices, effective `BuildRules`, per-blueprint `BlueprintChoice`) → `PlanResult` (items, blueprints, jobs, shopping list, costs, total time, warnings). Every decision carries a `Reason(code, text)`.
+- `plan()` algorithm: decide build/buy per item → order BUILD items consumers-first → walk once, so each item's runs are computed on the merged demand of all lines and each job's materials are rounded per job → leftover BUY demand minus assets is the shopping list → schedule → fees.
+- Decisions made in the engine:
+  - Assets reduce input demand only, never a plan line's own quantity (a line means "build this").
+  - A plan line is always built, even if a rule would buy its category.
+  - Blueprint source per blueprint: owned BPO (one job, all runs) → owned BPCs (best ME first, one job each) → invention for T2 → "missing" at ME 0 / TE 0 with a warning. Splitting BPO runs across idle slots is step 6.
+  - Station: among stations offering the activity, lowest material multiplier, then time, then fee rate.
+  - Decryptor `auto`: lowest invention inputs + direct T2 job materials at market price (not invention cost alone, which ignores what the ME bonus saves).
+  - Invention chance uses the best eligible inventor's skills; attempts = ceil(BPCs / chance).
+  - Schedule: dependency-aware list scheduling, longest ready job first, onto the eligible character slot that finishes it earliest. Replaces the depth-phase timeline.
+- Fixed from the old calculator: bugs 1, 2, 8, 9, 10, 11 (tests in `tests/unit/engine/`). Bug 3 is a form bug; the engine takes ME override and decryptor as separate inputs, so the new UI cannot reproduce it. Invention chance changed from the old multiplicative skill formula to the additive one under Industry formulas.
+- Not modelled yet (stated in reasons/warnings where they apply):
+  - Copy and invention job fees (fee is `None`).
+  - Structure and rig time bonuses for copying/invention; copy/invention rigs.
+  - Copying-activity materials in the SDE (T2 BPO copy datacores; not used for T1 invention copies).
+  - Whether Advanced Industry applies to reactions (not applied).
+  - Structure restrictions (e.g. which hulls a Raitaru can build); stations declare activities only.
+  - Per-line cost attribution of shared components (Cost tab "per line").
+- Assumed, not verified: invention consumes one T1 copy run per attempt; T1 copies for invention are made from an owned T1 BPO at the copy's max runs; molecular-forged reactions use biochemical reactor rigs (carried over from the old code); the L-set reactor rig (group 1939) covers all three reaction rig categories (from its SDE description).
+
 ## Known bugs to fix in the engine extraction
 1. ME rounding applied per single run then multiplied — overcounts; must be applied to the whole job (`max(runs, ceil(base * runs * ME multipliers))`). `_resolve_material_tree` and `_compute_runs_needed` currently disagree.
 2. T2 invented ME updates materials but not job cost, build strategy, or sub-component run counts.
@@ -137,7 +160,7 @@ Data needed, with the ESI role it requires:
 9. SCC surcharge is 4% (since Feb 2024), code uses 1.5% (`industry.py` `SCC_SURCHARGE`).
 10. Job cost ignores the engineering complex cost bonus (Raitaru 3%, Azbel 4%, Sotiyo 5%; SDE attribute 2601 = 0.97/0.96/0.95) and the alpha clone tax (0.25%, alpha only).
 11. M-set TE rigs (groups 1819, 1821, …, 1841) and reactor TE/L rigs (1933, 1935, 1937, 1939) are not in the rig group maps, so their bonuses are ignored.
-12. Security class uses raw security (`> 0.0` = lowsec). EVE rounds to one decimal, so a system at 0.04 is nullsec in game but lowsec here. (Rounding rule recalled, not verified.)
+12. ~~Security class uses raw security.~~ Not a bug. CCP's system-security guide: positive values below 0.05 display as 0.1, so `>= 0.45` high / `> 0.0` low / else null on the raw value is correct. [official: developers.eveonline.com/docs/guides/system-security]
 
 ## Groundwork findings (2026-11-03)
 
@@ -197,8 +220,8 @@ This app needs periodic work (token refresh, character + corp job / asset / blue
 2. Cron for periodic + a task queue (Celery or RQ on the existing Redis) for on-demand. Immediate refresh, one more service and worker to run.
 
 ## Build order
-0. **Engine types** — input/output dataclasses, including a reason on each decision.
-1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
+0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
+1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
 2. **Account + data layer** — account-scoped config, all-character + corp fetches (assets, blueprints, jobs, divisions), role detection, token fix, Postgres.
 3. **Plans** — model + JSON API, asset reservation.
 4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard.
