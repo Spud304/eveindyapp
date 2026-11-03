@@ -15,9 +15,10 @@ factors (`0.97` means 3% off), times are seconds, ISK is float.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal, Mapping
+from typing import Literal
 
 TypeId = int
 
