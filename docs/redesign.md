@@ -185,7 +185,11 @@ Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or l
 
 Rejected: staying on Flask. Needs an OpenAPI add-on and a reimplementation of SSO / ESI / SDE code the AT Tool already has.
 
-### Background work (decision pending)
+### Background work
+
+**Decided (2026-11-03): cron for periodic work + Celery for on-demand work.** Supercronic `scheduler` container (as in the AT Tool) runs management commands for token refresh, scheduled character/corp sync and SDE checks. A Celery worker on the existing Redis runs on-demand jobs ("refresh now", first fetch after linking a character). No Celery beat; cron owns the schedule. Celery over RQ because this repo's fetch tasks (`src/tasks.py`) are already Celery tasks.
+
+Options considered:
 The AT Tool has no task queue: a `scheduler` container runs supercronic with `deploy/crontab` (hourly `refresh_affiliations`, SDE `--scan-incoming` every 5 min, `--check-latest` daily, backups). [code]
 
 This app needs periodic work (token refresh, character + corp job / asset / blueprint sync, SDE check) and on-demand work ("refresh now", first fetch after linking a character; corp assets can be many pages). Options:
