@@ -69,12 +69,12 @@ MIN_SPLIT_GAIN = 3600.0
 def plan(inp: PlanInput) -> PlanResult:
     base = _Planner(inp)
     result = base.run()
-    parallel, saved = _search_parallel(base)
-    if not parallel:
+    spread, parallel, saved = _search_parallel(base)
+    if not spread and not parallel:
         return result
-    split = _Planner(inp, parallel, saved).run()
+    split = _Planner(inp, parallel, saved, spread).run()
     # Per-job rounding can add a downstream run the search did not see; never return a
-    # slower plan than the one without copies.
+    # slower plan than the one without these settings.
     return split if split.total_seconds < result.total_seconds else result
 
 
@@ -135,6 +135,25 @@ def _bpo_layout(cp: _CopyPlan, k: int) -> tuple[list[_Spec], list[int], int]:
 
 
 @dataclass
+class _Layout:
+    """What a blueprint's jobs are made from, kept so the search can lay them out again with a
+    different spread over owned BPCs or BPO split: specs before the owned BPCs (picked and
+    bought), the owned BPCs and the runs they cover, specs after (extra BPOs, the BPO,
+    invention, missing)."""
+
+    prod: _Producer
+    prefix: list[_Spec]
+    pool: list[OwnedBlueprint]
+    pool_need: int
+    suffix: list[_Spec]
+    choice: BlueprintChoice
+    time_mult: float
+    invention_job_ids: list[str]
+    k_min: int = 0  # owned BPCs used when each is used up in order
+    cp: _CopyPlan | None = None
+
+
+@dataclass
 class _JobMeta:
     """Output-only job fields kept alongside the schedulable WorkJob."""
 
@@ -157,11 +176,15 @@ class _Planner:
         inp: PlanInput,
         parallel: dict[TypeId, int] | None = None,
         saved: dict[TypeId, float] | None = None,
+        spread: dict[TypeId, int] | None = None,
     ):
         self.inp = inp
         # Auto-copy: parallel jobs per BPO blueprint, and the seconds each split saves.
         self.parallel = parallel or {}
         self.saved = saved or {}
+        # Owned BPCs to spread a blueprint's runs over (None in the dict: the fewest).
+        self.spread = spread or {}
+        self.layouts: dict[TypeId, _Layout] = {}
         self.copy_plans: dict[TypeId, _CopyPlan] = {}
         self.copy_job_ids: dict[TypeId, list[str]] = {}  # auto-copy jobs by blueprint
         # Opt-in blueprint purchases: (kind "bpc" / "bpo", blueprint, count, unit price or None)
@@ -458,7 +481,8 @@ class _Planner:
                 self.picked.get(b.item_id, len(self.picked)),
                 -b.me,
                 -b.te,
-                b.available_in,
+                max(0.0, b.available_in),
+                b.source_job_id is not None,  # in the hangar before copies not yet delivered
                 b.item_id,
             ),
         )
@@ -527,17 +551,12 @@ class _Planner:
                 bought_bpcs += 1
             self.purchases.append(("bpc", bp_id, choice.buy_bpcs, choice.bpc_price))
             source_notes.append(f"{choice.buy_bpcs} bought BPC(s) of {per} runs (your choice)")
-        for b in [b for b in usable if b.item_id not in self.picked]:
-            if remaining <= 0:
-                break
-            use_bpc(b)
-        if owned_used:
-            note = f"{owned_used} owned BPC(s) cover {sum(sp.runs for sp in specs if sp.source == BlueprintSource.BPC)} runs"
-            if picked_used:
-                note += f" ({picked_used} picked for this plan)"
-            if incoming_used:
-                note += f"; {incoming_used} of them still being made by copy jobs"
-            source_notes.append(note)
+        # The rest of the owned BPCs: how many to use, and how many runs each, is decided by
+        # `pool_specs` (fewest BPCs, or spread over more when that finishes the plan sooner).
+        pool = [b for b in usable if b.item_id not in self.picked]
+        pool_index = len(specs)
+        pool_need = min(remaining, sum(b.runs for b in pool))
+        remaining -= pool_need
         if in_jobs:
             source_notes.append(f"{len(in_jobs)} owned BPC(s) in jobs not used")
         if len(usable) < len(bpcs) and best_bpo is not None:
@@ -548,7 +567,6 @@ class _Planner:
 
         # Originals: the owned BPO and any extra BPOs you chose to buy share the rest evenly.
         extra = choice.extra_bpos if not is_reaction else 0
-        bpo_index = len(specs)
         if extra > 0:
             self.purchases.append(("bpo", bp_id, extra, self.price(bp_id)))
         if remaining > 0 and (best_bpo is not None or extra > 0):
@@ -568,7 +586,6 @@ class _Planner:
                     f"{extra} extra BPO(s) bought (your choice) at ME {choice.bpo_me} / "
                     f"TE {choice.bpo_te}, sharing the runs"
                 )
-            bpo_index = len(specs)
             if best_bpo is not None:
                 b = best_bpo
                 specs.append(
@@ -585,7 +602,7 @@ class _Planner:
                     )
                 )
                 source_notes.append(
-                    f"owned BPO for {own_share} runs" if specs[:-1] else "owned BPO"
+                    f"owned BPO for {own_share} runs" if specs[:-1] or pool_need else "owned BPO"
                 )
                 if b.job_activity_id is not None:
                     source_notes.append(_job_note(b))
@@ -621,45 +638,60 @@ class _Planner:
                 f"{self.name(bp_id)}: no owned blueprint for {remaining} runs.",
             )
 
-        if not is_reaction and (choice.me_override is not None or choice.te_override is not None):
-            overridden = []
-            for sp in specs:
-                new_me = choice.me_override if choice.me_override is not None else sp.me
-                new_te = choice.te_override if choice.te_override is not None else sp.te
-                why = Reason(
-                    ReasonCode.ME_OVERRIDE,
-                    f"ME {new_me} / TE {new_te} set by you "
-                    f"(blueprint gives ME {sp.me} / TE {sp.te}).",
-                )
-                overridden.append(replace(sp, me=new_me, te=new_te, me_reason=why))
-            specs = overridden
-
         bp_cost_mult = bp_data.job_cost_multiplier if bp_data else 1.0
+        lay = _Layout(
+            prod=prod,
+            prefix=specs[:pool_index],
+            pool=pool,
+            pool_need=pool_need,
+            suffix=specs[pool_index:],
+            choice=choice,
+            time_mult=time_mult,
+            invention_job_ids=invention_job_ids,
+        )
+        lay.k_min = len(self.pool_specs(lay, None)[0])
 
         # Auto-copy: an owned BPO that can be copied is a candidate for the split search.
-        copy_parts: list[int] = []
-        per_copy = 0
-        cp = None
-        bpo_runs = next((sp.runs for sp in specs if sp.source == BlueprintSource.BPO), 0)
-        if not is_reaction and bp_data and bp_data.copying and bpo_runs > 1:
+        bpo_spec = next(
+            (sp for sp in self.override(lay.suffix, lay) if sp.source == BlueprintSource.BPO),
+            None,
+        )
+        if not is_reaction and bp_data and bp_data.copying and bpo_spec and bpo_spec.runs > 1:
             copy_station, copy_bonuses, _ = self.choose_station(Activity.COPYING, None, bp_id)
-            cp = _CopyPlan(
+            lay.cp = _CopyPlan(
                 prod=prod,
-                bpo=specs[bpo_index],
-                runs=bpo_runs,
+                bpo=bpo_spec,
+                runs=bpo_spec.runs,
                 time_mult=time_mult,
                 max_per_copy=max(1, bp_data.max_production_limit),
                 copy_recipe=bp_data.copying,
                 copy_station=copy_station,
                 copy_bonuses=copy_bonuses,
                 cost_mult=bp_cost_mult,
-                first=bpo_index,
             )
-            self.copy_plans[bp_id] = cp
-            if self.parallel.get(bp_id, 1) > 1:
-                one_job = self.split_long(prod, specs, time_mult, [])
-                layout, copy_parts, per_copy = _bpo_layout(cp, self.parallel[bp_id])
-                specs = specs[:bpo_index] + layout + specs[bpo_index + 1 :]
+            self.copy_plans[bp_id] = lay.cp
+        self.layouts[bp_id] = lay
+        cp = lay.cp
+
+        k_spread = self.spread.get(bp_id)
+        specs, copy_parts, per_copy, one_job, used = self.layout_specs(
+            lay, k_spread, self.parallel.get(bp_id, 1)
+        )
+        bpc_runs = sum(sp.runs for sp in specs if sp.source == BlueprintSource.BPC)
+        if picked_used or used:
+            note = f"{picked_used + len(used)} owned BPC(s) cover {bpc_runs} runs"
+            if picked_used:
+                note += f" ({picked_used} picked for this plan)"
+            incoming_used += sum(b.source_job_id is not None for b in used)
+            if incoming_used:
+                note += f"; {incoming_used} of them still being made by copy jobs"
+            if k_spread is not None:
+                note += (
+                    f", spread over {len(used)} BPCs so they run in parallel: the plan finishes "
+                    f"{_duration(self.saved.get(bp_id, 0.0))} sooner than using the fewest "
+                    f"({lay.k_min})"
+                )
+            source_notes.insert(0, note)
 
         specs = self.split_long(prod, specs, time_mult, source_notes)
 
@@ -753,6 +785,79 @@ class _Planner:
             )
         )
 
+    def override(self, specs: list[_Spec], lay: _Layout) -> list[_Spec]:
+        """ME / TE set by you replace every job's own."""
+        c_ = lay.choice
+        if lay.prod.activity == Activity.REACTION or (
+            c_.me_override is None and c_.te_override is None
+        ):
+            return list(specs)
+        out = []
+        for sp in specs:
+            new_me = c_.me_override if c_.me_override is not None else sp.me
+            new_te = c_.te_override if c_.te_override is not None else sp.te
+            why = Reason(
+                ReasonCode.ME_OVERRIDE,
+                f"ME {new_me} / TE {new_te} set by you (blueprint gives ME {sp.me} / TE {sp.te}).",
+            )
+            out.append(replace(sp, me=new_me, te=new_te, me_reason=why))
+        return out
+
+    def pool_specs(self, lay: _Layout, k: int | None) -> tuple[list[_Spec], list[OwnedBlueprint]]:
+        """Jobs on the owned BPCs (not picked) for `lay.pool_need` runs. `k` None: the fewest
+        BPCs, each used up in order. Otherwise at least `k` BPCs (more if their runs fall
+        short), runs shared so the jobs are as even as the BPCs allow."""
+        need = lay.pool_need
+        if need <= 0:
+            return [], []
+        if k is None:
+            takes = []
+            for b in lay.pool:
+                if need <= 0:
+                    break
+                t = min(b.runs, need)
+                if t > 0:
+                    takes.append((b, t))
+                    need -= t
+        else:
+            n = k
+            while sum(b.runs for b in lay.pool[:n]) < need:
+                n += 1
+            chosen = lay.pool[:n]
+            takes = [
+                (b, t)
+                for b, t in zip(chosen, _water_fill([b.runs for b in chosen], need), strict=True)
+                if t > 0
+            ]
+        specs = [
+            _Spec(
+                t,
+                b.me,
+                b.te,
+                BlueprintSource.BPC,
+                Reason(ReasonCode.ME_OWNED_BPC, self.bpc_text(b)),
+                _item_lock(b),
+            )
+            for b, t in takes
+        ]
+        return specs, [b for b, _ in takes]
+
+    def layout_specs(self, lay: _Layout, k_spread: int | None, k_copy: int):
+        """A blueprint's manufacturing specs for the given spread and BPO split, before the
+        30-day split: (specs, copies per copy job, runs per copy, the unsplit BPO specs or
+        None, owned BPCs used)."""
+        pool_specs, used = self.pool_specs(lay, k_spread)
+        specs = self.override(lay.prefix + pool_specs + lay.suffix, lay)
+        copy_parts: list[int] = []
+        per_copy = 0
+        one_job = None
+        if lay.cp is not None and k_copy > 1:
+            i = next(i for i, sp in enumerate(specs) if sp.source == BlueprintSource.BPO)
+            one_job = self.split_long(lay.prod, specs, lay.time_mult, [])
+            layout, copy_parts, per_copy = _bpo_layout(lay.cp, k_copy)
+            specs = specs[:i] + layout + specs[i + 1 :]
+        return specs, copy_parts, per_copy, one_job, used
+
     def bpc_text(self, b: OwnedBlueprint) -> str:
         stats = f"ME {b.me} / TE {b.te}, {b.runs} runs"
         if b.source_job_id is not None:
@@ -815,19 +920,24 @@ class _Planner:
             lock=cp.bpo.lock,
         )
 
-    def trial_jobs(self, bp_id: TypeId, k: int) -> list[WorkJob]:
-        """Copy and manufacturing jobs for one BPO split k ways, for timing only: item
-        dependencies are left in `dep_items` for the caller to resolve."""
-        cp = self.copy_plans[bp_id]
-        specs, parts, per_copy = _bpo_layout(cp, k)
-        specs = self.split_long(cp.prod, specs, cp.time_mult, [])
-        copies = [self.copy_work(bp_id, n, cp, per_copy, x) for n, x in enumerate(parts, 1)]
-        dep_items = {m.type_id for m in cp.prod.recipe.materials}
+    def trial_jobs(self, bp_id: TypeId, k_spread: int | None, k_copy: int) -> list[WorkJob]:
+        """All manufacturing and auto-copy jobs of one blueprint for the given spread and BPO
+        split, for timing only: item dependencies are left in `dep_items` for the caller."""
+        lay = self.layouts[bp_id]
+        specs, parts, per_copy, _, _ = self.layout_specs(lay, k_spread, k_copy)
+        specs = self.split_long(lay.prod, specs, lay.time_mult, [])
+        copies = []
+        if lay.cp is not None:
+            copies = [self.copy_work(bp_id, n, lay.cp, per_copy, x) for n, x in enumerate(parts, 1)]
+        dep_items = {m.type_id for m in lay.prod.recipe.materials}
         out = list(copies)
-        for i, sp in enumerate(specs, cp.first + 1):
-            job_id = f"{cp.prod.activity.value}:{bp_id}:{i}"
-            work = self.mfg_work(cp.prod, sp, job_id, cp.time_mult, dep_items)
-            work.depends_on.extend(j.job_id for j in copies)
+        for i, sp in enumerate(specs, 1):
+            job_id = f"{lay.prod.activity.value}:{bp_id}:{i}"
+            work = self.mfg_work(lay.prod, sp, job_id, lay.time_mult, dep_items)
+            if sp.source in (BlueprintSource.BPO, BlueprintSource.COPY):
+                work.depends_on.extend(j.job_id for j in copies)
+            if sp.source == BlueprintSource.INVENTION:
+                work.depends_on.extend(lay.invention_job_ids)
             out.append(work)
         return out
 
@@ -1324,38 +1434,52 @@ class _Planner:
         )
 
 
-def _search_parallel(base: _Planner) -> tuple[dict[TypeId, int], dict[TypeId, float]]:
-    """Greedy split search over the base plan's copyable BPOs, longest first. For each, try
-    2, 3, ... parallel jobs (up to its runs and the total manufacturing slots), stopping
-    after two tries in a row that do not finish sooner than the best so far. The best is
-    kept if it makes the plan finish at least MIN_SPLIT_GAIN sooner. Repeats while a pass
-    changes something (at most 3 passes).
-    Returns (parallel jobs by blueprint, seconds the plan would lose without each split)."""
-    if not base.copy_plans:
-        return {}, {}
+def _search_parallel(
+    base: _Planner,
+) -> tuple[dict[TypeId, int], dict[TypeId, int], dict[TypeId, float]]:
+    """Greedy search over the base plan's blueprints, longest first, on two settings each:
+    how many owned BPCs to spread the runs over (from the fewest + 1 up), and how many ways
+    to split an owned BPO with copies (2, 3, ...); both at most the total manufacturing
+    slots. Each setting stops after two tries in a row that do not beat the best so far. A
+    change is kept if the plan finishes at least MIN_SPLIT_GAIN sooner, or if the blueprint's
+    own jobs do without the plan finishing later: two blueprints that end together only
+    shorten the plan when both change. Repeats while a pass changes something (at most 3
+    passes), then drops every setting whose removal would cost the plan less than
+    MIN_SPLIT_GAIN. Options are timed by re-scheduling only.
+    Returns (BPCs to spread over, BPO splits, seconds the plan would lose without each
+    blueprint's settings)."""
     slots = sum(
         f.slots(ch, Activity.MANUFACTURING)
         for ch in base.inp.characters
         if Activity.MANUFACTURING in ch.activities
     )
     if slots < 2:
-        return {}, {}
+        return {}, {}, {}
+    can_spread = {
+        bp_id: lay
+        for bp_id, lay in base.layouts.items()
+        if lay.pool_need > 0 and len(lay.pool) > lay.k_min
+    }
+    if not can_spread and not base.copy_plans:
+        return {}, {}, {}
     old_ids: dict[TypeId, list[str]] = defaultdict(list)
     length: dict[TypeId, float] = defaultdict(float)
     for j in base.jobs:
-        cp = base.copy_plans.get(j.blueprint_type_id)
-        # Only the BPO's own jobs are replaced; owned BPC jobs of the blueprint stay.
-        if cp and j.activity == Activity.MANUFACTURING and j.lock == cp.bpo.lock:
+        lay = base.layouts.get(j.blueprint_type_id)
+        if lay is not None and j.activity == lay.prod.activity:
             old_ids[j.blueprint_type_id].append(j.job_id)
             length[j.blueprint_type_id] += j.duration(None)
 
-    def total(parallel: dict[TypeId, int]) -> float:
+    def total(
+        spread: dict[TypeId, int], parallel: dict[TypeId, int], bp: TypeId | None = None
+    ) -> tuple[float, float]:
+        """(plan finish, finish of blueprint `bp`'s manufacturing jobs)."""
         new: list[WorkJob] = []
         mapping: dict[str, list[str]] = {}
-        for bp_id, k in parallel.items():
-            jobs = base.trial_jobs(bp_id, k)
+        for bp_id in set(spread) | set(parallel):
+            jobs = base.trial_jobs(bp_id, spread.get(bp_id), parallel.get(bp_id, 1))
             new.extend(jobs)
-            ids = [j.job_id for j in jobs if j.activity == Activity.MANUFACTURING]
+            ids = [j.job_id for j in jobs if j.activity != Activity.COPYING]
             for old in old_ids[bp_id]:
                 mapping[old] = ids
 
@@ -1372,32 +1496,78 @@ def _search_parallel(base: _Planner) -> tuple[dict[TypeId, int], dict[TypeId, fl
             for item in sorted(j.dep_items):
                 deps.extend(base.jobs_by_product.get(item, []))
             jobs.append(replace(j, depends_on=expand(deps)))
-        return schedule(jobs, base.inp.characters, base.busy)
+        finish = schedule(jobs, base.inp.characters, base.busy)
+        mine = [j.end for j in jobs if j.blueprint_type_id == bp and j.activity != Activity.COPYING]
+        return finish, max(mine, default=0.0)
 
+    spread: dict[TypeId, int] = {}
     parallel: dict[TypeId, int] = {}
-    best = total(parallel)
-    order = sorted(base.copy_plans, key=lambda bp_id: (-length[bp_id], bp_id))
+    best = total(spread, parallel)[0]
+
+    def improve(bp_id, values, attempt) -> int | None:
+        """Try `values` in order through `attempt(k) -> (plan finish, blueprint finish)`."""
+        nonlocal best
+        _, own0 = total(spread, parallel, bp_id)
+        best_k, best_key, misses = None, (best, own0), 0
+        for k in values:
+            key = attempt(k)
+            if key < best_key:
+                best_k, best_key, misses = k, key, 0
+            else:
+                misses += 1
+                if misses >= 2:
+                    break
+        if best_k is None or best_key[0] > best:
+            return None
+        if best_key[0] <= best - MIN_SPLIT_GAIN or best_key[1] <= own0 - MIN_SPLIT_GAIN:
+            best = best_key[0]
+            return best_k
+        return None
+
+    order = sorted(base.layouts, key=lambda bp_id: (-length[bp_id], bp_id))
     for _ in range(3):
         changed = False
         for bp_id in order:
-            k0 = parallel.get(bp_id, 1)
-            best_k, best_t, misses = k0, best, 0
-            for k in range(k0 + 1, min(base.copy_plans[bp_id].runs, slots) + 1):
-                t = total({**parallel, bp_id: k})
-                if t < best_t:
-                    best_k, best_t, misses = k, t, 0
-                else:
-                    misses += 1
-                    if misses >= 2:
-                        break
-            if best_k != k0 and best_t <= best - MIN_SPLIT_GAIN:
-                parallel[bp_id], best, changed = best_k, best_t, True
+            lay = can_spread.get(bp_id)
+            if lay is not None:
+                k0 = spread.get(bp_id, lay.k_min)
+                k = improve(
+                    bp_id,
+                    range(k0 + 1, min(len(lay.pool), slots) + 1),
+                    lambda k, b=bp_id: total({**spread, b: k}, parallel, b),
+                )
+                if k is not None:
+                    spread[bp_id], changed = k, True
+            cp = base.copy_plans.get(bp_id)
+            if cp is not None:
+                k0 = parallel.get(bp_id, 1)
+                k = improve(
+                    bp_id,
+                    range(k0 + 1, min(cp.runs, slots) + 1),
+                    lambda k, b=bp_id: total(spread, {**parallel, b: k}, b),
+                )
+                if k is not None:
+                    parallel[bp_id], changed = k, True
         if not changed:
             break
-    saved = {
-        bp_id: total({b: k for b, k in parallel.items() if b != bp_id}) - best for bp_id in parallel
-    }
-    return parallel, saved
+
+    def without(bp_id) -> float:
+        return total(
+            {b: k for b, k in spread.items() if b != bp_id},
+            {b: k for b, k in parallel.items() if b != bp_id},
+        )[0]
+
+    # Drop settings that do not pay for themselves in plan time, weakest first.
+    while True:
+        best = total(spread, parallel)[0]
+        saved = {bp_id: without(bp_id) - best for bp_id in set(spread) | set(parallel)}
+        weak = [b for b, v in saved.items() if v < MIN_SPLIT_GAIN]
+        if not weak:
+            break
+        drop = min(weak, key=lambda b: (saved[b], b))
+        spread.pop(drop, None)
+        parallel.pop(drop, None)
+    return spread, parallel, saved
 
 
 def _duration(seconds: float) -> str:
@@ -1433,6 +1603,27 @@ def _best_bpo(bpos: list[OwnedBlueprint]) -> OwnedBlueprint:
 
 def _item_lock(b: OwnedBlueprint) -> str:
     return f"item:{b.item_id}"
+
+
+def _water_fill(caps: list[int], need: int) -> list[int]:
+    """Share `need` runs over BPCs holding `caps` runs: each gets min(cap, level) for the
+    lowest level that covers the need, trimmed by one from the last full shares."""
+    lo, hi = 1, max(caps)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if sum(min(c, mid) for c in caps) >= need:
+            hi = mid
+        else:
+            lo = mid + 1
+    out = [min(c, lo) for c in caps]
+    excess = sum(out) - need
+    for i in reversed(range(len(out))):
+        if excess <= 0:
+            break
+        if out[i] == lo:
+            out[i] -= 1
+            excess -= 1
+    return out
 
 
 def _even(total: int, parts: int) -> list[int]:

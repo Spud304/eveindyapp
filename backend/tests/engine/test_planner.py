@@ -5,7 +5,7 @@ import pytest
 
 from engine import PlanError, plan
 from engine.formulas import StationBonuses
-from engine.planner import _bpo_layout, _CopyPlan, _Spec
+from engine.planner import _bpo_layout, _CopyPlan, _Spec, _water_fill
 from engine.types import (
     Activity,
     BlueprintChoice,
@@ -794,6 +794,60 @@ def test_copy_job_layout_respects_thirty_days_per_copy():
     assert parts == [3, 3, 3, 3, 3, 3, 1]
     assert specs[0].runs == 200 - 19 * 10 and specs[0].lock == "item:1"
     assert all(sp.source == BlueprintSource.COPY and sp.runs == 10 for sp in specs[1:])
+
+
+# --- spreading runs over owned BPCs --------------------------------------------------------------
+
+
+def four_hull_bpcs():
+    return tuple(bpc(BP_HULL, 10, item_id=i) for i in range(1, 5))
+
+
+def test_runs_spread_over_more_bpcs_when_slots_are_free():
+    # 20 runs: the fewest BPCs is 2 x 10 runs (10000 s); spread over 4 x 5 runs: 5000 s.
+    r = plan(
+        make_input(
+            [(HULL, 20)],
+            blueprints=four_hull_bpcs(),
+            characters=(character(skills=FIVE_MFG_SLOTS),),
+            rules=BuildRules(item_blacklist=frozenset({COMP_A})),
+        )
+    )
+    assert sorted(j.runs for j in jobs_for(r, BP_HULL)) == [5, 5, 5, 5]
+    assert r.total_seconds == 5000
+    text = bp(r, BP_HULL).source_reason.text
+    assert "4 owned BPC(s) cover 20 runs, spread over 4 BPCs so they run in parallel" in text
+    assert "finishes 1h 23m sooner than using the fewest (2)" in text
+
+
+def test_no_spread_with_one_slot():
+    r = plan(
+        make_input(
+            [(HULL, 20)],
+            blueprints=four_hull_bpcs(),
+            rules=BuildRules(item_blacklist=frozenset({COMP_A})),
+        )
+    )
+    assert sorted(j.runs for j in jobs_for(r, BP_HULL)) == [10, 10]
+
+
+def test_no_spread_when_the_saving_is_small():
+    # 2 runs: 2000 s on one BPC, 1000 s on two; under an hour saved.
+    r = plan(
+        make_input(
+            [(HULL, 2)],
+            blueprints=four_hull_bpcs(),
+            characters=(character(skills=FIVE_MFG_SLOTS),),
+            rules=BuildRules(item_blacklist=frozenset({COMP_A})),
+        )
+    )
+    assert [j.runs for j in jobs_for(r, BP_HULL)] == [2]
+
+
+def test_water_fill_evens_out_runs():
+    assert _water_fill([200, 200, 54, 50], 502) == [199, 199, 54, 50]
+    assert _water_fill([10, 10, 10], 20) == [7, 7, 6]
+    assert _water_fill([3, 10], 4) == [2, 2]
 
 
 # --- opt-in purchases -------------------------------------------------------------------------
