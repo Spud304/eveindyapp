@@ -18,13 +18,14 @@ Dev setup:
 - Production stack: `deploy/docker-compose.yml`.
 
 ## Status (2026-11-03)
-Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Step 6 (BPO/BPC trade-off) is done** except for the items below; see "Step 6 progress" in `docs/redesign.md` (blueprint locks, auto-copy, BPC reuse and spreading, BPC lines, blueprints in jobs, copies being made, opt-in purchases). **Next: step 7, sharing** (corp / link visibility).
+Build order steps 0–7 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Next: step 8, Janice export, then the compressed ore calculator.**
 
-Open from step 6:
-- Copies attributed to a plan lose that attribution once delivered.
-- A picked BPC that disappears is skipped without a warning.
+Open from steps 6–7:
+- Copies attributed to a plan lose that attribution once delivered; a picked BPC that disappears is skipped without a warning.
 - The split search is greedy; `_search_parallel` in `backend/engine/planner.py` documents its rules.
-- Browser tests make test BPCs with `manage.py playwright_blueprint` (reserved ids only).
+- Plan editors (others changing a plan) are deferred.
+- Browser tests make test BPCs with `manage.py playwright_blueprint` and put test characters in a made-up corp with `login(corp=...)` (reserved ids only).
+- No Prettier config exists; do not run Prettier on frontend files (it reformats them with its defaults).
 
 Reference sources (prefer these over memory for game mechanics):
 - Decompiled game client: `/mnt/g/eve projects/src` (`industry/` for job cost, time, materials, max runs; `eve/common/script/util/industryCommon.py` for how modifiers are built). Findings are recorded under "Client code" in `docs/redesign.md`.

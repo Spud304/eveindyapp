@@ -105,6 +105,7 @@ Data needed, with the ESI role it requires:
 ### Sharing and permissions
 - Plan owner + optional editors; viewers (corp or link) see progress, schedule, shopping list.
 - **Viewers must not see the raw corp asset list** fetched with a director's token — only what the plan exposes (e.g. "need 40k Tritanium, 30k on hand"). Treat corp data as owner-private by default.
+- **Decided (2026-11-03):** corp viewers log in with `publicData` only (the existing login); link viewers need no login and see aliases ("Station 1", "Builder 1", "Corp member 1", "Structure 1") instead of the owner's station, structure and character names, because structure names and stock at them can be sensitive. Editors are deferred: a plan computes from the owner's assets, blueprints and characters, so editing by others needs its own design.
 
 ## Other features (after the core)
 - **Janice export** — copy button in Janice/EVE multibuy paste format. Later: Janice appraisal API for prices (needs API key).
@@ -363,6 +364,14 @@ Step 4 is done apart from per-plan sharing views (step 7).
 - Scheduler: ready jobs and their no-skill durations are tracked incrementally instead of recomputed every step (same order and results). dreadbatch 1 plans in ~0.5 s with the wider search (1.5 s before this change).
 - Not done: copies attributed to a plan lose that attribution once delivered (they become ordinary owned BPCs); a picked BPC that disappears (consumed by a job, sold, moved out of the account) is silently skipped, with no warning.
 
+## Step 7 progress (2026-11-03)
+- `Plan.share_token` (link secret; "New link" replaces it and the old link stops working) and `Plan.share_corporation_id` (None: the owner's main's corp). Turning on link visibility makes a token.
+- `apps/planning/sharing.py`: who may view, and the read-only payload. Corp access re-checks the viewer's characters against ESI's public affiliation when the stored one is older than 24 h, so someone who left the corp loses access within a day. Every viewer gets the lines, the engine result (shopping list, schedule, costs) and progress, computed from the owner's data; only the stations and characters the plan uses are listed. Never: reservation details, jobs offered for linking, buy options, settings. Link payloads replace every owner station, character and structure name in all text and remap their ids (character ids resolve to names through ESI); used stations are numbered first so the numbers do not hint at how many the owner has. Payloads are cached 60 s per plan and kind, keyed by the plan's last edit.
+- API: `GET /api/shared/{token}` (no login), `GET /api/plans/{id}/view` (corp members, and the owner as a preview; anyone else gets 404), `GET /api/plans/shared-with-me`, `GET /api/plans/corporations`, `POST /api/plans/{id}/share-link`. Fixed paths are declared before `/plans/{plan_id}`: ninja matches the path before checking that the id is a number.
+- Frontend: Sharing panel on the plan page (visibility, corporation, link with Copy and New link, Preview); `/shared/<token>` opens without login; `/plans/<id>/view` is the read-only page (Shopping list, Schedule, Progress tabs, no actions); Plans page lists "Shared with me".
+- Live check (maelstroms plan, link payload built in memory, not shared): no station, structure, character or owner name and no character id in the payload; the plan's 2 stations show as Station 1 and 2.
+- Tests: 7 API tests (link aliases and revocation, corp access, other corps, the 24 h re-check, corp validation, the cache) and 2 browser tests (link view in a logged-out browser, corp member finds and opens the plan; another corp gets nothing). Browser test characters can be put in a made-up corp: `login(corp=...)`.
+
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
 1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
@@ -371,7 +380,7 @@ Step 4 is done apart from per-plan sharing views (step 7).
 4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard. Done; see Step 4 progress.
 5. **Tracker** — active-plan job matching, progress tab, reservation release. Done; see Step 5 progress.
 6. **BPO/BPC trade-off** — auto-copy to fill slots, opt-in buy BPC / extra BPO with cost vs time shown.
-7. **Sharing** — corp/link visibility.
+7. **Sharing** — corp/link visibility. Done; see Step 7 progress.
 8. **Janice export**, then **compressed ore calculator**.
 
 ## Decisions (from review, 2026-11-03)
@@ -383,4 +392,3 @@ Step 4 is done apart from per-plan sharing views (step 7).
 
 ## Open questions
 - Exact list of tier/category build switches.
-- Corp viewers of a shared plan. Default unless changed: **corp** visibility requires EVE SSO login with minimal scopes (to prove corp membership, no data pulled); **link** visibility needs no login.
