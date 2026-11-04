@@ -110,6 +110,7 @@ class _CopyPlan:
     copy_station: Station | None
     copy_bonuses: f.StationBonuses
     cost_mult: float  # blueprint job cost multiplier
+    first: int = 0  # owned BPC jobs of the blueprint numbered before the BPO's
 
 
 def _bpo_layout(cp: _CopyPlan, k: int) -> tuple[list[_Spec], list[int], int]:
@@ -451,11 +452,44 @@ class _Planner:
                 return Reason(ReasonCode.ME_REACTION, "Reaction formulas have no ME/TE.")
             return Reason(code, text)
 
-        if bpos:
-            b = _best_bpo(bpos)
+        # Owned BPCs first, best ME first, one job each. With a BPO owned too, only BPCs at
+        # least as good in ME are used (they cost no more materials), and the BPO takes the
+        # rest of the runs.
+        best_bpo = _best_bpo(bpos) if bpos else None
+        usable = [b for b in bpcs if best_bpo is None or b.me >= best_bpo.me]
+        for b in usable:
+            if remaining <= 0:
+                break
+            take = min(b.runs, remaining)
+            if take <= 0:
+                continue
             specs.append(
                 _Spec(
-                    runs,
+                    take,
+                    b.me,
+                    b.te,
+                    BlueprintSource.BPC,
+                    me_reason(
+                        ReasonCode.ME_OWNED_BPC,
+                        f"Owned BPC {b.item_id}: ME {b.me} / TE {b.te}, {b.runs} runs.",
+                    ),
+                    _item_lock(b),
+                )
+            )
+            remaining -= take
+        n_bpc_specs = len(specs)
+        if specs:
+            source_notes.append(f"{len(specs)} owned BPC(s) cover {runs - remaining} runs")
+        if len(usable) < len(bpcs) and best_bpo is not None:
+            skipped = len(bpcs) - len(usable)
+            source_notes.append(
+                f"{skipped} owned BPC(s) with lower ME than the BPO (ME {best_bpo.me}) not used"
+            )
+        if best_bpo is not None and remaining > 0:
+            b = best_bpo
+            specs.append(
+                _Spec(
+                    remaining,
                     b.me,
                     b.te,
                     BlueprintSource.BPO,
@@ -466,31 +500,8 @@ class _Planner:
                     _item_lock(b),
                 )
             )
-            source_notes.append("owned BPO")
+            source_notes.append(f"owned BPO for {remaining} runs" if specs[:-1] else "owned BPO")
             remaining = 0
-        else:
-            for b in bpcs:
-                if remaining <= 0:
-                    break
-                take = min(b.runs, remaining)
-                if take <= 0:
-                    continue
-                specs.append(
-                    _Spec(
-                        take,
-                        b.me,
-                        b.te,
-                        BlueprintSource.BPC,
-                        me_reason(
-                            ReasonCode.ME_OWNED_BPC,
-                            f"Owned BPC {b.item_id}: ME {b.me} / TE {b.te}, {b.runs} runs.",
-                        ),
-                        _item_lock(b),
-                    )
-                )
-                remaining -= take
-            if specs:
-                source_notes.append(f"{len(specs)} owned BPC(s) cover {runs - remaining} runs")
 
         if remaining > 0 and not is_reaction and bp_id in self.invented_from:
             invention, inv_specs, invention_job_ids = self.plan_invention(
@@ -542,23 +553,26 @@ class _Planner:
         copy_parts: list[int] = []
         per_copy = 0
         cp = None
-        if bpos and not is_reaction and bp_data and bp_data.copying and runs > 1:
+        bpo_runs = next((sp.runs for sp in specs if sp.source == BlueprintSource.BPO), 0)
+        if not is_reaction and bp_data and bp_data.copying and bpo_runs > 1:
             copy_station, copy_bonuses, _ = self.choose_station(Activity.COPYING, None, bp_id)
             cp = _CopyPlan(
                 prod=prod,
-                bpo=specs[0],
-                runs=runs,
+                bpo=specs[n_bpc_specs],
+                runs=bpo_runs,
                 time_mult=time_mult,
                 max_per_copy=max(1, bp_data.max_production_limit),
                 copy_recipe=bp_data.copying,
                 copy_station=copy_station,
                 copy_bonuses=copy_bonuses,
                 cost_mult=bp_cost_mult,
+                first=n_bpc_specs,
             )
             self.copy_plans[bp_id] = cp
             if self.parallel.get(bp_id, 1) > 1:
                 one_job = self.split_long(prod, specs, time_mult, [])
-                specs, copy_parts, per_copy = _bpo_layout(cp, self.parallel[bp_id])
+                layout, copy_parts, per_copy = _bpo_layout(cp, self.parallel[bp_id])
+                specs = specs[:n_bpc_specs] + layout
 
         specs = self.split_long(prod, specs, time_mult, source_notes)
 
@@ -710,7 +724,7 @@ class _Planner:
         copies = [self.copy_work(bp_id, n, cp, per_copy, x) for n, x in enumerate(parts, 1)]
         dep_items = {m.type_id for m in cp.prod.recipe.materials}
         out = list(copies)
-        for i, sp in enumerate(specs, 1):
+        for i, sp in enumerate(specs, cp.first + 1):
             job_id = f"{cp.prod.activity.value}:{bp_id}:{i}"
             work = self.mfg_work(cp.prod, sp, job_id, cp.time_mult, dep_items)
             work.depends_on.extend(j.job_id for j in copies)
@@ -1177,7 +1191,9 @@ def _search_parallel(base: _Planner) -> tuple[dict[TypeId, int], dict[TypeId, fl
     old_ids: dict[TypeId, list[str]] = defaultdict(list)
     length: dict[TypeId, float] = defaultdict(float)
     for j in base.jobs:
-        if j.blueprint_type_id in base.copy_plans and j.activity == Activity.MANUFACTURING:
+        cp = base.copy_plans.get(j.blueprint_type_id)
+        # Only the BPO's own jobs are replaced; owned BPC jobs of the blueprint stay.
+        if cp and j.activity == Activity.MANUFACTURING and j.lock == cp.bpo.lock:
             old_ids[j.blueprint_type_id].append(j.job_id)
             length[j.blueprint_type_id] += j.duration(None)
 

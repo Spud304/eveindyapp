@@ -611,6 +611,58 @@ def test_no_auto_copy_for_owned_bpcs():
     assert jobs_for(r, BP_HULL, Activity.COPYING) == []
 
 
+def test_owned_bpcs_are_used_before_the_bpo():
+    r = plan(
+        make_input(
+            [(HULL, 25)],
+            blueprints=(
+                bpo(BP_HULL, me=10),
+                bpc(BP_HULL, 10, me=10, item_id=1),
+                bpc(BP_HULL, 10, me=10, item_id=2),
+                bpo(BP_COMP_A),
+            ),
+        )
+    )
+    hull = jobs_for(r, BP_HULL)
+    assert sorted((j.source, j.runs) for j in hull) == [
+        (BlueprintSource.BPC, 10),
+        (BlueprintSource.BPC, 10),
+        (BlueprintSource.BPO, 5),
+    ]
+    assert bp(r, BP_HULL).source_reason.text == (
+        "2 owned BPC(s) cover 20 runs; owned BPO for 5 runs."
+    )
+
+
+def test_bpcs_with_lower_me_than_the_bpo_are_not_used():
+    r = plan(
+        make_input(
+            [(HULL, 10)],
+            blueprints=(bpo(BP_HULL, me=10), bpc(BP_HULL, 10, me=8), bpo(BP_COMP_A)),
+        )
+    )
+    assert [j.source for j in jobs_for(r, BP_HULL)] == [BlueprintSource.BPO]
+    assert "1 owned BPC(s) with lower ME than the BPO (ME 10) not used" in (
+        bp(r, BP_HULL).source_reason.text
+    )
+
+
+def test_auto_copy_keeps_owned_bpc_jobs():
+    r = plan(
+        make_input(
+            [(HULL, 30)],
+            blueprints=(bpo(BP_HULL), bpc(BP_HULL, 10, item_id=1), bpo(BP_COMP_A)),
+            characters=(character(skills=FIVE_MFG_SLOTS),),
+        )
+    )
+    ids = [j.job_id for j in r.jobs]
+    assert len(ids) == len(set(ids))
+    hull = jobs_for(r, BP_HULL, Activity.MANUFACTURING)
+    assert [j.runs for j in hull if j.source == BlueprintSource.BPC] == [10]
+    assert sum(j.runs for j in hull) == 30
+    assert jobs_for(r, BP_HULL, Activity.COPYING)  # the BPO's 20 runs are still split
+
+
 def test_copy_job_layout_respects_thirty_days_per_copy():
     # 1 day per copied run, 10 runs per copy: one job may hold ceil(30 / 10) = 3 copies.
     cp = _CopyPlan(
