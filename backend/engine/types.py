@@ -65,11 +65,13 @@ class ReasonCode(StrEnum):
     BUY_BLACKLIST = "buy_blacklist"
     BUY_RULE = "buy_rule"
     BUY_INVENTION_INPUT = "buy_invention_input"
+    BUY_BLUEPRINT = "buy_blueprint"
     LINE_NOT_BUILDABLE = "line_not_buildable"
     # ME / TE source
     ME_OVERRIDE = "me_override"
     ME_OWNED_BPO = "me_owned_bpo"
     ME_OWNED_BPC = "me_owned_bpc"
+    ME_BOUGHT = "me_bought"
     ME_INVENTED = "me_invented"
     ME_REACTION = "me_reaction"
     ME_MISSING_BLUEPRINT = "me_missing_blueprint"
@@ -77,6 +79,7 @@ class ReasonCode(StrEnum):
     SOURCE_BPO = "source_bpo"
     SOURCE_BPC = "source_bpc"
     SOURCE_COPY = "source_copy"
+    SOURCE_BOUGHT = "source_bought"
     SOURCE_INVENTION = "source_invention"
     SOURCE_MISSING = "source_missing"
     # Station
@@ -317,6 +320,19 @@ class BlueprintChoice:
     me_override: int | None = None
     te_override: int | None = None
     decryptor: DecryptorChoice = "auto"
+    # Opt-in purchases. Bought BPCs: how many, runs each (None: the blueprint's max
+    # production limit), ME / TE, and price per BPC (None: not set; BPCs sell on contracts,
+    # so there is no market price). They are used after BPCs picked on a line.
+    buy_bpcs: int = 0
+    bpc_runs: int | None = None
+    bpc_me: int = 10
+    bpc_te: int = 20
+    bpc_price: float | None = None
+    # Extra BPOs bought on the market, unresearched unless set; they share the runs left
+    # after BPCs evenly with the owned BPO, which gets the larger share.
+    extra_bpos: int = 0
+    bpo_me: int = 0
+    bpo_te: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,6 +381,7 @@ class BlueprintSource(StrEnum):
     BPO = "bpo"
     BPC = "bpc"
     COPY = "copy"  # copied from an owned BPO by this plan, to run jobs in parallel
+    BOUGHT = "bought"  # BPCs or extra BPOs you chose to buy (BlueprintChoice)
     INVENTION = "invention"
     MISSING = "missing"
 
@@ -500,6 +517,7 @@ class CostSummary:
     materials: float  # shopping list total, excluding invention inputs
     invention_inputs: float  # datacores + decryptors
     job_fees: Mapping[Activity, float]
+    blueprints: float  # bought BPCs (with a price set) and extra BPOs
     total: float
     unpriced_type_ids: tuple[TypeId, ...]
 

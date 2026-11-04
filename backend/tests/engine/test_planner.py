@@ -796,6 +796,77 @@ def test_copy_job_layout_respects_thirty_days_per_copy():
     assert all(sp.source == BlueprintSource.COPY and sp.runs == 10 for sp in specs[1:])
 
 
+# --- opt-in purchases -------------------------------------------------------------------------
+
+NO_COMP = BuildRules(item_blacklist=frozenset({COMP_A}))
+
+
+def test_bought_bpcs_are_used_and_priced():
+    choice = BlueprintChoice(buy_bpcs=2, bpc_runs=4, bpc_price=1_000_000.0)
+    r = plan(
+        make_input(
+            [(HULL, 10)],
+            blueprints=(bpo(BP_HULL, me=10),),
+            choices={BP_HULL: choice},
+            rules=NO_COMP,
+        )
+    )
+    hull = jobs_for(r, BP_HULL)
+    assert sorted((str(j.source), j.runs, j.me) for j in hull) == [
+        ("bought", 4, 10),
+        ("bought", 4, 10),
+        ("bpo", 2, 10),
+    ]
+    assert len({j.schedule.start_seconds for j in hull}) == 1  # all in parallel
+    assert r.costs.blueprints == 2_000_000
+    assert "2 bought BPC(s) of 4 runs (your choice)" in bp(r, BP_HULL).source_reason.text
+    assert all(s.type_id != BP_HULL for s in r.shopping_list)  # BPCs sell on contracts
+
+
+def test_bought_bpcs_without_a_price_warn():
+    r = plan(
+        make_input(
+            [(HULL, 10)],
+            blueprints=(bpo(BP_HULL),),
+            choices={BP_HULL: BlueprintChoice(buy_bpcs=1)},
+            rules=NO_COMP,
+        )
+    )
+    assert r.costs.blueprints == 0
+    assert any("no price set for the 1 bought BPC(s)" in w.text for w in r.warnings)
+    # Runs default to the blueprint's max production limit (10 for the hull).
+    assert [j.runs for j in jobs_for(r, BP_HULL)] == [10]
+
+
+def test_extra_bpo_shares_runs_and_goes_on_the_shopping_list():
+    prices = {BP_HULL: Price(5_000_000.0, None)}
+    r = plan(
+        make_input(
+            [(HULL, 11)],
+            blueprints=(bpo(BP_HULL, me=10),),
+            choices={BP_HULL: BlueprintChoice(extra_bpos=1)},
+            rules=NO_COMP,
+            prices=prices,
+        )
+    )
+    assert sorted((str(j.source), j.runs, j.me) for j in jobs_for(r, BP_HULL)) == [
+        ("bought", 5, 0),
+        ("bpo", 6, 10),  # the owned, researched BPO takes the larger share
+    ]
+    [bpo_buy] = [s for s in r.shopping_list if s.type_id == BP_HULL]
+    assert (bpo_buy.quantity, bpo_buy.total_price) == (1, 5_000_000)
+    assert bpo_buy.reason.code == ReasonCode.BUY_BLUEPRINT
+    assert r.costs.blueprints == 5_000_000
+
+
+def test_extra_bpo_replaces_a_missing_blueprint():
+    r = plan(
+        make_input([(HULL, 3)], choices={BP_HULL: BlueprintChoice(extra_bpos=1)}, rules=NO_COMP)
+    )
+    assert [str(j.source) for j in jobs_for(r, BP_HULL)] == ["bought"]
+    assert not any(w.code == ReasonCode.SOURCE_MISSING for w in r.warnings)
+
+
 # --- schedule ------------------------------------------------------------------
 
 

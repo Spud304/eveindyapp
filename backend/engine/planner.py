@@ -164,6 +164,8 @@ class _Planner:
         self.saved = saved or {}
         self.copy_plans: dict[TypeId, _CopyPlan] = {}
         self.copy_job_ids: dict[TypeId, list[str]] = {}  # auto-copy jobs by blueprint
+        # Opt-in blueprint purchases: (kind "bpc" / "bpo", blueprint, count, unit price or None)
+        self.purchases: list[tuple[str, TypeId, int, float | None]] = []
         self.types = inp.game.types
         self.warnings: list[PlanWarning] = []
 
@@ -480,13 +482,14 @@ class _Planner:
         usable = [
             b for b in bpcs if best_bpo is None or b.me >= best_bpo.me or b.item_id in self.picked
         ]
-        picked_used = incoming_used = 0
-        for b in usable:
-            if remaining <= 0:
-                break
+        bp_data = self.inp.game.blueprints.get(bp_id)
+        picked_used = incoming_used = owned_used = 0
+
+        def use_bpc(b: OwnedBlueprint) -> None:
+            nonlocal remaining, picked_used, incoming_used, owned_used
             take = min(b.runs, remaining)
             if take <= 0:
-                continue
+                return
             specs.append(
                 _Spec(
                     take,
@@ -498,11 +501,38 @@ class _Planner:
                 )
             )
             remaining -= take
+            owned_used += 1
             picked_used += b.item_id in self.picked
             incoming_used += b.source_job_id is not None
-        n_bpc_specs = len(specs)
-        if specs:
-            note = f"{len(specs)} owned BPC(s) cover {runs - remaining} runs"
+
+        for b in [b for b in usable if b.item_id in self.picked]:
+            use_bpc(b)
+        # BPCs you chose to buy come after picked ones, before the rest you own.
+        bought_bpcs = 0
+        if not is_reaction and choice.buy_bpcs > 0:
+            per = choice.bpc_runs or (bp_data.max_production_limit if bp_data else 1)
+            why = Reason(
+                ReasonCode.ME_BOUGHT,
+                f"Bought BPC (your choice): ME {choice.bpc_me} / TE {choice.bpc_te}, {per} runs.",
+            )
+            for n in range(1, choice.buy_bpcs + 1):
+                take = min(max(1, per), remaining)
+                if take <= 0:
+                    break
+                lock = f"bought-bpc:{bp_id}:{n}"
+                specs.append(
+                    _Spec(take, choice.bpc_me, choice.bpc_te, BlueprintSource.BOUGHT, why, lock)
+                )
+                remaining -= take
+                bought_bpcs += 1
+            self.purchases.append(("bpc", bp_id, choice.buy_bpcs, choice.bpc_price))
+            source_notes.append(f"{choice.buy_bpcs} bought BPC(s) of {per} runs (your choice)")
+        for b in [b for b in usable if b.item_id not in self.picked]:
+            if remaining <= 0:
+                break
+            use_bpc(b)
+        if owned_used:
+            note = f"{owned_used} owned BPC(s) cover {sum(sp.runs for sp in specs if sp.source == BlueprintSource.BPC)} runs"
             if picked_used:
                 note += f" ({picked_used} picked for this plan)"
             if incoming_used:
@@ -515,24 +545,50 @@ class _Planner:
             source_notes.append(
                 f"{skipped} owned BPC(s) with lower ME than the BPO (ME {best_bpo.me}) not used"
             )
-        if best_bpo is not None and remaining > 0:
-            b = best_bpo
-            specs.append(
-                _Spec(
-                    remaining,
-                    b.me,
-                    b.te,
-                    BlueprintSource.BPO,
-                    me_reason(
-                        ReasonCode.ME_OWNED_BPO,
-                        f"Owned BPO ME {b.me} / TE {b.te} (best of {len(bpos)}).",
-                    ),
-                    _item_lock(b),
-                )
+
+        # Originals: the owned BPO and any extra BPOs you chose to buy share the rest evenly.
+        extra = choice.extra_bpos if not is_reaction else 0
+        bpo_index = len(specs)
+        if extra > 0:
+            self.purchases.append(("bpo", bp_id, extra, self.price(bp_id)))
+        if remaining > 0 and (best_bpo is not None or extra > 0):
+            shares = [x for x in _even(remaining, extra + (best_bpo is not None)) if x > 0]
+            own_share = shares.pop(0) if best_bpo is not None else 0
+            why = Reason(
+                ReasonCode.ME_BOUGHT,
+                f"Extra BPO (your choice): ME {choice.bpo_me} / TE {choice.bpo_te}.",
             )
-            source_notes.append(f"owned BPO for {remaining} runs" if specs[:-1] else "owned BPO")
-            if b.job_activity_id is not None:
-                source_notes.append(_job_note(b))
+            for n, share in enumerate(shares, 1):
+                lock = f"bought-bpo:{bp_id}:{n}"
+                specs.append(
+                    _Spec(share, choice.bpo_me, choice.bpo_te, BlueprintSource.BOUGHT, why, lock)
+                )
+            if extra:
+                source_notes.append(
+                    f"{extra} extra BPO(s) bought (your choice) at ME {choice.bpo_me} / "
+                    f"TE {choice.bpo_te}, sharing the runs"
+                )
+            bpo_index = len(specs)
+            if best_bpo is not None:
+                b = best_bpo
+                specs.append(
+                    _Spec(
+                        own_share,
+                        b.me,
+                        b.te,
+                        BlueprintSource.BPO,
+                        me_reason(
+                            ReasonCode.ME_OWNED_BPO,
+                            f"Owned BPO ME {b.me} / TE {b.te} (best of {len(bpos)}).",
+                        ),
+                        _item_lock(b),
+                    )
+                )
+                source_notes.append(
+                    f"owned BPO for {own_share} runs" if specs[:-1] else "owned BPO"
+                )
+                if b.job_activity_id is not None:
+                    source_notes.append(_job_note(b))
             remaining = 0
 
         if remaining > 0 and not is_reaction and bp_id in self.invented_from:
@@ -578,7 +634,6 @@ class _Planner:
                 overridden.append(replace(sp, me=new_me, te=new_te, me_reason=why))
             specs = overridden
 
-        bp_data = self.inp.game.blueprints.get(bp_id)
         bp_cost_mult = bp_data.job_cost_multiplier if bp_data else 1.0
 
         # Auto-copy: an owned BPO that can be copied is a candidate for the split search.
@@ -590,7 +645,7 @@ class _Planner:
             copy_station, copy_bonuses, _ = self.choose_station(Activity.COPYING, None, bp_id)
             cp = _CopyPlan(
                 prod=prod,
-                bpo=specs[n_bpc_specs],
+                bpo=specs[bpo_index],
                 runs=bpo_runs,
                 time_mult=time_mult,
                 max_per_copy=max(1, bp_data.max_production_limit),
@@ -598,13 +653,13 @@ class _Planner:
                 copy_station=copy_station,
                 copy_bonuses=copy_bonuses,
                 cost_mult=bp_cost_mult,
-                first=n_bpc_specs,
+                first=bpo_index,
             )
             self.copy_plans[bp_id] = cp
             if self.parallel.get(bp_id, 1) > 1:
                 one_job = self.split_long(prod, specs, time_mult, [])
                 layout, copy_parts, per_copy = _bpo_layout(cp, self.parallel[bp_id])
-                specs = specs[:n_bpc_specs] + layout
+                specs = specs[:bpo_index] + layout + specs[bpo_index + 1 :]
 
         specs = self.split_long(prod, specs, time_mult, source_notes)
 
@@ -679,6 +734,7 @@ class _Planner:
             BlueprintSource.BPO: ReasonCode.SOURCE_BPO,
             BlueprintSource.BPC: ReasonCode.SOURCE_BPC,
             BlueprintSource.COPY: ReasonCode.SOURCE_COPY,
+            BlueprintSource.BOUGHT: ReasonCode.SOURCE_BOUGHT,
             BlueprintSource.INVENTION: ReasonCode.SOURCE_INVENTION,
             BlueprintSource.MISSING: ReasonCode.SOURCE_MISSING,
         }[sources[-1]]
@@ -1211,18 +1267,44 @@ class _Planner:
                     reason=row.reason,
                 )
             )
+        # Extra BPOs are on the market; bought BPCs are not (contracts), so only BPOs go here.
+        for kind, bp_id, count, unit in self.purchases:
+            if kind == "bpo":
+                out.append(
+                    ShoppingItem(
+                        type_id=bp_id,
+                        name=self.name(bp_id),
+                        quantity=count,
+                        unit_price=unit,
+                        total_price=unit * count if unit is not None else None,
+                        reason=Reason(ReasonCode.BUY_BLUEPRINT, "Extra BPO (your choice)."),
+                    )
+                )
         return tuple(sorted(out, key=lambda s: (s.name, s.type_id)))
 
     def costs(self, shopping, jobs) -> CostSummary:
-        materials = invention = 0.0
+        materials = invention = blueprints = 0.0
         unpriced = []
         for s in shopping:
             if s.total_price is None:
                 unpriced.append(s.type_id)
             elif s.reason.code == ReasonCode.BUY_INVENTION_INPUT:
                 invention += s.total_price
+            elif s.reason.code == ReasonCode.BUY_BLUEPRINT:
+                blueprints += s.total_price
             else:
                 materials += s.total_price
+        for kind, bp_id, count, unit in self.purchases:
+            if kind != "bpc":
+                continue
+            if unit is None:
+                self.warn(
+                    ReasonCode.PRICE_MISSING,
+                    f"{self.name(bp_id)}: no price set for the {count} bought BPC(s); "
+                    "left out of totals.",
+                )
+            else:
+                blueprints += unit * count
         fees: dict[Activity, float] = defaultdict(float)
         for j in jobs:
             if j.cost.fee is not None:
@@ -1236,7 +1318,8 @@ class _Planner:
             materials=materials,
             invention_inputs=invention,
             job_fees=dict(fees),
-            total=materials + invention + sum(fees.values()),
+            blueprints=blueprints,
+            total=materials + invention + blueprints + sum(fees.values()),
             unpriced_type_ids=tuple(sorted(unpriced)),
         )
 
@@ -1350,6 +1433,12 @@ def _best_bpo(bpos: list[OwnedBlueprint]) -> OwnedBlueprint:
 
 def _item_lock(b: OwnedBlueprint) -> str:
     return f"item:{b.item_id}"
+
+
+def _even(total: int, parts: int) -> list[int]:
+    """`total` split into `parts` sizes differing by at most one, largest first."""
+    base, rest = divmod(total, parts)
+    return [base + 1] * rest + [base] * (parts - rest)
 
 
 def _split(total: int, size: int):
