@@ -182,18 +182,8 @@ def _effective_status(job: IndustryJob, now: datetime) -> str:
     return job.status
 
 
-@router.get("/dashboard", response=DashboardOut)
-def dashboard(request: HttpRequest):
-    user = _user(request)
-    now = timezone.now()
-    own = set(user.characters.values_list("character_id", flat=True))
-    q = owner_q(user, Feed.JOBS)
-    jobs = list(
-        IndustryJob.objects.filter(q, status__in=OPEN_STATUSES).order_by("end_date")
-        | IndustryJob.objects.filter(
-            q, status="delivered", completed_date__gte=now - timedelta(days=1)
-        )
-    )
+def describe_jobs(user: User, jobs: list[IndustryJob], now: datetime) -> list[dict]:
+    """JobRow dicts with names and the effective status, for the dashboard and plan progress."""
     type_names = dict(
         EveType.objects.filter(
             pk__in={j.blueprint_type_id for j in jobs}
@@ -201,11 +191,12 @@ def dashboard(request: HttpRequest):
         ).values_list("id", "name")
     )
     people = names.resolve({j.installer_id for j in jobs})
+    own = set()
     for c in user.characters.all():
         people[c.character_id] = c.name
+        own.add(c.character_id)
     facilities = _location_names(user, {j.facility_id for j in jobs})
-
-    job_rows = [
+    return [
         {
             "job_id": j.job_id,
             "activity": ACTIVITY_NAMES.get(j.activity_id, str(j.activity_id)),
@@ -224,8 +215,23 @@ def dashboard(request: HttpRequest):
             "start_date": j.start_date,
             "end_date": j.end_date,
         }
-        for j in sorted(jobs, key=lambda j: j.end_date)
+        for j in jobs
     ]
+
+
+@router.get("/dashboard", response=DashboardOut)
+def dashboard(request: HttpRequest):
+    user = _user(request)
+    now = timezone.now()
+    own = set(user.characters.values_list("character_id", flat=True))
+    q = owner_q(user, Feed.JOBS)
+    jobs = list(
+        IndustryJob.objects.filter(q, status__in=OPEN_STATUSES).order_by("end_date")
+        | IndustryJob.objects.filter(
+            q, status="delivered", completed_date__gte=now - timedelta(days=1)
+        )
+    )
+    job_rows = describe_jobs(user, sorted(jobs, key=lambda j: j.end_date), now)
 
     skills: dict[int, dict[int, int]] = {}
     for cid, sid, level in CharacterSkill.objects.filter(character__user=user).values_list(

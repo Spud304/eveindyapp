@@ -126,3 +126,32 @@ class PlanLine(models.Model):
     class Meta:
         db_table = "planning_plan_line"
         ordering = ["position", "id"]
+
+
+class LinkSource(models.TextChoices):
+    AUTO = "auto", "Matched to the active plan"
+    MANUAL = "manual", "Linked by you"
+
+
+class JobLink(models.Model):
+    """Which plan an ESI industry job counts toward, per account.
+
+    `plan` null means the job was unlinked by hand: the matcher leaves it alone from then on.
+    Links stay when the active plan changes (docs/redesign.md, Job tracking)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="job_links"
+    )
+    plan = models.ForeignKey(
+        Plan, null=True, blank=True, on_delete=models.CASCADE, related_name="job_links"
+    )
+    job = models.ForeignKey("esidata.IndustryJob", on_delete=models.CASCADE, related_name="links")
+    source = models.CharField(max_length=8, choices=LinkSource.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "planning_job_link"
+        constraints = [
+            models.UniqueConstraint(fields=["user", "job"], name="planning_job_link_user_job_uniq")
+        ]

@@ -6,6 +6,7 @@ from apps.accounts.models import EveCharacter, User
 from apps.core.locks import advisory_lock
 from apps.esidata import sync
 from apps.esidata.models import Feed
+from apps.planning.tracker import match_after_sync
 
 
 def _lock_key(mode: str) -> int:
@@ -62,6 +63,9 @@ class Command(BaseCommand):
         for user in users:
             self.stdout.write(f"account {user.pk} ({user})")
             self._report(sync.sync_account(user, feeds=feeds))
+            if feeds is None or Feed.JOBS in feeds:
+                linked = match_after_sync(user)
+                self.stdout.write(f"  linked {linked} new jobs to the active plan")
 
     def _report(self, statuses) -> None:
         for s in statuses:

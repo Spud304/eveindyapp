@@ -1,7 +1,7 @@
 """Plans: CRUD, lines, active plan, and the computed result with reservations."""
 
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, cast
 
 from django.db import transaction
@@ -12,11 +12,14 @@ from ninja import Field, Router, Schema, Status
 from ninja.errors import HttpError
 
 from apps.accounts.models import User
+from apps.esidata.access import owner_q
+from apps.esidata.models import Feed, IndustryJob
+from apps.esidata.overview_api import JobRow, describe_jobs
 from apps.sde.models import EveType
-from engine.types import BuildCategory, PlanResult
+from engine.types import Activity, BuildCategory, PlanResult
 
-from . import reservation
-from .models import Plan, PlanLine, Visibility
+from . import reservation, tracker
+from .models import JobLink, LinkSource, Plan, PlanLine, Visibility
 
 router = Router(tags=["plans"])
 
@@ -288,3 +291,161 @@ def plan_result(request: HttpRequest, plan_id: int):
             "held_elsewhere": {t: [asdict(h) for h in hs] for t, hs in run.held_elsewhere.items()},
         },
     }
+
+
+# --- progress (step 5) ---------------------------------------------------------------------
+
+
+class ProgressRow(Schema):
+    """One blueprint and activity of the plan: what jobs are doing for it."""
+
+    blueprint_type_id: int
+    activity: str
+    name: str
+    product_name: str
+    remaining_runs: int  # still to start, from the engine with progress applied
+    running_runs: int
+    ready_runs: int
+    delivered_runs: int
+    over_plan: int  # units of the product made beyond what the plan needs
+
+
+class LinkedJob(JobRow):
+    source: str  # auto | manual
+
+
+class ProgressOut(Schema):
+    active: bool
+    activated_at: datetime | None
+    rows: list[ProgressRow]
+    jobs: list[LinkedJob]
+    candidates: list[JobRow]  # recent jobs of this plan's blueprints that are not linked here
+
+
+CANDIDATE_DAYS = 30
+
+
+@router.get("/plans/{plan_id}/progress", response=ProgressOut)
+def plan_progress(request: HttpRequest, plan_id: int):
+    """Jobs linked to this plan, per blueprint, with what is left. Matching runs first, so
+    jobs synced since the last match show up here."""
+    user = _user(request)
+    p = _plan(request, plan_id)
+    data = reservation.load(user)
+    if p.is_active:
+        tracker.match(user, data)
+    run = reservation.run_plans(user, [p], data)[p.pk]
+    base = tracker.base_result(p, data)
+    keys = tracker.plan_keys(base) if base else set()
+    now = timezone.now()
+
+    links = list(
+        JobLink.objects.filter(user=user, plan=p).select_related("job").order_by("job__start_date")
+    )
+    linked_jobs = [ln.job for ln in links]
+    rows_by_job = {r["job_id"]: r for r in describe_jobs(user, linked_jobs, now)}
+
+    remaining: dict[tuple[int, str], int] = {}
+    over: dict[int, int] = {}
+    if run.result:
+        for j in run.result.jobs:
+            key = (j.blueprint_type_id, j.activity.value)
+            remaining[key] = remaining.get(key, 0) + j.runs * max(j.copies, 1)
+        over = {i.type_id: i.over_plan for i in run.result.items if i.over_plan}
+    names = dict(
+        EveType.objects.filter(
+            pk__in={bp for bp, _ in keys}
+            | {j.product_type_id for j in linked_jobs if j.product_type_id}
+        ).values_list("id", "name")
+    )
+    products = _products(data.game, keys)
+    counts: dict[tuple[int, str], dict[str, int]] = {}
+    for job in linked_jobs:
+        activity = tracker.JOB_ACTIVITY.get(job.activity_id)
+        if activity is None:
+            continue
+        status = rows_by_job[job.job_id]["status"]
+        c = counts.setdefault(
+            (job.blueprint_type_id, activity.value), {"running": 0, "ready": 0, "delivered": 0}
+        )
+        if status in ("active", "paused"):
+            c["running"] += job.runs
+        elif status in c:
+            c[status] += job.runs
+    rows = []
+    for bp_id, activity in sorted(
+        keys | {(k[0], Activity(k[1])) for k in counts}, key=lambda k: names.get(k[0], "")
+    ):
+        key = (bp_id, activity.value)
+        c = counts.get(key, {"running": 0, "ready": 0, "delivered": 0})
+        product = products.get(key)
+        rows.append(
+            {
+                "blueprint_type_id": bp_id,
+                "activity": activity.value,
+                "name": names.get(bp_id, str(bp_id)),
+                "product_name": names.get(product, "") if product else "",
+                "remaining_runs": remaining.get(key, 0),
+                "running_runs": c["running"],
+                "ready_runs": c["ready"],
+                "delivered_runs": c["delivered"],
+                "over_plan": over.get(product, 0) if product else 0,
+            }
+        )
+
+    linked_ids = JobLink.objects.filter(user=user, plan__isnull=False).values("job_id")
+    since = now - timedelta(days=CANDIDATE_DAYS)
+    candidates = [
+        j
+        for j in IndustryJob.objects.filter(owner_q(user, Feed.JOBS), start_date__gte=since)
+        .exclude(status__in=tracker.DEAD)
+        .exclude(pk__in=linked_ids)
+        .order_by("-start_date")
+        if (j.blueprint_type_id, tracker.JOB_ACTIVITY.get(j.activity_id)) in keys
+    ]
+    return {
+        "active": p.is_active,
+        "activated_at": p.activated_at,
+        "rows": rows,
+        "jobs": [{**rows_by_job[ln.job_id], "source": ln.source} for ln in links],
+        "candidates": describe_jobs(user, candidates[:100], now),
+    }
+
+
+def _products(game, keys) -> dict[tuple[int, str], int]:
+    out = {}
+    for bp_id, activity in keys:
+        bp = game.blueprints.get(bp_id)
+        if bp is None:
+            continue
+        recipe = {
+            Activity.MANUFACTURING: bp.manufacturing,
+            Activity.REACTION: bp.reaction,
+        }.get(activity)
+        if recipe and recipe.product_type_id:
+            out[(bp_id, activity.value)] = recipe.product_type_id
+    return out
+
+
+@router.post("/plans/{plan_id}/jobs/{job_id}", response=ProgressOut)
+def link_job(request: HttpRequest, plan_id: int, job_id: int):
+    """Count a job toward this plan (moving it from another plan, or undoing an unlink)."""
+    user = _user(request)
+    p = _plan(request, plan_id)
+    job = get_object_or_404(IndustryJob.objects.filter(owner_q(user, Feed.JOBS)), pk=job_id)
+    JobLink.objects.update_or_create(
+        user=user, job=job, defaults={"plan": p, "source": LinkSource.MANUAL}
+    )
+    return plan_progress(request, plan_id)
+
+
+@router.delete("/plans/{plan_id}/jobs/{job_id}", response=ProgressOut)
+def unlink_job(request: HttpRequest, plan_id: int, job_id: int):
+    """Stop counting a job toward this plan. It is not matched again automatically."""
+    user = _user(request)
+    p = _plan(request, plan_id)
+    link = get_object_or_404(JobLink, user=user, plan=p, job_id=job_id)
+    link.plan = None
+    link.source = LinkSource.MANUAL
+    link.save(update_fields=["plan", "source", "updated_at"])
+    return plan_progress(request, plan_id)

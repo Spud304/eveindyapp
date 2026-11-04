@@ -36,7 +36,7 @@ from engine.types import OwnedBlueprint as EngineBlueprint
 from engine.types import SolarSystem as EngineSystem
 from engine.types import Station as EngineStation
 
-from . import inputs
+from . import inputs, tracker
 from .inputs import AssetBucket
 from .models import Plan
 from .stations import engine_station
@@ -147,6 +147,7 @@ def plan_input(p: Plan, data: AccountData, pool: dict[AssetBucket, int]) -> Plan
         if qty > 0 and _in_scope(bucket, locations, flags):
             assets[bucket[0]] += qty
     stations = plan_stations(p, data)
+    started, started_attempts = tracker.progress_inputs(p, data.game)
     return PlanInput(
         lines=tuple(PlanLine(str(ln.pk), ln.type_id, ln.quantity) for ln in p.lines.all()),
         game=data.game,
@@ -158,6 +159,8 @@ def plan_input(p: Plan, data: AccountData, pool: dict[AssetBucket, int]) -> Plan
         prices=data.prices,
         rules=effective_rules(data.default_rules, p),
         choices=_choices(p),
+        started=started,
+        started_attempts=started_attempts,
     )
 
 

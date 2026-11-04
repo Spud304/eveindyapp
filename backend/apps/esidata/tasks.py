@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.cache import cache
 
 from apps.accounts.models import User
+from apps.planning.tracker import match_after_sync
 
 from . import sync
 
@@ -42,6 +43,13 @@ def sync_account_task(user_id: int) -> None:
             return
         statuses = sync.sync_account(user)
         failed = [f"{s.owner_kind}:{s.owner_id}:{s.feed}" for s in statuses if not s.ok]
-        log.info("account %s synced: %d feeds, failed %s", user_id, len(statuses), failed)
+        linked = match_after_sync(user)
+        log.info(
+            "account %s synced: %d feeds, failed %s, %d jobs linked",
+            user_id,
+            len(statuses),
+            failed,
+            linked,
+        )
     finally:
         cache.delete(_dedup_key(user_id))
