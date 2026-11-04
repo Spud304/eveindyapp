@@ -18,7 +18,7 @@ Dev setup:
 - Production stack: `deploy/docker-compose.yml`.
 
 ## Status (2026-11-03)
-Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. The ore calculator prices from Jita 4-4 sell orders (`apps/esidata/market.py`). **Next:** Jita prices for the rest of the shopping list and the Cost tab (same order books), and checking the Shopping list's copy format against a real Janice / multibuy paste.
+Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. Plan results, shared views and the ore calculator price from Jita 4-4 sell orders (`apps/esidata/market.py`, `engine/pricing.py`); tests stub the market (`no_market` fixture in `tests/planning/conftest.py`). **Next:** check the Shopping list's copy format against a real Janice / multibuy paste; the build order is otherwise done.
 
 Open from steps 6–7:
 - Copies attributed to a plan lose that attribution once delivered; a picked BPC that disappears is skipped without a warning.
