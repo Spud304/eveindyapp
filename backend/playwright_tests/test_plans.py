@@ -129,13 +129,18 @@ def test_plan_settings_toggles_save(login):
     page = s.page
     page.goto(f"/plans/{plan['id']}")
 
-    by_test_id(page, "plan.reserve").check()
-    expect(page.get_by_test_id("toast").last).to_have_text("Plan saved")
+    def saved(action):
+        """Run `action` and wait for the plan PATCH it sends: the toast from an earlier save
+        already says "Plan saved", so it cannot tell this save apart."""
+        with page.expect_response(
+            lambda r: r.request.method == "PATCH" and f"/api/plans/{plan['id']}" in r.url
+        ):
+            action()
 
-    by_test_id(page, "plan.stations.all").uncheck()  # lists every station, all ticked
+    saved(lambda: by_test_id(page, "plan.reserve").check())
+    saved(lambda: by_test_id(page, "plan.stations.all").uncheck())  # lists every station, ticked
     expect(by_test_id(page, f"plan.stations.{first['id']}")).to_be_checked()
-    by_test_id(page, f"plan.stations.{first['id']}").uncheck()
-    expect(page.get_by_test_id("toast").last).to_have_text("Plan saved")
+    saved(lambda: by_test_id(page, f"plan.stations.{first['id']}").uncheck())
 
     page.reload()
     expect(by_test_id(page, "plan.reserve")).to_be_checked()

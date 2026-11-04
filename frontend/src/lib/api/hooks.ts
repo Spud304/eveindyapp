@@ -197,12 +197,16 @@ export function usePlanMutations() {
     edit: useMutation({
       mutationFn: async ({ id, body }: { id: number; body: PlanSettings }) =>
         unwrap(await api.PATCH('/api/plans/{plan_id}', { ...path(id), body })),
+      // One at a time, in order: two quick edits sent together could finish out of order and
+      // leave the older value saved.
+      scope: { id: 'plan-edit' },
       onSuccess: done,
       meta: { toast: 'Plan saved' },
     }),
     setLines: useMutation({
       mutationFn: async ({ id, lines }: { id: number; lines: LineIO[] }) =>
         unwrap(await api.PUT('/api/plans/{plan_id}/lines', { ...path(id), body: lines })),
+      scope: { id: 'plan-edit' },
       onSuccess: () => {
         void done()
         void qc.invalidateQueries({ queryKey: keys.library }) // picked BPCs show their plan
