@@ -77,6 +77,14 @@ Decided (2026-11-03):
 - Matching fills planned jobs in order; extra runs beyond the plan show as "over plan".
 - Manual unlink/relink for the odd job that isn't for the plan.
 - Switching the active plan doesn't move jobs already attributed.
+- **Decided (2026-11-03), how progress feeds the plan:**
+  - Links are stored (`JobLink`); progress is computed. Each plan run feeds the engine the output of its linked jobs as `started` units. Those cover demand before assets do, plan lines included, so the plan needs fewer runs and fewer inputs. That is the reservation release: the inputs a started job consumed are no longer demanded, and nothing is counted twice.
+  - Delivered output counts only for plan lines. Delivered components are in a hangar and arrive through the next asset sync.
+  - Invention attempts running for the plan reduce the attempts still needed; delivered T2 copies arrive as owned blueprints.
+  - Copy jobs are linked and shown but not fed to the engine yet.
+  - Matching uses the plan computed without progress and without assets, so a blueprint stays matchable after its runs are all started or its output is in stock.
+  - Cancelled and reverted jobs count for nothing.
+  - Corp jobs installed by corpmates match too, as this section says. Unlink the odd one.
 
 ### Corp support (first-class, not an add-on)
 Data needed, with the ESI role it requires:
@@ -323,13 +331,23 @@ Step 2 is done apart from per-character settings (alpha clone, allowed activitie
 
 Step 4 is done apart from per-plan sharing views (step 7).
 
+## Step 5 progress (2026-11-03)
+- Engine: `PlanInput.started` (units by item) and `started_attempts` (invention attempts by T2 blueprint). `ItemPlan.started` / `over_plan` and `InventionPlan.attempts_in_progress` report them.
+- `apps/planning/tracker.py`: `match()` links new jobs to the active plan. It runs after every sync that reads jobs (cron and Celery) and when the Progress tab loads. Unlinked jobs keep a link row with no plan and are never matched again. `progress_inputs()` builds the engine inputs, and every plan run (reservations included) uses them.
+- API: `GET /api/plans/{id}/progress` returns, per blueprint and activity, runs to start / running / ready / delivered and units over plan. It also returns the linked jobs and the unlinked jobs of the last 30 days for these blueprints. `POST` / `DELETE /api/plans/{id}/jobs/{job_id}` link and unlink by hand.
+- Frontend: a Progress tab with one bar per blueprint (delivered / ready / running / to start), the linked jobs with Unlink, and the other recent jobs with Link. The dashboard's active-plan panel shows the totals.
+- Live (dreadbatch 1): 27 blueprint rows; 30 corp jobs (a corpmate's capital components started before activation) offered to link by hand. Progress response ~2 s.
+- Tests: 14 unit tests (matching rules, progress inputs, engine effect, API) and 5 browser specs: auto link, unlink then link, jobs from before activation, inactive plan, over plan. Test jobs come from `manage.py playwright_job`, which only accepts reserved test ids.
+- Found by the browser tests: the plan result cached from other tabs went stale after matching on the Progress tab. It is now refreshed whenever the linked jobs change.
+- Not done: copy jobs reducing planned copies; progress caching (each call recomputes).
+
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
 1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
 2. **Account + data layer** — account-scoped config, all-character + corp fetches (assets, blueprints, jobs, divisions), role detection, token fix, Postgres. In progress; see Step 2 progress.
 3. **Plans** — model + JSON API, asset reservation. Done; see Step 3 progress.
 4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard. Done; see Step 4 progress.
-5. **Tracker** — active-plan job matching, progress tab, reservation release.
+5. **Tracker** — active-plan job matching, progress tab, reservation release. Done; see Step 5 progress.
 6. **BPO/BPC trade-off** — auto-copy to fill slots, opt-in buy BPC / extra BPO with cost vs time shown.
 7. **Sharing** — corp/link visibility.
 8. **Janice export**, then **compressed ore calculator**.

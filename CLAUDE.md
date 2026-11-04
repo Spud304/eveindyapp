@@ -13,6 +13,7 @@ Dev setup:
 - Frontend: `npm run dev` from `frontend/`. Vite serves the app on http://localhost:5050 and proxies `/api`, `/auth` and `/callback` to Django. 5050 is the port the EVE application's registered callback uses, so open the app there.
 - On-demand syncs need a worker: `uv run celery -A config worker -l INFO` from `backend/`.
 - After changing API schemas: `npm run gen:api` from `frontend/` (Django must be running).
+- Vite's watcher can miss a second quick edit to the same file (seen 2026-11-03: a served module lacked a new import). If the browser shows code you already changed, restart `npm run dev`.
 - Never use `/auth/dev-login` with a real character id: it upserts the character with a dev owner hash, which counts as a transfer and deletes its ESI token.
 - Production stack: `deploy/docker-compose.yml`.
 
