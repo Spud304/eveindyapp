@@ -16,14 +16,13 @@ from collections.abc import Iterable, Mapping
 from django.db.models import Q
 
 from apps.accounts.models import User
-from apps.esidata.access import readable_corp_feeds
+from apps.esidata.access import owner_q
 from apps.esidata.models import (
     Asset,
     BlueprintItem,
     CharacterSkill,
     Feed,
     MarketPrice,
-    OwnerKind,
     SystemCostIndex,
 )
 from apps.sde import gamedata
@@ -48,11 +47,7 @@ AVAILABLE_FLAGS = ("Hangar", "CorpDeliveries", "Deliveries")
 
 
 def _owners(user: User, feed: Feed) -> Q:
-    q = Q(owner_kind=OwnerKind.CHARACTER, owner_id__in=user.characters.values("character_id"))
-    for corp_id, feeds in readable_corp_feeds(user).items():
-        if feed in feeds:
-            q |= Q(owner_kind=OwnerKind.CORPORATION, owner_id=corp_id)
-    return q
+    return owner_q(user, feed)
 
 
 def characters(user: User) -> tuple[Character, ...]:

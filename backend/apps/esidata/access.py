@@ -18,3 +18,17 @@ def readable_corp_feeds(user: User) -> dict[int, set[Feed]]:
             if r.has(*cf.roles):
                 out.setdefault(r.corporation_id, set()).add(cf.feed)
     return out
+
+
+def owner_q(user: User, feed: Feed):
+    """Rows of a feed this account may read: its characters', plus each corp where one of its
+    characters holds the feed's role."""
+    from django.db.models import Q
+
+    from .models import OwnerKind
+
+    q = Q(owner_kind=OwnerKind.CHARACTER, owner_id__in=user.characters.values("character_id"))
+    for corp_id, feeds in readable_corp_feeds(user).items():
+        if feed in feeds:
+            q |= Q(owner_kind=OwnerKind.CORPORATION, owner_id=corp_id)
+    return q
