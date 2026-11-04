@@ -329,6 +329,11 @@ class PlanInput:
     prices: Mapping[TypeId, Price] = field(default_factory=dict)
     rules: BuildRules = BuildRules()
     choices: Mapping[TypeId, BlueprintChoice] = field(default_factory=dict)
+    # Progress (step 5). Units of an item that jobs attributed to this plan will produce or
+    # have produced; they cover demand before assets do, plan lines included.
+    started: Mapping[TypeId, int] = field(default_factory=dict)
+    # Invention attempts already running for this plan, by invented (T2) blueprint.
+    started_attempts: Mapping[TypeId, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +369,8 @@ class ItemPlan:
     to_buy: int
     blueprint_type_id: TypeId | None = None
     build_category: BuildCategory | None = None
+    started: int = 0  # demand covered by jobs already attributed to the plan
+    over_plan: int = 0  # attributed output beyond what the plan needs
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,8 +405,9 @@ class InventionPlan:
     probability_reason: Reason
     runs_per_bpc: int
     bpcs_needed: int
-    attempts: int
+    attempts: int  # still to start
     options: tuple[DecryptorOption, ...]
+    attempts_in_progress: int = 0  # already running for this plan
 
 
 @dataclass(frozen=True, slots=True)

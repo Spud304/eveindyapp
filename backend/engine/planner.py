@@ -311,12 +311,25 @@ class _Planner:
         for m in meta.materials:
             self.input_qty[m.type_id] += m.quantity
 
+    def cover(self, type_id: TypeId) -> tuple[int, int, int, int]:
+        """(started used, assets used, still needed, over plan) for one item.
+
+        Units from jobs already attributed to the plan cover demand first, plan lines
+        included (a started job is the line being built). Assets then cover what is left of
+        the input demand only, as before."""
+        line, inputs = self.line_qty[type_id], self.input_qty[type_id]
+        started = self.inp.started.get(type_id, 0)
+        s = min(started, line + inputs)
+        line_left = max(0, line - s)
+        inputs_left = inputs - (s - (line - line_left))
+        used = min(self.inp.assets.get(type_id, 0), inputs_left)
+        return s, used, line_left + inputs_left - used, started - s
+
     def plan_item(self, type_id: TypeId) -> None:
         prod = self.producers[type_id]
         decision, reason, cat = self.decisions[type_id]
         reducible = self.input_qty[type_id]
-        used = min(self.inp.assets.get(type_id, 0), reducible)
-        net = self.line_qty[type_id] + reducible - used
+        started, used, net, over = self.cover(type_id)
         per_run = prod.recipe.product_quantity or 1
         runs = math.ceil(net / per_run) if net > 0 else 0
         if runs:
@@ -335,6 +348,8 @@ class _Planner:
             to_buy=0,
             blueprint_type_id=prod.blueprint_type_id,
             build_category=cat,
+            started=started,
+            over_plan=over,
         )
 
     def plan_blueprint(self, prod: _Producer, product_type_id: TypeId, runs: int) -> None:
@@ -551,6 +566,7 @@ class _Planner:
         t1_bp_id, inv = self.invented_from[t2_bp_id]
         inventor, enc, sci, p_reason = self.best_inventor(inv)
         base_p = inv.probability or 0.0
+        in_progress = self.inp.started_attempts.get(t2_bp_id, 0)
         datacore_cost = 0.0
         for m in inv.materials:
             datacore_cost += m.quantity * (self.price(m.type_id) or 0.0)
@@ -566,7 +582,8 @@ class _Planner:
             me = c.T2_BASE_ME + (dec.me_modifier if dec else 0)
             te = c.T2_BASE_TE + (dec.te_modifier if dec else 0)
             bpcs = math.ceil(runs / runs_per)
-            attempts = math.ceil(bpcs / p)
+            # Attempts already running for this plan count toward the expected total.
+            attempts = max(0, math.ceil(bpcs / p) - in_progress)
             dec_price = (self.price(dec.type_id) or 0.0) if dec else 0.0
             input_cost = attempts * (datacore_cost + dec_price)
             material_cost = 0.0
@@ -751,6 +768,7 @@ class _Planner:
             bpcs_needed=opt.bpcs_needed,
             attempts=opt.attempts,
             options=tuple(o for o, _ in options),
+            attempts_in_progress=in_progress,
         )
         return inv_plan, specs, job_ids
 
@@ -764,8 +782,8 @@ class _Planner:
         for t, (decision, reason, cat) in self.decisions.items():
             if decision != ItemDecision.BUY:
                 continue
-            demand = self.input_qty[t] + self.line_qty[t]
-            used = min(self.inp.assets.get(t, 0), self.input_qty[t])
+            # A bought item can still have started units: a job built it for this plan anyway.
+            started, used, needed, over = self.cover(t)
             self.item_rows[t] = ItemPlan(
                 type_id=t,
                 name=self.name(t),
@@ -776,11 +794,13 @@ class _Planner:
                 on_hand_used=used,
                 produced=0,
                 surplus=0,
-                to_buy=demand - used,
+                to_buy=needed,
                 blueprint_type_id=self.producers[t].blueprint_type_id
                 if t in self.producers
                 else None,
                 build_category=cat,
+                started=started,
+                over_plan=over,
             )
 
         for job in self.jobs:

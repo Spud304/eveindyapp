@@ -533,3 +533,63 @@ def test_schedule_picks_faster_character():
         )
     )
     assert jobs_for(r, BP_COMP_A)[0].schedule.character_id == 2
+
+
+# --- progress (started jobs) ---------------------------------------------------------------
+
+
+def test_started_units_cover_a_plan_line():
+    r = plan(make_input([(HULL, 3)], blueprints=(bpo(BP_COMP_A), bpo(BP_HULL)), started={HULL: 1}))
+    assert bp(r, BP_HULL).runs == 2
+    assert bp(r, BP_COMP_A).runs == 14  # components only for the two hulls still to build
+    hull = item(r, HULL)
+    assert (hull.started, hull.over_plan) == (1, 0)
+
+
+def test_started_beyond_the_plan_is_over_plan():
+    r = plan(make_input([(HULL, 3)], blueprints=(bpo(BP_HULL),), started={HULL: 5}))
+    assert all(b.type_id != BP_HULL for b in r.blueprints)
+    hull = item(r, HULL)
+    assert (hull.started, hull.over_plan, hull.produced) == (3, 2, 0)
+    assert buy(r, COMP_A) == 0  # nothing left to build, so no inputs
+
+
+def test_started_components_come_before_assets():
+    r = plan(
+        make_input(
+            [(HULL, 1)],
+            blueprints=(bpo(BP_COMP_A), bpo(BP_HULL)),
+            started={COMP_A: 5},
+            assets={COMP_A: 1},
+        )
+    )
+    comp = item(r, COMP_A)
+    assert (comp.started, comp.on_hand_used) == (5, 1)
+    assert bp(r, BP_COMP_A).runs == 1
+
+
+def test_started_units_reduce_a_bought_item():
+    r = plan(
+        make_input(
+            [(HULL, 1)],
+            blueprints=(bpo(BP_HULL),),
+            rules=BuildRules(item_blacklist=frozenset({COMP_A})),
+            started={COMP_A: 4},
+        )
+    )
+    assert buy(r, COMP_A) == 3
+
+
+def test_invention_attempts_in_progress_reduce_what_is_left():
+    base = bp(plan(t2_input()), BP_T2_MOD).invention
+    r = plan(t2_input(started_attempts={BP_T2_MOD: 3}))
+    inv = bp(r, BP_T2_MOD).invention
+    assert inv.attempts == base.attempts - 3 and inv.attempts_in_progress == 3
+    assert buy(r, DATACORE) == 2 * (base.attempts - 3)
+
+
+def test_all_attempts_running_plans_no_more_invention():
+    r = plan(t2_input(started_attempts={BP_T2_MOD: 50}))
+    assert bp(r, BP_T2_MOD).invention.attempts == 0
+    assert jobs_for(r, BP_T1_MOD, Activity.INVENTION) == []
+    assert jobs_for(r, BP_T1_MOD, Activity.COPYING) == []
