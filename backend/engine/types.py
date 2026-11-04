@@ -312,9 +312,14 @@ class BlueprintChoice:
 
 @dataclass(frozen=True, slots=True)
 class PlanLine:
+    """`blueprint_item_ids`: owned BPCs picked for this line ("run these BPCs"). The caller
+    sets `quantity` from their runs; the engine uses them first, in this order, before any
+    other source for their blueprint."""
+
     line_id: str
     type_id: TypeId
     quantity: int
+    blueprint_item_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -14,6 +14,7 @@ from engine.types import (
     BuildRules,
     GameData,
     ItemDecision,
+    PlanLine,
     Price,
     ReasonCode,
     Recipe,
@@ -661,6 +662,39 @@ def test_auto_copy_keeps_owned_bpc_jobs():
     assert [j.runs for j in hull if j.source == BlueprintSource.BPC] == [10]
     assert sum(j.runs for j in hull) == 30
     assert jobs_for(r, BP_HULL, Activity.COPYING)  # the BPO's 20 runs are still split
+
+
+def test_picked_bpcs_are_used_first_in_the_order_picked():
+    # Five 9-run BPCs picked out of six; the unpicked 10-run one has better ME.
+    nine = [bpc(BP_HULL, 9, me=8, item_id=i) for i in range(1, 7)]
+    best = bpc(BP_HULL, 10, me=10, item_id=99)
+    r = plan(
+        make_input(
+            [],
+            lines=(PlanLine("l0", HULL, 45, (5, 4, 3, 2, 1)),),
+            blueprints=(*nine, best, bpo(BP_HULL, me=10), bpo(BP_COMP_A)),
+        )
+    )
+    hull = jobs_for(r, BP_HULL)
+    assert [(j.source, j.runs, j.me) for j in hull] == [(BlueprintSource.BPC, 9, 8)] * 5
+    assert "5 owned BPC(s) cover 45 runs (5 picked for this plan)" in (
+        bp(r, BP_HULL).source_reason.text
+    )
+    assert hull[0].me_reason.text.startswith("BPC picked for this plan 5:")
+
+
+def test_picked_bpcs_cover_their_runs_and_other_sources_the_rest():
+    r = plan(
+        make_input(
+            [],
+            lines=(PlanLine("l0", HULL, 9, (1,)), PlanLine("l1", HULL, 5)),
+            blueprints=(bpc(BP_HULL, 9, item_id=1), bpo(BP_HULL), bpo(BP_COMP_A)),
+        )
+    )
+    assert sorted((j.source, j.runs) for j in jobs_for(r, BP_HULL)) == [
+        (BlueprintSource.BPC, 9),
+        (BlueprintSource.BPO, 5),
+    ]
 
 
 def test_copy_job_layout_respects_thirty_days_per_copy():

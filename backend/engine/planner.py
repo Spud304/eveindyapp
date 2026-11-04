@@ -191,7 +191,11 @@ class _Planner:
             self.owned[ob.type_id].append(ob)
 
         self.line_qty: dict[TypeId, int] = defaultdict(int)
+        # BPCs picked on plan lines, by item id, in the order they were picked.
+        self.picked: dict[int, int] = {}
         for line in inp.lines:
+            for item_id in line.blueprint_item_ids:
+                self.picked.setdefault(item_id, len(self.picked))
             if line.quantity <= 0:
                 raise PlanError(f"line {line.line_id}: quantity must be positive")
             self.line_qty[line.type_id] += line.quantity
@@ -438,7 +442,11 @@ class _Planner:
         choice = self.inp.choices.get(bp_id, BlueprintChoice())
         owned = self.owned.get(bp_id, [])
         bpos = [b for b in owned if not b.is_copy]
-        bpcs = sorted((b for b in owned if b.is_copy), key=lambda b: (-b.me, -b.te, b.item_id))
+        # Picked BPCs first, in the order picked; then the rest, best ME first.
+        bpcs = sorted(
+            (b for b in owned if b.is_copy),
+            key=lambda b: (self.picked.get(b.item_id, len(self.picked)), -b.me, -b.te, b.item_id),
+        )
         is_reaction = prod.activity == Activity.REACTION
 
         specs: list[_Spec] = []
@@ -456,7 +464,10 @@ class _Planner:
         # least as good in ME are used (they cost no more materials), and the BPO takes the
         # rest of the runs.
         best_bpo = _best_bpo(bpos) if bpos else None
-        usable = [b for b in bpcs if best_bpo is None or b.me >= best_bpo.me]
+        usable = [
+            b for b in bpcs if best_bpo is None or b.me >= best_bpo.me or b.item_id in self.picked
+        ]
+        picked_used = 0
         for b in usable:
             if remaining <= 0:
                 break
@@ -471,15 +482,20 @@ class _Planner:
                     BlueprintSource.BPC,
                     me_reason(
                         ReasonCode.ME_OWNED_BPC,
-                        f"Owned BPC {b.item_id}: ME {b.me} / TE {b.te}, {b.runs} runs.",
+                        f"{'BPC picked for this plan' if b.item_id in self.picked else 'Owned BPC'}"
+                        f" {b.item_id}: ME {b.me} / TE {b.te}, {b.runs} runs.",
                     ),
                     _item_lock(b),
                 )
             )
             remaining -= take
+            picked_used += b.item_id in self.picked
         n_bpc_specs = len(specs)
         if specs:
-            source_notes.append(f"{len(specs)} owned BPC(s) cover {runs - remaining} runs")
+            note = f"{len(specs)} owned BPC(s) cover {runs - remaining} runs"
+            if picked_used:
+                note += f" ({picked_used} picked for this plan)"
+            source_notes.append(note)
         if len(usable) < len(bpcs) and best_bpo is not None:
             skipped = len(bpcs) - len(usable)
             source_notes.append(

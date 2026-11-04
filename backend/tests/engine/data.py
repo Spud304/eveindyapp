@@ -243,4 +243,5 @@ def lines(*pairs):
 def make_input(line_pairs, **kw):
     kw.setdefault("game", game())
     kw.setdefault("systems", SYSTEMS)
-    return PlanInput(lines=lines(*line_pairs), **kw)
+    kw.setdefault("lines", lines(*line_pairs))
+    return PlanInput(**kw)
