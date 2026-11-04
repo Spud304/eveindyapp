@@ -21,6 +21,9 @@ class WorkJob:
     time_multiplier: float  # blueprint TE x station; skills applied per character
     skills: tuple[SkillRequirement, ...]
     copies: int = 1
+    # Blueprint item the job is installed with: jobs with the same lock never overlap, since
+    # one blueprint is in one job at a time. None for a blueprint used by this job only.
+    lock: str | None = None
     depends_on: list[str] = field(default_factory=list)
     dep_items: set[int] = field(default_factory=set)  # resolved into depends_on
     # Required-skill time bonuses (manufacturing only); see GameData.skill_time_bonuses
@@ -57,14 +60,15 @@ _SLOT_KIND = {
 def schedule(jobs: list[WorkJob], characters: tuple[Character, ...]) -> float:
     """Assign each job a character, start and end. Jobs start once every job
     they depend on has ended. Among ready jobs the longest goes first (LPT);
-    each goes to the eligible slot that finishes it earliest. Returns the
-    wall-clock end of the last job."""
+    each goes to the eligible slot that finishes it earliest, and not before
+    its blueprint is free. Returns the wall-clock end of the last job."""
     by_id = {j.job_id: j for j in jobs}
     free: dict[tuple[int, str], list[float]] = {}
     for ch in characters:
         for activity, kind in _SLOT_KIND.items():
             free.setdefault((ch.character_id, kind), [0.0] * f.slots(ch, activity))
 
+    locks: dict[str, float] = {}
     pending = {j.job_id for j in jobs}
     done: set[str] = set()
     while pending:
@@ -73,7 +77,11 @@ def schedule(jobs: list[WorkJob], characters: tuple[Character, ...]) -> float:
             raise ValueError("job dependency cycle")
         job = max(ready, key=lambda j: (j.duration(None), j.job_id))
         ready_at = max((by_id[d].end for d in job.depends_on), default=0.0)
+        if job.lock is not None:
+            ready_at = max(ready_at, locks.get(job.lock, 0.0))
         _place(job, ready_at, characters, free)
+        if job.lock is not None:
+            locks[job.lock] = job.end
         pending.discard(job.job_id)
         done.add(job.job_id)
     return max((j.end for j in jobs), default=0.0)
@@ -108,7 +116,9 @@ def _place(job: WorkJob, ready_at: float, characters, free) -> None:
     end, start, ch, idx = best
     free[(ch.character_id, kind)][idx] = end
     job.character, job.start, job.end = ch, start, end
-    waited = " after its inputs finish" if start == ready_at and ready_at > 0 else ""
+    waited = (
+        " after its inputs and blueprint are ready" if start == ready_at and ready_at > 0 else ""
+    )
     job.schedule_reason = Reason(
         ReasonCode.SCHEDULED,
         f"{ch.name}: earliest finish of {len(eligible)} eligible character(s){waited}.",

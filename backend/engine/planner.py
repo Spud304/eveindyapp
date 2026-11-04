@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from . import constants as c
 from . import formulas as f
@@ -65,6 +65,18 @@ class _Producer:
     blueprint_type_id: TypeId
     activity: Activity
     recipe: Recipe
+
+
+@dataclass(frozen=True)
+class _Spec:
+    """One manufacturing or reaction job to create for a blueprint."""
+
+    runs: int
+    me: int
+    te: int
+    source: BlueprintSource
+    me_reason: Reason
+    lock: str | None = None  # blueprint item the job is installed with
 
 
 @dataclass
@@ -364,8 +376,7 @@ class _Planner:
         bpcs = sorted((b for b in owned if b.is_copy), key=lambda b: (-b.me, -b.te, b.item_id))
         is_reaction = prod.activity == Activity.REACTION
 
-        # (runs, me, te, source, me_reason)
-        specs: list[tuple[int, int, int, BlueprintSource, Reason]] = []
+        specs: list[_Spec] = []
         source_notes: list[str] = []
         invention: InventionPlan | None = None
         invention_job_ids: list[str] = []
@@ -377,9 +388,9 @@ class _Planner:
             return Reason(code, text)
 
         if bpos:
-            b = max(bpos, key=lambda b: (b.me, b.te, -b.item_id))
+            b = _best_bpo(bpos)
             specs.append(
-                (
+                _Spec(
                     runs,
                     b.me,
                     b.te,
@@ -388,6 +399,7 @@ class _Planner:
                         ReasonCode.ME_OWNED_BPO,
                         f"Owned BPO ME {b.me} / TE {b.te} (best of {len(bpos)}).",
                     ),
+                    _item_lock(b),
                 )
             )
             source_notes.append("owned BPO")
@@ -400,7 +412,7 @@ class _Planner:
                 if take <= 0:
                     continue
                 specs.append(
-                    (
+                    _Spec(
                         take,
                         b.me,
                         b.te,
@@ -409,6 +421,7 @@ class _Planner:
                             ReasonCode.ME_OWNED_BPC,
                             f"Owned BPC {b.item_id}: ME {b.me} / TE {b.te}, {b.runs} runs.",
                         ),
+                        _item_lock(b),
                     )
                 )
                 remaining -= take
@@ -426,7 +439,7 @@ class _Planner:
 
         if remaining > 0:
             specs.append(
-                (
+                _Spec(
                     remaining,
                     0,
                     0,
@@ -435,6 +448,8 @@ class _Planner:
                         ReasonCode.ME_MISSING_BLUEPRINT,
                         "No owned blueprint; planned at ME 0 / TE 0 until you add one.",
                     ),
+                    # Planned as one blueprint you would buy, so its jobs run one after another.
+                    f"missing:{bp_id}",
                 )
             )
             source_notes.append(f"{remaining} runs need a blueprint you do not own")
@@ -445,36 +460,38 @@ class _Planner:
 
         if not is_reaction and (choice.me_override is not None or choice.te_override is not None):
             overridden = []
-            for r, me, te, src, why in specs:
-                new_me = choice.me_override if choice.me_override is not None else me
-                new_te = choice.te_override if choice.te_override is not None else te
+            for sp in specs:
+                new_me = choice.me_override if choice.me_override is not None else sp.me
+                new_te = choice.te_override if choice.te_override is not None else sp.te
                 why = Reason(
                     ReasonCode.ME_OVERRIDE,
-                    f"ME {new_me} / TE {new_te} set by you (blueprint gives ME {me} / TE {te}).",
+                    f"ME {new_me} / TE {new_te} set by you "
+                    f"(blueprint gives ME {sp.me} / TE {sp.te}).",
                 )
-                overridden.append((r, new_me, new_te, src, why))
+                overridden.append(replace(sp, me=new_me, te=new_te, me_reason=why))
             specs = overridden
 
         # Jobs on an original (BPO, reaction formula, or a BPO you do not own yet) may not
         # run longer than 30 days; copies are limited only by their runs. [client]
         split_specs = []
-        for r, me, te, src, why in specs:
-            if src in (BlueprintSource.BPO, BlueprintSource.MISSING):
-                te_factor = 1.0 if is_reaction else 1 - te / 100
+        for sp in specs:
+            if sp.source in (BlueprintSource.BPO, BlueprintSource.MISSING):
+                te_factor = 1.0 if is_reaction else 1 - sp.te / 100
                 cap = f.max_runs(prod.activity, prod.recipe.time_seconds, te_factor * time_mult)
-                if r > cap:
+                if sp.runs > cap:
                     source_notes.append(
                         f"split into jobs of at most {cap} runs (30-day job limit, before skills)"
                     )
-                split_specs.extend((chunk, me, te, src, why) for chunk in _split(r, cap))
+                split_specs.extend(replace(sp, runs=chunk) for chunk in _split(sp.runs, cap))
             else:
-                split_specs.append((r, me, te, src, why))
+                split_specs.append(sp)
         specs = split_specs
         bp_data = self.inp.game.blueprints.get(bp_id)
         bp_cost_mult = bp_data.job_cost_multiplier if bp_data else 1.0
 
         job_ids = []
-        for i, (r, me, te, src, why) in enumerate(specs, 1):
+        for i, sp in enumerate(specs, 1):
+            r, me, te, src, why = sp.runs, sp.me, sp.te, sp.source, sp.me_reason
             job_id = f"{prod.activity.value}:{bp_id}:{i}"
             mats = f.job_materials(prod.recipe.materials, r, me, mat_mult)
             te_factor = 1.0 if is_reaction else 1 - te / 100
@@ -488,6 +505,7 @@ class _Planner:
                 skills=prod.recipe.skills,
                 dep_items={m.type_id for m in mats},
                 skill_time_bonuses=self.inp.game.skill_time_bonuses,
+                lock=sp.lock,
             )
             if src == BlueprintSource.INVENTION:
                 work.depends_on.extend(invention_job_ids)
@@ -508,7 +526,7 @@ class _Planner:
             )
             job_ids.append(job_id)
 
-        sources = tuple(dict.fromkeys(s[3] for s in specs))
+        sources = tuple(dict.fromkeys(sp.source for sp in specs))
         code = {
             BlueprintSource.BPO: ReasonCode.SOURCE_BPO,
             BlueprintSource.BPC: ReasonCode.SOURCE_BPC,
@@ -660,8 +678,12 @@ class _Planner:
         job_ids: list[str] = []
         copy_job_ids: list[str] = []
         if t1_bpos and t1 and t1.copying:
+            # Same pick as manufacturing, so copying and building share the blueprint's lock.
+            t1_bpo = _best_bpo(t1_bpos)
             copy_station, copy_bonuses, _ = self.choose_station(Activity.COPYING, None, t1_bp_id)
-            copy_cap = f.max_runs(Activity.COPYING, t1.copying.time_seconds, copy_bonuses.time)
+            copy_cap = f.max_runs(
+                Activity.COPYING, t1.copying.time_seconds * per_copy, copy_bonuses.time
+            )
             # Every copy gets `per_copy` runs; the last one may have runs to spare.
             for n, copies in enumerate(_split(len(copy_runs), copy_cap), 1):
                 copy_job_id = f"copying:{t1_bp_id}:for:{t2_bp_id}:{n}"
@@ -675,6 +697,7 @@ class _Planner:
                         time_per_run=t1.copying.time_seconds,
                         time_multiplier=copy_bonuses.time,
                         skills=t1.copying.skills,
+                        lock=_item_lock(t1_bpo),
                     ),
                     _JobMeta(
                         me=0,
@@ -749,7 +772,7 @@ class _Planner:
         if dec:
             dec_note += f" + {dec.name} ({dec.me_modifier:+d} / {dec.te_modifier:+d})"
         specs = [
-            (
+            _Spec(
                 r,
                 opt.me,
                 opt.te,
@@ -933,6 +956,14 @@ class _Planner:
             total=materials + invention + sum(fees.values()),
             unpriced_type_ids=tuple(sorted(unpriced)),
         )
+
+
+def _best_bpo(bpos: list[OwnedBlueprint]) -> OwnedBlueprint:
+    return max(bpos, key=lambda b: (b.me, b.te, -b.item_id))
+
+
+def _item_lock(b: OwnedBlueprint) -> str:
+    return f"item:{b.item_id}"
 
 
 def _split(total: int, size: int):

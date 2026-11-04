@@ -1,3 +1,5 @@
+from itertools import pairwise
+
 import pytest
 
 from engine import PlanError, plan
@@ -44,6 +46,7 @@ from .data import (
     SCIENCE_1,
     SCIENCE_2,
     SYSTEMS,
+    T1_MOD,
     T2_MOD,
     TRIT,
     athanor,
@@ -326,6 +329,27 @@ def test_invented_bpc_base_me_is_plus_two():
     assert buy(r, TRIT) == 2 * 98 + 3 * 40
 
 
+def test_t1_copying_and_t1_manufacturing_share_the_bpo():
+    # The plan builds T1 modules and copies the same T1 BPO for invention.
+    inv = t2_input()
+    r = plan(
+        make_input(
+            [(T2_MOD, 20), (T1_MOD, 50)],
+            blueprints=inv.blueprints,
+            characters=(character(1, skills=INVENTOR), character(2, skills=INVENTOR)),
+        )
+    )
+    on_bpo = sorted(
+        [
+            *jobs_for(r, BP_T1_MOD, Activity.COPYING),
+            *jobs_for(r, BP_T1_MOD, Activity.MANUFACTURING),
+        ],
+        key=lambda j: j.schedule.start_seconds,
+    )
+    assert len(on_bpo) == 2
+    assert on_bpo[1].schedule.start_seconds >= on_bpo[0].schedule.end_seconds
+
+
 def test_invention_attempts_and_datacores():
     r = plan(t2_input())
     inv = bp(r, BP_T2_MOD).invention
@@ -440,6 +464,49 @@ def test_bpo_job_split_at_thirty_days():
     hull_jobs = jobs_for(r, BP_HULL)
     assert [j.runs for j in hull_jobs] == [2592, 2592, 816]
     assert "30-day job limit" in bp(r, BP_HULL).source_reason.text
+
+
+def test_jobs_on_one_bpo_run_one_after_another():
+    # One BPO is in one job at a time, even with free slots on other characters.
+    r = plan(
+        make_input(
+            [(HULL, 6000)],
+            blueprints=(bpo(BP_HULL), bpo(BP_COMP_A)),
+            characters=(character(1), character(2), character(3)),
+        )
+    )
+    on_bpo = sorted(
+        (
+            j
+            for j in jobs_for(r, BP_HULL)
+            if j.activity == Activity.COPYING or j.source == BlueprintSource.BPO
+        ),
+        key=lambda j: j.schedule.start_seconds,
+    )
+    assert len(on_bpo) >= 3
+    for before, after in pairwise(on_bpo):
+        assert after.schedule.start_seconds >= before.schedule.end_seconds
+
+
+def test_missing_blueprint_jobs_run_one_after_another():
+    r = plan(make_input([(HULL, 6000)], characters=(character(1), character(2))))
+    hull = sorted(jobs_for(r, BP_HULL), key=lambda j: j.schedule.start_seconds)
+    assert len(hull) == 3
+    for before, after in pairwise(hull):
+        assert after.schedule.start_seconds >= before.schedule.end_seconds
+
+
+def test_owned_bpcs_of_one_blueprint_run_in_parallel():
+    r = plan(
+        make_input(
+            [(HULL, 20)],
+            blueprints=(bpc(BP_HULL, 10, item_id=1), bpc(BP_HULL, 10, item_id=2), bpo(BP_COMP_A)),
+            characters=(character(1), character(2)),
+        )
+    )
+    starts = {j.schedule.start_seconds for j in jobs_for(r, BP_HULL)}
+    comp_end = max(j.schedule.end_seconds for j in jobs_for(r, BP_COMP_A))
+    assert starts == {comp_end}
 
 
 def test_invention_jobs_split_by_thirty_days():
