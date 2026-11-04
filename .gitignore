@@ -68,3 +68,4 @@ backend/instance-test/
 .ruff_cache/
 .pytest_cache/
 deploy/.env
+backend/test-results/

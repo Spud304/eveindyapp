@@ -21,8 +21,12 @@ dependencies = [
 [dependency-groups]
 dev = [
     "hypothesis>=6.170.14",
+    # Pinned: newer Playwright has no Chromium build for Ubuntu 20.04 (this dev box), and
+    # `playwright install` deletes browsers no installed version uses. Bump with the OS.
+    "playwright==1.58.0",
     "pytest>=8.3",
     "pytest-django>=4.10",
+    "pytest-playwright>=0.7",
     "ruff>=0.11",
 ]
 
