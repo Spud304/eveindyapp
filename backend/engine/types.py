@@ -512,6 +512,9 @@ class ShoppingItem:
     total_price: float | None
     reason: Reason
     volume: float = 0.0  # m3 for the whole quantity, packaged
+    # "average" (CCP's average price) or "jita" (priced through Jita 4-4 sell orders)
+    price_source: str = "average"
+    on_sale: int | None = None  # units on sale at Jita 4-4, when looked up
 
 
 @dataclass(frozen=True, slots=True)

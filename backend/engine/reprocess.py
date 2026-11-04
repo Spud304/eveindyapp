@@ -33,12 +33,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .pricing import Book, book_cost
 from .types import Material, Reason, ReasonCode, SecurityClass, TypeId
 
 NO_RIG_MULTIPLIER = 0.50
 LP_ROUNDING_BATCHES = 1000  # above this many batches, round the linear answer up
-
-Book = tuple[tuple[float, int], ...]  # sell orders as (price, units), cheapest first
 
 
 class OreClass(StrEnum):
@@ -150,19 +149,6 @@ def character_yield(
 
 def produced(ore: Ore, batches: int, efficiency: float) -> dict[TypeId, int]:
     return {m.type_id: math.floor(m.quantity * batches * efficiency) for m in ore.materials}
-
-
-def book_cost(book: Book, units: int) -> tuple[float, float | None, int]:
-    """(ISK for `units` bought cheapest first, dearest price paid, units short)."""
-    cost, top, left = 0.0, None, units
-    for price, available in book:
-        if left <= 0:
-            break
-        take = min(available, left)
-        cost += take * price
-        top = price
-        left -= take
-    return cost, top, max(0, left)
 
 
 def cheapest_mix(
