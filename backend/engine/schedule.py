@@ -57,18 +57,23 @@ _SLOT_KIND = {
 }
 
 
-def schedule(jobs: list[WorkJob], characters: tuple[Character, ...]) -> float:
+def schedule(
+    jobs: list[WorkJob],
+    characters: tuple[Character, ...],
+    locks: Mapping[str, float] | None = None,
+) -> float:
     """Assign each job a character, start and end. Jobs start once every job
     they depend on has ended. Among ready jobs the longest goes first (LPT);
     each goes to the eligible slot that finishes it earliest, and not before
-    its blueprint is free. Returns the wall-clock end of the last job."""
+    its blueprint is free. `locks` gives blueprints that are busy at the start (in a job
+    already running) the time they become free. Returns the wall-clock end of the last job."""
     by_id = {j.job_id: j for j in jobs}
     free: dict[tuple[int, str], list[float]] = {}
     for ch in characters:
         for activity, kind in _SLOT_KIND.items():
             free.setdefault((ch.character_id, kind), [0.0] * f.slots(ch, activity))
 
-    locks: dict[str, float] = {}
+    locks = dict(locks or {})
     pending = {j.job_id for j in jobs}
     done: set[str] = set()
     while pending:

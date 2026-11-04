@@ -71,3 +71,14 @@ GROUP_COMPOSITE_FORMULAS = 1888  # holds both intermediate and composite reactio
 GROUP_POLYMER_FORMULAS = 1889
 GROUP_BIOCHEMICAL_FORMULAS = 1890
 GROUP_MOLECULAR_FORGED_FORMULAS = 4097
+
+
+# ESI / client industry activity ids, for describing a job a blueprint is installed in.
+JOB_ACTIVITY_NAMES = {
+    1: "manufacturing",
+    3: "TE research",
+    4: "ME research",
+    5: "copying",
+    8: "invention",
+    9: "reaction",
+}

@@ -280,6 +280,11 @@ class OwnedBlueprint:
     te: int
     owner_id: int  # character or corporation id
     location_id: int | None = None
+    # Open industry job the blueprint is installed in (ESI activity id), and seconds until it
+    # ends; 0 or less means finished and waiting to be delivered. A BPC in a job is not used;
+    # a BPO's jobs in the plan start when its job ends.
+    job_activity_id: int | None = None
+    job_ends_in: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

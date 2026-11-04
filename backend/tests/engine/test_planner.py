@@ -1,3 +1,4 @@
+from dataclasses import replace
 from itertools import pairwise
 
 import pytest
@@ -695,6 +696,40 @@ def test_picked_bpcs_cover_their_runs_and_other_sources_the_rest():
         (BlueprintSource.BPC, 9),
         (BlueprintSource.BPO, 5),
     ]
+
+
+def test_bpo_in_a_running_job_starts_planned_jobs_when_it_ends():
+    busy = replace(bpo(BP_HULL), job_activity_id=5, job_ends_in=5000.0)
+    r = plan(
+        make_input(
+            [(HULL, 2)],
+            blueprints=(busy,),
+            rules=BuildRules(item_blacklist=frozenset({COMP_A})),
+        )
+    )
+    [hull] = jobs_for(r, BP_HULL)
+    assert hull.schedule.start_seconds == 5000
+    assert r.total_seconds == 5000 + 2000
+    assert "the BPO is in a copying job for 1h 23m; these jobs start after" in (
+        bp(r, BP_HULL).source_reason.text
+    )
+
+
+def test_bpo_in_a_finished_job_must_be_delivered():
+    done = replace(bpo(BP_HULL), job_activity_id=5, job_ends_in=-60.0)
+    r = plan(make_input([(HULL, 1)], blueprints=(done, bpo(BP_COMP_A))))
+    assert "the BPO is in a finished copying job: deliver it before these jobs start" in (
+        bp(r, BP_HULL).source_reason.text
+    )
+
+
+def test_bpcs_in_jobs_are_not_used():
+    in_job = replace(bpc(BP_HULL, 10, item_id=1), job_activity_id=1, job_ends_in=100.0)
+    r = plan(
+        make_input([(HULL, 5)], blueprints=(in_job, bpc(BP_HULL, 5, item_id=2), bpo(BP_COMP_A)))
+    )
+    assert [j.runs for j in jobs_for(r, BP_HULL)] == [5]
+    assert "1 owned BPC(s) in jobs not used" in bp(r, BP_HULL).source_reason.text
 
 
 def test_copy_job_layout_respects_thirty_days_per_copy():

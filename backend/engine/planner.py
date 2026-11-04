@@ -187,8 +187,12 @@ class _Planner:
         self.reaction_inputs = reaction_inputs
 
         self.owned: dict[TypeId, list[OwnedBlueprint]] = defaultdict(list)
+        # Originals already in a job are free when that job ends; their planned jobs wait.
+        self.busy: dict[str, float] = {}
         for ob in inp.blueprints:
             self.owned[ob.type_id].append(ob)
+            if ob.job_activity_id is not None and not ob.is_copy:
+                self.busy[_item_lock(ob)] = max(0.0, ob.job_ends_in)
 
         self.line_qty: dict[TypeId, int] = defaultdict(int)
         # BPCs picked on plan lines, by item id, in the order they were picked.
@@ -443,8 +447,9 @@ class _Planner:
         owned = self.owned.get(bp_id, [])
         bpos = [b for b in owned if not b.is_copy]
         # Picked BPCs first, in the order picked; then the rest, best ME first.
+        in_jobs = [b for b in owned if b.is_copy and b.job_activity_id is not None]
         bpcs = sorted(
-            (b for b in owned if b.is_copy),
+            (b for b in owned if b.is_copy and b.job_activity_id is None),
             key=lambda b: (self.picked.get(b.item_id, len(self.picked)), -b.me, -b.te, b.item_id),
         )
         is_reaction = prod.activity == Activity.REACTION
@@ -496,6 +501,8 @@ class _Planner:
             if picked_used:
                 note += f" ({picked_used} picked for this plan)"
             source_notes.append(note)
+        if in_jobs:
+            source_notes.append(f"{len(in_jobs)} owned BPC(s) in jobs not used")
         if len(usable) < len(bpcs) and best_bpo is not None:
             skipped = len(bpcs) - len(usable)
             source_notes.append(
@@ -517,6 +524,8 @@ class _Planner:
                 )
             )
             source_notes.append(f"owned BPO for {remaining} runs" if specs[:-1] else "owned BPO")
+            if b.job_activity_id is not None:
+                source_notes.append(_job_note(b))
             remaining = 0
 
         if remaining > 0 and not is_reaction and bp_id in self.invented_from:
@@ -934,7 +943,11 @@ class _Planner:
                 copy_job_ids.append(copy_job_id)
             job_ids.extend(copy_job_ids)
         t1_source = BlueprintSource.BPC
-        if not copy_job_ids and sum(b.runs for b in t1_owned if b.is_copy) < opt.attempts:
+        if (
+            not copy_job_ids
+            and sum(b.runs for b in t1_owned if b.is_copy and b.job_activity_id is None)
+            < opt.attempts
+        ):
             t1_source = BlueprintSource.MISSING
             self.warn(
                 ReasonCode.SOURCE_MISSING,
@@ -1046,7 +1059,7 @@ class _Planner:
             for item in sorted(job.dep_items):
                 job.depends_on.extend(self.jobs_by_product.get(item, []))
 
-        total = schedule(self.jobs, self.inp.characters)
+        total = schedule(self.jobs, self.inp.characters, self.busy)
         self.item_rows = {
             t: row for t, row in self.item_rows.items() if row.line_quantity or row.input_quantity
         }
@@ -1236,7 +1249,7 @@ def _search_parallel(base: _Planner) -> tuple[dict[TypeId, int], dict[TypeId, fl
             for item in sorted(j.dep_items):
                 deps.extend(base.jobs_by_product.get(item, []))
             jobs.append(replace(j, depends_on=expand(deps)))
-        return schedule(jobs, base.inp.characters)
+        return schedule(jobs, base.inp.characters, base.busy)
 
     parallel: dict[TypeId, int] = {}
     best = total(parallel)
@@ -1273,6 +1286,13 @@ def _duration(seconds: float) -> str:
     if h:
         return f"{h}h {m}m"
     return f"{m}m"
+
+
+def _job_note(b: OwnedBlueprint) -> str:
+    activity = c.JOB_ACTIVITY_NAMES.get(b.job_activity_id or 0, "an industry")
+    if b.job_ends_in <= 0:
+        return f"the BPO is in a finished {activity} job: deliver it before these jobs start"
+    return f"the BPO is in a {activity} job for {_duration(b.job_ends_in)}; these jobs start after"
 
 
 def _sentence(text: str) -> str:
