@@ -303,12 +303,23 @@ Step 2 is done apart from per-character settings (alpha clone, allowed activitie
 - Live (2026-11-03): "indy 1" (10 Ishtar + 50 Hulk, priority 1) and "dreadbatch 1" (1 Phoenix, 2 Naglfar, 1 Revelation Navy Issue, priority 2), both reserving. indy 1 claims 16 items (e.g. all 3.67M Mexallon at the D-JVGJ structures); dreadbatch 1 sees them held by indy 1 and claims 50 others. Result in 1.3 s.
 - Not done: results are recomputed on every request (no cache); rule overrides are not yet shown per item in the result (the engine's reason says "rule: <category>" but not whether the plan overrode it; the response lists the overrides beside it).
 
+## Step 4 progress (2026-11-03)
+- `frontend/`: React 19 + TypeScript + Vite 6, Tailwind v4 tokens, TanStack Router + Query, `openapi-fetch` with types generated from the backend's OpenAPI schema (`npm run gen:api`). Base ported from the AT Tool (tokens, primitives, toasts, hooks, shell), with font sizes moved to tokens (`text-label` / `text-ui` / `text-body` / `text-title`) as `docs/ui-design.md` asks. New primitives: `Tabs`, `Why` (a derived value's reason), `SearchPicker` (type-ahead for long lists), `Num` (right-aligned monospace cell).
+- Backend for the frontend: plan result and preview responses are typed from the engine's dataclasses (pydantic reads them directly, so the TypeScript types cover the whole result without duplicate schemas). Lookups: `GET /api/types/search?kind=buildable|structure|rig|any`, `GET /api/types?ids=`, `GET /api/systems/search`.
+- Dev ports: Django on 127.0.0.1:8000; Vite serves the app on localhost:5050 and proxies `/api`, `/auth`, `/callback`, because 5050 is the EVE application's registered callback.
+- Pages:
+  - Plans list (create, active / reserving badges, priority).
+  - Plan view: inline rename, make active, delete. Tabs: Shopping list (with "held by plan X", copy as multibuy), Blueprints (source, ME/TE and station, each with its reason; invention chance and decryptor), Schedule (start, duration, character, station), Cost (totals and per-job fee parts), Progress (placeholder until step 5). Side column: lines editor with item search, settings (reserve, priority, stations, hangars, per-plan rule overrides), warnings.
+  - Setup: characters and ESI status (link, re-link, main, remove), ESI feed status with "refresh now", stations (discover, enable, activities, rigs via search, tax), account build rules.
+- Checked: `tsc`, `eslint` and the production build are clean; Vite compiles every module; the API answers through the Vite proxy with a real session (indy 1 result: 102 jobs in 1.3 s); login redirects to the registered callback. Not checked: rendering in a browser. Headless Chromium in this WSL distro lacks system libraries (`libatk` and others), and the Chrome extension was not connected.
+- Not built: Library and Dashboard pages (they need list endpoints for blueprints and jobs), Playwright tests.
+
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
 1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
 2. **Account + data layer** — account-scoped config, all-character + corp fetches (assets, blueprints, jobs, divisions), role detection, token fix, Postgres. In progress; see Step 2 progress.
 3. **Plans** — model + JSON API, asset reservation. Done; see Step 3 progress.
-4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard.
+4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard. In progress; see Step 4 progress.
 5. **Tracker** — active-plan job matching, progress tab, reservation release.
 6. **BPO/BPC trade-off** — auto-copy to fill slots, opt-in buy BPC / extra BPO with cost vs time shown.
 7. **Sharing** — corp/link visibility.
