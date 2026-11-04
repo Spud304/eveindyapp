@@ -10,6 +10,11 @@ Algorithm:
 4. BUY items are leaves; what is left after assets goes on the shopping list.
 5. Schedule jobs onto characters, then compute fees (alpha tax depends on
    who runs the job).
+6. Auto-copy: for each owned BPO that can be copied, try running it as the BPO
+   plus copies it makes first, all in parallel. A split is kept only if it
+   makes the whole plan finish sooner (by at least MIN_SPLIT_GAIN). Options
+   are compared by re-scheduling only; the chosen splits are then planned
+   again in full, so materials are exact.
 """
 
 from __future__ import annotations
@@ -56,8 +61,21 @@ class PlanError(ValueError):
     pass
 
 
+# A split must make the plan finish at least this much sooner to be kept: each copy costs a
+# copy job fee and a little extra material (materials are rounded per job).
+MIN_SPLIT_GAIN = 3600.0
+
+
 def plan(inp: PlanInput) -> PlanResult:
-    return _Planner(inp).run()
+    base = _Planner(inp)
+    result = base.run()
+    parallel, saved = _search_parallel(base)
+    if not parallel:
+        return result
+    split = _Planner(inp, parallel, saved).run()
+    # Per-job rounding can add a downstream run the search did not see; never return a
+    # slower plan than the one without copies.
+    return split if split.total_seconds < result.total_seconds else result
 
 
 @dataclass(frozen=True)
@@ -79,6 +97,42 @@ class _Spec:
     lock: str | None = None  # blueprint item the job is installed with
 
 
+@dataclass(frozen=True)
+class _CopyPlan:
+    """An owned BPO whose runs could be split across copies of it (see `_bpo_layout`)."""
+
+    prod: _Producer
+    bpo: _Spec  # the BPO's single job, after any ME/TE override
+    runs: int
+    time_mult: float  # station time factor for manufacturing
+    max_per_copy: int  # blueprint max production limit
+    copy_recipe: Recipe
+    copy_station: Station | None
+    copy_bonuses: f.StationBonuses
+    cost_mult: float  # blueprint job cost multiplier
+
+
+def _bpo_layout(cp: _CopyPlan, k: int) -> tuple[list[_Spec], list[int], int]:
+    """Split a BPO's runs into k parallel jobs: the BPO itself plus k - 1 copies it makes
+    first. Returns (manufacturing specs, copies per copy job, runs per copy). Copies get
+    ceil(runs / k) runs each, capped at the blueprint's max production limit; the BPO keeps
+    the rest, at least one run. One copy job's time minus one copy's time may not exceed
+    30 days. [client: job.py RUN_LENGTH check, activities/copying.py]"""
+    per_copy = min(math.ceil(cp.runs / k), cp.max_per_copy)
+    n = min(k - 1, (cp.runs - 1) // per_copy) if k > 1 else 0
+    if n <= 0:
+        return [cp.bpo], [], 0
+    me, te = cp.bpo.me, cp.bpo.te
+    why = Reason(
+        ReasonCode.ME_OWNED_BPO,
+        f"Copy of the owned BPO at ME {me} / TE {te}, made by this plan.",
+    )
+    specs = [replace(cp.bpo, runs=cp.runs - n * per_copy)]
+    specs += [_Spec(per_copy, me, te, BlueprintSource.COPY, why)] * n
+    cap = f.max_runs(Activity.COPYING, cp.copy_recipe.time_seconds * per_copy, cp.copy_bonuses.time)
+    return specs, list(_split(n, cap)), per_copy
+
+
 @dataclass
 class _JobMeta:
     """Output-only job fields kept alongside the schedulable WorkJob."""
@@ -97,8 +151,18 @@ class _JobMeta:
 
 
 class _Planner:
-    def __init__(self, inp: PlanInput):
+    def __init__(
+        self,
+        inp: PlanInput,
+        parallel: dict[TypeId, int] | None = None,
+        saved: dict[TypeId, float] | None = None,
+    ):
         self.inp = inp
+        # Auto-copy: parallel jobs per BPO blueprint, and the seconds each split saves.
+        self.parallel = parallel or {}
+        self.saved = saved or {}
+        self.copy_plans: dict[TypeId, _CopyPlan] = {}
+        self.copy_job_ids: dict[TypeId, list[str]] = {}  # auto-copy jobs by blueprint
         self.types = inp.game.types
         self.warnings: list[PlanWarning] = []
 
@@ -471,65 +535,104 @@ class _Planner:
                 overridden.append(replace(sp, me=new_me, te=new_te, me_reason=why))
             specs = overridden
 
-        # Jobs on an original (BPO, reaction formula, or a BPO you do not own yet) may not
-        # run longer than 30 days; copies are limited only by their runs. [client]
-        split_specs = []
-        for sp in specs:
-            if sp.source in (BlueprintSource.BPO, BlueprintSource.MISSING):
-                te_factor = 1.0 if is_reaction else 1 - sp.te / 100
-                cap = f.max_runs(prod.activity, prod.recipe.time_seconds, te_factor * time_mult)
-                if sp.runs > cap:
-                    source_notes.append(
-                        f"split into jobs of at most {cap} runs (30-day job limit, before skills)"
-                    )
-                split_specs.extend(replace(sp, runs=chunk) for chunk in _split(sp.runs, cap))
-            else:
-                split_specs.append(sp)
-        specs = split_specs
         bp_data = self.inp.game.blueprints.get(bp_id)
         bp_cost_mult = bp_data.job_cost_multiplier if bp_data else 1.0
 
-        job_ids = []
-        for i, sp in enumerate(specs, 1):
-            r, me, te, src, why = sp.runs, sp.me, sp.te, sp.source, sp.me_reason
-            job_id = f"{prod.activity.value}:{bp_id}:{i}"
-            mats = f.job_materials(prod.recipe.materials, r, me, mat_mult)
-            te_factor = 1.0 if is_reaction else 1 - te / 100
-            work = WorkJob(
-                job_id=job_id,
-                activity=prod.activity,
-                blueprint_type_id=bp_id,
-                runs=r,
-                time_per_run=prod.recipe.time_seconds,
-                time_multiplier=te_factor * time_mult,
-                skills=prod.recipe.skills,
-                dep_items={m.type_id for m in mats},
-                skill_time_bonuses=self.inp.game.skill_time_bonuses,
-                lock=sp.lock,
+        # Auto-copy: an owned BPO that can be copied is a candidate for the split search.
+        copy_parts: list[int] = []
+        per_copy = 0
+        cp = None
+        if bpos and not is_reaction and bp_data and bp_data.copying and runs > 1:
+            copy_station, copy_bonuses, _ = self.choose_station(Activity.COPYING, None, bp_id)
+            cp = _CopyPlan(
+                prod=prod,
+                bpo=specs[0],
+                runs=runs,
+                time_mult=time_mult,
+                max_per_copy=max(1, bp_data.max_production_limit),
+                copy_recipe=bp_data.copying,
+                copy_station=copy_station,
+                copy_bonuses=copy_bonuses,
+                cost_mult=bp_cost_mult,
             )
-            if src == BlueprintSource.INVENTION:
-                work.depends_on.extend(invention_job_ids)
+            self.copy_plans[bp_id] = cp
+            if self.parallel.get(bp_id, 1) > 1:
+                one_job = self.split_long(prod, specs, time_mult, [])
+                specs, copy_parts, per_copy = _bpo_layout(cp, self.parallel[bp_id])
+
+        specs = self.split_long(prod, specs, time_mult, source_notes)
+
+        copy_ids = []
+        for n, copies in enumerate(copy_parts, 1):
+            assert cp is not None
+            work = self.copy_work(bp_id, n, cp, per_copy, copies)
             self.add_job(
                 work,
                 _JobMeta(
-                    me=me,
-                    te=te,
-                    me_reason=why,
-                    source=src,
+                    me=cp.bpo.me,
+                    te=cp.bpo.te,
+                    me_reason=Reason(
+                        ReasonCode.SOURCE_BPO,
+                        f"Copies of the owned BPO so {len(specs) - 1} more jobs run in parallel.",
+                    ),
+                    source=BlueprintSource.BPO,
+                    station=cp.copy_station,
+                    materials=(),
+                    product_type_id=bp_id,
+                    product_quantity=copies,
+                    eiv_materials=prod.recipe.materials,
+                    cost_multiplier=cp.copy_bonuses.cost * bp_cost_mult,
+                    base_share=c.COST_PERCENTAGE,
+                ),
+            )
+            copy_ids.append(work.job_id)
+
+        job_ids = list(copy_ids)
+        for i, sp in enumerate(specs, 1):
+            mats = f.job_materials(prod.recipe.materials, sp.runs, sp.me, mat_mult)
+            work = self.mfg_work(
+                prod, sp, f"{prod.activity.value}:{bp_id}:{i}", time_mult, {m.type_id for m in mats}
+            )
+            if sp.source == BlueprintSource.INVENTION:
+                work.depends_on.extend(invention_job_ids)
+            if sp.source in (BlueprintSource.BPO, BlueprintSource.COPY):
+                work.depends_on.extend(copy_ids)
+            self.add_job(
+                work,
+                _JobMeta(
+                    me=sp.me,
+                    te=sp.te,
+                    me_reason=sp.me_reason,
+                    source=sp.source,
                     station=station,
                     materials=mats,
                     product_type_id=product_type_id,
-                    product_quantity=r * (prod.recipe.product_quantity or 1),
+                    product_quantity=sp.runs * (prod.recipe.product_quantity or 1),
                     eiv_materials=prod.recipe.materials,
                     cost_multiplier=bonuses.cost * bp_cost_mult,
                 ),
             )
-            job_ids.append(job_id)
+            job_ids.append(work.job_id)
+
+        if copy_parts:
+            n_copies = sum(copy_parts)
+            note = (
+                f"{n_copies} {_plural(n_copies, 'copy', 'copies')} of {per_copy} "
+                f"{_plural(per_copy, 'run', 'runs')} made first, "
+                f"so {n_copies + 1} jobs run in parallel: the plan finishes "
+                f"{_duration(self.saved.get(bp_id, 0.0))} sooner than with the BPO alone"
+            )
+            extra = self.extra_materials(prod, specs, one_job, mat_mult)
+            if extra:
+                note += f"; per-job rounding uses {extra}"
+            source_notes.append(note)
+            self.copy_job_ids[bp_id] = copy_ids
 
         sources = tuple(dict.fromkeys(sp.source for sp in specs))
         code = {
             BlueprintSource.BPO: ReasonCode.SOURCE_BPO,
             BlueprintSource.BPC: ReasonCode.SOURCE_BPC,
+            BlueprintSource.COPY: ReasonCode.SOURCE_COPY,
             BlueprintSource.INVENTION: ReasonCode.SOURCE_INVENTION,
             BlueprintSource.MISSING: ReasonCode.SOURCE_MISSING,
         }[sources[-1]]
@@ -541,12 +644,95 @@ class _Planner:
                 product_type_id=product_type_id,
                 runs=runs,
                 sources=sources,
-                source_reason=Reason(code, "; ".join(source_notes).capitalize() + "."),
+                source_reason=Reason(code, _sentence("; ".join(source_notes))),
                 station=station_choice,
                 job_ids=tuple(job_ids + invention_job_ids),
                 invention=invention,
             )
         )
+
+    def split_long(
+        self, prod: _Producer, specs: list[_Spec], time_mult: float, notes: list[str]
+    ) -> list[_Spec]:
+        """Jobs on an original (BPO, reaction formula, or a BPO you do not own yet) may not run
+        longer than 30 days; copies are limited only by their runs. [client]"""
+        is_reaction = prod.activity == Activity.REACTION
+        out = []
+        for sp in specs:
+            if sp.source in (BlueprintSource.BPO, BlueprintSource.MISSING):
+                te_factor = 1.0 if is_reaction else 1 - sp.te / 100
+                cap = f.max_runs(prod.activity, prod.recipe.time_seconds, te_factor * time_mult)
+                if sp.runs > cap:
+                    notes.append(
+                        f"split into jobs of at most {cap} runs (30-day job limit, before skills)"
+                    )
+                out.extend(replace(sp, runs=chunk) for chunk in _split(sp.runs, cap))
+            else:
+                out.append(sp)
+        return out
+
+    def mfg_work(
+        self, prod: _Producer, sp: _Spec, job_id: str, time_mult: float, dep_items: set[TypeId]
+    ) -> WorkJob:
+        te_factor = 1.0 if prod.activity == Activity.REACTION else 1 - sp.te / 100
+        return WorkJob(
+            job_id=job_id,
+            activity=prod.activity,
+            blueprint_type_id=prod.blueprint_type_id,
+            runs=sp.runs,
+            time_per_run=prod.recipe.time_seconds,
+            time_multiplier=te_factor * time_mult,
+            skills=prod.recipe.skills,
+            dep_items=dep_items,
+            skill_time_bonuses=self.inp.game.skill_time_bonuses,
+            lock=sp.lock,
+        )
+
+    def copy_work(self, bp_id: TypeId, n: int, cp: _CopyPlan, per_copy: int, copies: int):
+        return WorkJob(
+            job_id=f"copying:{bp_id}:{n}",
+            activity=Activity.COPYING,
+            blueprint_type_id=bp_id,
+            runs=per_copy,
+            copies=copies,
+            time_per_run=cp.copy_recipe.time_seconds,
+            time_multiplier=cp.copy_bonuses.time,
+            skills=cp.copy_recipe.skills,
+            lock=cp.bpo.lock,
+        )
+
+    def trial_jobs(self, bp_id: TypeId, k: int) -> list[WorkJob]:
+        """Copy and manufacturing jobs for one BPO split k ways, for timing only: item
+        dependencies are left in `dep_items` for the caller to resolve."""
+        cp = self.copy_plans[bp_id]
+        specs, parts, per_copy = _bpo_layout(cp, k)
+        specs = self.split_long(cp.prod, specs, cp.time_mult, [])
+        copies = [self.copy_work(bp_id, n, cp, per_copy, x) for n, x in enumerate(parts, 1)]
+        dep_items = {m.type_id for m in cp.prod.recipe.materials}
+        out = list(copies)
+        for i, sp in enumerate(specs, 1):
+            job_id = f"{cp.prod.activity.value}:{bp_id}:{i}"
+            work = self.mfg_work(cp.prod, sp, job_id, cp.time_mult, dep_items)
+            work.depends_on.extend(j.job_id for j in copies)
+            out.append(work)
+        return out
+
+    def extra_materials(self, prod, specs, one_job, mat_mult) -> str:
+        """Material used by the split jobs beyond the unsplit BPO jobs, as text."""
+        extra: dict[TypeId, int] = defaultdict(int)
+        for sign, group in ((1, specs), (-1, one_job)):
+            for sp in group:
+                for m in f.job_materials(prod.recipe.materials, sp.runs, sp.me, mat_mult):
+                    extra[m.type_id] += sign * m.quantity
+        extra = {t: q for t, q in extra.items() if q > 0}
+        if not extra:
+            return ""
+        units = sum(extra.values())
+        prices = [self.price(t) for t in extra]
+        if all(p is not None for p in prices):
+            isk = sum(q * (self.price(t) or 0.0) for t, q in extra.items())
+            return f"{units:,} more units of materials ({isk:,.0f} ISK)"
+        return f"{units:,} more units of materials"
 
     # -- invention -----------------------------------------------------------
 
@@ -835,6 +1021,7 @@ class _Planner:
             t: row for t, row in self.item_rows.items() if row.line_quantity or row.input_quantity
         }
         jobs = [self.freeze(j) for j in sorted(self.jobs, key=lambda j: (j.start, j.job_id))]
+        self.add_copy_fees(jobs)
         shopping = self.shopping_list()
         return PlanResult(
             items=tuple(sorted(self.item_rows.values(), key=lambda i: (i.name, i.type_id))),
@@ -845,6 +1032,19 @@ class _Planner:
             total_seconds=total,
             warnings=tuple(self.warnings),
         )
+
+    def add_copy_fees(self, jobs: list[PlannedJob]) -> None:
+        """Fees are known only after scheduling (alpha tax depends on who runs the job), so
+        the auto-copy fee is added to the blueprint's reason here."""
+        fees = {j.job_id: j.cost.fee for j in jobs}
+        for i, b in enumerate(self.bp_plans):
+            ids = self.copy_job_ids.get(b.type_id)
+            if not ids:
+                continue
+            parts = [fees[x] for x in ids]
+            fee = "unknown" if None in parts else f"{sum(p or 0.0 for p in parts):,.0f} ISK"
+            text = b.source_reason.text.removesuffix(".") + f"; copy job fee {fee}."
+            self.bp_plans[i] = replace(b, source_reason=Reason(b.source_reason.code, text))
 
     def freeze(self, job: WorkJob) -> PlannedJob:
         meta = self.meta[job.job_id]
@@ -956,6 +1156,100 @@ class _Planner:
             total=materials + invention + sum(fees.values()),
             unpriced_type_ids=tuple(sorted(unpriced)),
         )
+
+
+def _search_parallel(base: _Planner) -> tuple[dict[TypeId, int], dict[TypeId, float]]:
+    """Greedy split search over the base plan's copyable BPOs, longest first. For each, try
+    2, 3, ... parallel jobs (up to its runs and the total manufacturing slots), stopping
+    after two tries in a row that do not finish sooner than the best so far. The best is
+    kept if it makes the plan finish at least MIN_SPLIT_GAIN sooner. Repeats while a pass
+    changes something (at most 3 passes).
+    Returns (parallel jobs by blueprint, seconds the plan would lose without each split)."""
+    if not base.copy_plans:
+        return {}, {}
+    slots = sum(
+        f.slots(ch, Activity.MANUFACTURING)
+        for ch in base.inp.characters
+        if Activity.MANUFACTURING in ch.activities
+    )
+    if slots < 2:
+        return {}, {}
+    old_ids: dict[TypeId, list[str]] = defaultdict(list)
+    length: dict[TypeId, float] = defaultdict(float)
+    for j in base.jobs:
+        if j.blueprint_type_id in base.copy_plans and j.activity == Activity.MANUFACTURING:
+            old_ids[j.blueprint_type_id].append(j.job_id)
+            length[j.blueprint_type_id] += j.duration(None)
+
+    def total(parallel: dict[TypeId, int]) -> float:
+        new: list[WorkJob] = []
+        mapping: dict[str, list[str]] = {}
+        for bp_id, k in parallel.items():
+            jobs = base.trial_jobs(bp_id, k)
+            new.extend(jobs)
+            ids = [j.job_id for j in jobs if j.activity == Activity.MANUFACTURING]
+            for old in old_ids[bp_id]:
+                mapping[old] = ids
+
+        def expand(ids):
+            return list(dict.fromkeys(x for i in ids for x in mapping.get(i, [i])))
+
+        jobs = [
+            replace(j, depends_on=expand(j.depends_on))
+            for j in base.jobs
+            if j.job_id not in mapping
+        ]
+        for j in new:
+            deps = list(j.depends_on)
+            for item in sorted(j.dep_items):
+                deps.extend(base.jobs_by_product.get(item, []))
+            jobs.append(replace(j, depends_on=expand(deps)))
+        return schedule(jobs, base.inp.characters)
+
+    parallel: dict[TypeId, int] = {}
+    best = total(parallel)
+    order = sorted(base.copy_plans, key=lambda bp_id: (-length[bp_id], bp_id))
+    for _ in range(3):
+        changed = False
+        for bp_id in order:
+            k0 = parallel.get(bp_id, 1)
+            best_k, best_t, misses = k0, best, 0
+            for k in range(k0 + 1, min(base.copy_plans[bp_id].runs, slots) + 1):
+                t = total({**parallel, bp_id: k})
+                if t < best_t:
+                    best_k, best_t, misses = k, t, 0
+                else:
+                    misses += 1
+                    if misses >= 2:
+                        break
+            if best_k != k0 and best_t <= best - MIN_SPLIT_GAIN:
+                parallel[bp_id], best, changed = best_k, best_t, True
+        if not changed:
+            break
+    saved = {
+        bp_id: total({b: k for b, k in parallel.items() if b != bp_id}) - best for bp_id in parallel
+    }
+    return parallel, saved
+
+
+def _duration(seconds: float) -> str:
+    minutes = round(seconds / 60)
+    d, rest = divmod(minutes, 24 * 60)
+    h, m = divmod(rest, 60)
+    if d:
+        return f"{d}d {h}h"
+    if h:
+        return f"{h}h {m}m"
+    return f"{m}m"
+
+
+def _sentence(text: str) -> str:
+    """First letter upper case, the rest as written (str.capitalize lowercases "BPO")."""
+    return text[:1].upper() + text[1:] + "."
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return one if n == 1 else many
 
 
 def _best_bpo(bpos: list[OwnedBlueprint]) -> OwnedBlueprint:

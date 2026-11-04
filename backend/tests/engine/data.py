@@ -100,6 +100,7 @@ BLUEPRINTS = {
             BP_HULL,
             10,
             manufacturing=_mfg(HULL, 1, [(COMP_A, 7), (TRIT, 100)], time=1000),
+            copying=Recipe(time_seconds=800),
         ),
         BlueprintData(BP_HULL_B, 10, manufacturing=_mfg(HULL_B, 1, [(COMP_A, 5), (MEX, 50)])),
         BlueprintData(BP_FUEL, 100, manufacturing=_mfg(FUEL, 40, [(TRIT, 10)])),

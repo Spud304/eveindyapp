@@ -3,6 +3,8 @@ from itertools import pairwise
 import pytest
 
 from engine import PlanError, plan
+from engine.formulas import StationBonuses
+from engine.planner import _bpo_layout, _CopyPlan, _Spec
 from engine.types import (
     Activity,
     BlueprintChoice,
@@ -542,6 +544,91 @@ def test_required_skill_shortens_manufacturing_time():
     )
     job = jobs_for(r, BP_COMP_A)[0]
     assert job.schedule.end_seconds == pytest.approx(100 * 10 * 0.95)
+
+
+# --- auto-copy -----------------------------------------------------------------
+
+FIVE_MFG_SLOTS = {3387: 4}
+
+
+def test_auto_copy_while_the_bpo_waits_for_inputs():
+    # Comp A: 70 runs x 100 s = 7000 s on one BPO. Unsplit, the hull starts after it:
+    # 7000 + 10 x 1000 = 17000 s. Split 5 ways, the BPO copies 4 x 2 runs (4 x 2 x 800 =
+    # 6400 s) while Comp A builds, then 5 jobs of 2 runs finish at 7000 + 2000 = 9000 s.
+    r = plan(
+        make_input(
+            [(HULL, 10)],
+            blueprints=(bpo(BP_HULL), bpo(BP_COMP_A)),
+            characters=(character(skills=FIVE_MFG_SLOTS),),
+        )
+    )
+    assert r.total_seconds == 9000
+    [copy] = jobs_for(r, BP_HULL, Activity.COPYING)
+    assert (copy.copies, copy.runs, copy.schedule.start_seconds) == (4, 2, 0)
+    assert copy.cost.base == 0  # no adjusted prices in this input
+    mfg = jobs_for(r, BP_HULL, Activity.MANUFACTURING)
+    assert sorted(j.source for j in mfg) == [BlueprintSource.BPO] + [BlueprintSource.COPY] * 4
+    assert all(j.runs == 2 and j.schedule.start_seconds == 7000 for j in mfg)
+    assert all(copy.job_id in j.depends_on for j in mfg)
+    plan_bp = bp(r, BP_HULL)
+    assert plan_bp.sources == (BlueprintSource.BPO, BlueprintSource.COPY)
+    assert plan_bp.source_reason.code == ReasonCode.SOURCE_COPY
+    assert "4 copies of 2 runs" in plan_bp.source_reason.text
+    assert "finishes 2h 13m sooner" in plan_bp.source_reason.text  # 17000 - 9000 s
+    assert plan_bp.source_reason.text.endswith("; copy job fee unknown.")  # no station
+
+
+def test_no_auto_copy_when_the_saving_is_small():
+    # Inputs are bought, so the BPO could start at once. Unsplit: 10000 s. The best split
+    # (5 runs copied in 4000 s, then 5 + 5 runs) ends at 9000 s: under an hour saved.
+    r = plan(
+        make_input(
+            [(HULL, 10)],
+            blueprints=(bpo(BP_HULL),),
+            characters=(character(skills=FIVE_MFG_SLOTS),),
+            rules=BuildRules(item_blacklist=frozenset({COMP_A})),
+        )
+    )
+    assert r.total_seconds == 10000
+    assert jobs_for(r, BP_HULL, Activity.COPYING) == []
+    assert [j.source for j in jobs_for(r, BP_HULL)] == [BlueprintSource.BPO]
+
+
+def test_no_auto_copy_with_one_manufacturing_slot():
+    r = plan(make_input([(HULL, 10)], blueprints=(bpo(BP_HULL), bpo(BP_COMP_A))))
+    assert jobs_for(r, BP_HULL, Activity.COPYING) == []
+    assert r.total_seconds == 17000
+
+
+def test_no_auto_copy_for_owned_bpcs():
+    r = plan(
+        make_input(
+            [(HULL, 10)],
+            blueprints=(bpc(BP_HULL, 10), bpo(BP_COMP_A)),
+            characters=(character(skills=FIVE_MFG_SLOTS),),
+        )
+    )
+    assert jobs_for(r, BP_HULL, Activity.COPYING) == []
+
+
+def test_copy_job_layout_respects_thirty_days_per_copy():
+    # 1 day per copied run, 10 runs per copy: one job may hold ceil(30 / 10) = 3 copies.
+    cp = _CopyPlan(
+        prod=None,
+        bpo=_Spec(200, 10, 20, BlueprintSource.BPO, None, "item:1"),
+        runs=200,
+        time_mult=1.0,
+        max_per_copy=10,
+        copy_recipe=Recipe(time_seconds=86400),
+        copy_station=None,
+        copy_bonuses=StationBonuses(1.0, 1.0, 1.0, ""),
+        cost_mult=1.0,
+    )
+    specs, parts, per_copy = _bpo_layout(cp, 20)
+    assert per_copy == 10
+    assert parts == [3, 3, 3, 3, 3, 3, 1]
+    assert specs[0].runs == 200 - 19 * 10 and specs[0].lock == "item:1"
+    assert all(sp.source == BlueprintSource.COPY and sp.runs == 10 for sp in specs[1:])
 
 
 # --- schedule ------------------------------------------------------------------

@@ -664,7 +664,7 @@ export interface components {
          * BlueprintSource
          * @enum {string}
          */
-        BlueprintSource: "bpo" | "bpc" | "invention" | "missing";
+        BlueprintSource: "bpo" | "bpc" | "copy" | "invention" | "missing";
         /** CostSummary */
         CostSummary: {
             /** Materials */
@@ -884,7 +884,7 @@ export interface components {
          * ReasonCode
          * @enum {string}
          */
-        ReasonCode: "plan_line" | "build_component" | "buy_no_blueprint" | "buy_blacklist" | "buy_rule" | "buy_invention_input" | "line_not_buildable" | "me_override" | "me_owned_bpo" | "me_owned_bpc" | "me_invented" | "me_reaction" | "me_missing_blueprint" | "source_bpo" | "source_bpc" | "source_invention" | "source_missing" | "station_best" | "station_none" | "decryptor_chosen" | "decryptor_auto" | "scheduled" | "unscheduled_no_character" | "fee_computed" | "fee_not_modelled" | "price_missing";
+        ReasonCode: "plan_line" | "build_component" | "buy_no_blueprint" | "buy_blacklist" | "buy_rule" | "buy_invention_input" | "line_not_buildable" | "me_override" | "me_owned_bpo" | "me_owned_bpc" | "me_invented" | "me_reaction" | "me_missing_blueprint" | "source_bpo" | "source_bpc" | "source_copy" | "source_invention" | "source_missing" | "station_best" | "station_none" | "decryptor_chosen" | "decryptor_auto" | "scheduled" | "unscheduled_no_character" | "fee_computed" | "fee_not_modelled" | "price_missing";
         /** ScheduledSlot */
         ScheduledSlot: {
             /** Character Id */

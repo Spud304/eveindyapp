@@ -76,6 +76,7 @@ class ReasonCode(StrEnum):
     # Blueprint source
     SOURCE_BPO = "source_bpo"
     SOURCE_BPC = "source_bpc"
+    SOURCE_COPY = "source_copy"
     SOURCE_INVENTION = "source_invention"
     SOURCE_MISSING = "source_missing"
     # Station
@@ -349,6 +350,7 @@ class ItemDecision(StrEnum):
 class BlueprintSource(StrEnum):
     BPO = "bpo"
     BPC = "bpc"
+    COPY = "copy"  # copied from an owned BPO by this plan, to run jobs in parallel
     INVENTION = "invention"
     MISSING = "missing"
 

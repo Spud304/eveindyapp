@@ -6,7 +6,7 @@ import { Badge, Button, Empty, Mono, Num, Panel, Table, Why } from '@/components
 
 export type Lookups = { characters: Map<number, string>; stations: Map<number, string> }
 
-const SOURCE_TONE = { bpo: 'ok', bpc: 'info', invention: 'accent', missing: 'bad' } as const
+const SOURCE_TONE = { bpo: 'ok', bpc: 'info', copy: 'info', invention: 'accent', missing: 'bad' } as const
 
 function names(data: PlanResultOut) {
   const r = data.result!
