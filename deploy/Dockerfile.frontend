@@ -1,0 +1,12 @@
+# Frontend image: the built React app served by Caddy, which also proxies the backend paths to
+# `web` and handles TLS. Adapted from the AT Tool's deploy/Dockerfile.frontend.
+FROM node:24-alpine AS build
+WORKDIR /src
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npx vite build
+
+FROM caddy:2-alpine
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /src/dist /srv/dist

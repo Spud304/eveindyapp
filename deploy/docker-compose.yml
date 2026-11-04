@@ -1,12 +1,12 @@
-# Production stack for the new backend. The frontend and Caddy (TLS) come with step 4; until
-# then `web` listens on 127.0.0.1:8000 only. Settings: deploy/.env (see .env.example).
+# Production stack: Caddy (frontend + TLS, proxies the backend paths to `web`), the Django app,
+# a Celery worker for on-demand syncs, the cron scheduler, Postgres and Redis.
+# Settings: deploy/.env (see .env.example).
 name: eveindy
 
+# web, worker and scheduler run one image. Only `web` builds it: three services building the same
+# image at once collide (containerd "parent snapshot does not exist" while exporting).
 x-backend: &backend
   image: eveindy-backend:${APP_VERSION:-dev}
-  build:
-    context: ..
-    dockerfile: deploy/Dockerfile.backend
   restart: unless-stopped
   env_file: .env
   environment:
@@ -17,9 +17,34 @@ x-backend: &backend
     - instance:/app/instance
 
 services:
+  caddy:
+    image: eveindy-frontend:${APP_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Let's Encrypt account email (expiry notices). Caddy will not start without one.
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/.env}
+      SITE_ADDRESS: ${SITE_ADDRESS:-${DOMAIN}}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
   web:
     <<: *backend
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
     command: ["/app/deploy/entrypoint.sh", "web"]
+    # Reached through Caddy; published on loopback only for debugging on the host.
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -73,3 +98,5 @@ services:
 volumes:
   pgdata:
   instance:
+  caddy_data:
+  caddy_config:
