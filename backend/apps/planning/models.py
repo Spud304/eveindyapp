@@ -69,8 +69,8 @@ class Visibility(models.TextChoices):
 
 
 class Plan(models.Model):
-    """A named set of lines to build, with its own settings. Sharing (visibility) is stored
-    now and enforced in step 7.
+    """A named set of lines to build, with its own settings. Visibility: private, corp
+    (members of `share_corporation_id` who log in) or link (anyone with the share token).
 
     Build rule overrides flip the account defaults for this plan only:
     `blacklist_add` / `blacklist_remove` are type ids; `category_overrides` maps an engine
@@ -92,6 +92,10 @@ class Plan(models.Model):
     visibility = models.CharField(
         max_length=16, choices=Visibility.choices, default=Visibility.PRIVATE
     )
+    # Sharing (step 7). Link visibility: the secret in /shared/<token>; a new one revokes the
+    # old. Corp visibility: the corporation whose members may view (None: the owner's main's).
+    share_token = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    share_corporation_id = models.BigIntegerField(null=True, blank=True)
     blacklist_add = models.JSONField(default=list, blank=True)
     blacklist_remove = models.JSONField(default=list, blank=True)
     category_overrides = models.JSONField(default=dict, blank=True)

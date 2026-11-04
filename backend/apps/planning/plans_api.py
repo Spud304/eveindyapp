@@ -19,7 +19,7 @@ from apps.sde.models import BlueprintProduct, EveType
 from engine import BlueprintOptions, purchase_options
 from engine.types import Activity, BuildCategory, PlanResult
 
-from . import reservation, tracker
+from . import reservation, sharing, tracker
 from .models import JobLink, LinkSource, Plan, PlanLine, Visibility
 
 router = Router(tags=["plans"])
@@ -64,6 +64,7 @@ class PlanSettings(Schema):
     station_ids: list[int] | None = None
     extra_location_ids: list[int] | None = None
     hangar_flags: list[str] | None = None
+    share_corporation_id: int | None = None
 
 
 class PlanCreate(Schema):
@@ -94,6 +95,8 @@ class PlanOut(PlanSummary):
     station_ids: list[int]
     extra_location_ids: list[int]
     hangar_flags: list[str]
+    share_token: str | None  # link visibility: the plan is at /shared/<share_token>
+    share_corporation_id: int | None  # corp visibility: None means the owner's main's corp
 
 
 def _user(request: HttpRequest) -> User:
@@ -142,6 +145,8 @@ def _out(p: Plan) -> dict:
         "station_ids": p.station_ids,
         "extra_location_ids": p.extra_location_ids,
         "hangar_flags": p.hangar_flags,
+        "share_token": p.share_token,
+        "share_corporation_id": p.share_corporation_id,
     }
 
 
@@ -209,6 +214,34 @@ def _set_lines(p: Plan, lines: list[LineIO]) -> None:
     PlanLine.objects.bulk_create(rows)
 
 
+class SharedSummary(Schema):
+    id: int
+    name: str
+    owner_name: str
+    updated_at: datetime
+
+
+class CorporationOption(Schema):
+    id: int
+    name: str
+
+
+@router.get("/plans/shared-with-me", response=list[SharedSummary])
+def shared_with_me(request: HttpRequest):
+    """Other accounts' plans shared with one of your corporations."""
+    return [
+        {"id": p.pk, "name": p.name, "owner_name": p.user.display_name, "updated_at": p.updated_at}
+        for p in sharing.corp_plans(_user(request))
+    ]
+
+
+# Before "/plans/{plan_id}": ninja matches the path before checking that the id is a number.
+@router.get("/plans/corporations", response=list[CorporationOption])
+def plan_corporations(request: HttpRequest):
+    """Corporations your characters are in: who corp visibility can share with."""
+    return sharing.corporation_options(_user(request))
+
+
 @router.get("/plans", response=list[PlanSummary])
 def list_plans(request: HttpRequest):
     return [_summary(p) for p in _user(request).plans.all()]
@@ -247,6 +280,11 @@ def edit_plan(request: HttpRequest, plan_id: int, body: PlanSettings):
         }
     if "choices" in data:
         data["choices"] = {str(k): v for k, v in data["choices"].items()}
+    corp = data.get("share_corporation_id")
+    if corp is not None and corp not in sharing.owner_corporations(_user(request)):
+        raise HttpError(422, "none of your characters is in that corporation")
+    if data.get("visibility") == Visibility.LINK and not p.share_token:
+        data["share_token"] = sharing.new_token()
     for key in ("blacklist_add", "blacklist_remove"):
         if key in data:
             _check_types(data[key])
@@ -405,6 +443,12 @@ def plan_progress(request: HttpRequest, plan_id: int):
     if p.is_active:
         tracker.match(user, data)
     run = reservation.run_plans(user, [p], data)[p.pk]
+    return progress_data(user, p, data, run, candidates=True)
+
+
+def progress_data(user: User, p: Plan, data, run, candidates: bool) -> dict:
+    """Progress rows and linked jobs for a plan of `user`; `candidates` adds the unlinked
+    recent jobs offered for linking (owner only)."""
     base = tracker.base_result(p, data)
     keys = tracker.plan_keys(base) if base else set()
     now = timezone.now()
@@ -464,9 +508,17 @@ def plan_progress(request: HttpRequest, plan_id: int):
             }
         )
 
+    if not candidates:
+        return {
+            "active": p.is_active,
+            "activated_at": p.activated_at,
+            "rows": rows,
+            "jobs": [{**rows_by_job[ln.job_id], "source": ln.source} for ln in links],
+            "candidates": [],
+        }
     linked_ids = JobLink.objects.filter(user=user, plan__isnull=False).values("job_id")
     since = now - timedelta(days=CANDIDATE_DAYS)
-    candidates = [
+    offered = [
         j
         for j in IndustryJob.objects.filter(owner_q(user, Feed.JOBS), start_date__gte=since)
         .exclude(status__in=tracker.DEAD)
@@ -479,7 +531,7 @@ def plan_progress(request: HttpRequest, plan_id: int):
         "activated_at": p.activated_at,
         "rows": rows,
         "jobs": [{**rows_by_job[ln.job_id], "source": ln.source} for ln in links],
-        "candidates": describe_jobs(user, candidates[:100], now),
+        "candidates": describe_jobs(user, offered[:100], now),
     }
 
 
@@ -520,3 +572,56 @@ def unlink_job(request: HttpRequest, plan_id: int, job_id: int):
     link.source = LinkSource.MANUAL
     link.save(update_fields=["plan", "source", "updated_at"])
     return plan_progress(request, plan_id)
+
+
+# --- sharing (step 7) ----------------------------------------------------------------------
+
+
+class SharedLine(Schema):
+    type_id: int
+    name: str
+    quantity: int
+
+
+class SharedPlanOut(Schema):
+    """A plan as a viewer sees it. Link viewers get aliases for stations and characters
+    (`anonymized`), and `plan_id` / `owner_name` are left out."""
+
+    plan_id: int | None
+    name: str
+    owner_name: str | None
+    anonymized: bool
+    lines: list[SharedLine]
+    error: str
+    result: PlanResult | None
+    progress: ProgressOut
+    stations: dict[int, str]
+    characters: dict[int, str]
+
+
+@router.get("/shared/{token}", auth=None, response=SharedPlanOut)
+def shared_by_link(request: HttpRequest, token: str):
+    """A plan shared by link: no login needed."""
+    p = sharing.by_token(token)
+    if p is None:
+        raise HttpError(404, "no plan is shared with this link")
+    return sharing.view(p, anonymize=True)
+
+
+@router.get("/plans/{plan_id}/view", response=SharedPlanOut)
+def view_plan(request: HttpRequest, plan_id: int):
+    """The read-only view: for corp members of a corp-shared plan, and for the owner as a
+    preview. Anyone else gets 404, so a plan's existence does not leak."""
+    p = Plan.objects.filter(pk=plan_id).select_related("user__main_character").first()
+    if p is None or not sharing.can_view(_user(request), p):
+        raise HttpError(404, "Not Found")
+    return sharing.view(p, anonymize=False)
+
+
+@router.post("/plans/{plan_id}/share-link", response=PlanOut)
+def new_share_link(request: HttpRequest, plan_id: int):
+    """A new link for the plan; the old one stops working."""
+    p = _plan(request, plan_id)
+    p.share_token = sharing.new_token()
+    p.save(update_fields=["share_token", "updated_at"])
+    return _out(p)
