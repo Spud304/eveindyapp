@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 
 from . import constants as c
 from . import formulas as f
+from .pricing import unpriced_warning
 from .schedule import WorkJob, schedule
 from .types import (
     Activity,
@@ -194,22 +195,36 @@ class _Planner:
 
         self.producers: dict[TypeId, _Producer] = {}
         self.invented_from: dict[TypeId, tuple[TypeId, Recipe]] = {}
-        reaction_inputs: set[TypeId] = set()
+        # When several blueprints make one product, the choice must not depend on the order
+        # game data was loaded in: published first, then manufacturing before reaction, then
+        # the lowest type id.
+        makers: list[tuple[tuple[bool, int, TypeId], TypeId, _Producer]] = []
         for bp in inp.game.blueprints.values():
-            if bp.manufacturing and bp.manufacturing.product_type_id is not None:
-                self.producers[bp.manufacturing.product_type_id] = _Producer(
-                    bp.type_id, Activity.MANUFACTURING, bp.manufacturing
-                )
+            for rank, activity, recipe in (
+                (0, Activity.MANUFACTURING, bp.manufacturing),
+                (1, Activity.REACTION, bp.reaction),
+            ):
+                if recipe and recipe.product_type_id is not None:
+                    makers.append(
+                        (
+                            (not bp.published, rank, bp.type_id),
+                            recipe.product_type_id,
+                            _Producer(bp.type_id, activity, recipe),
+                        )
+                    )
+        for _, product, producer in sorted(makers, key=lambda m: m[0]):
+            self.producers.setdefault(product, producer)
+        for bp in sorted(inp.game.blueprints.values(), key=lambda b: (not b.published, b.type_id)):
             for inv in bp.invention:
                 if inv.product_type_id is not None:
-                    self.invented_from[inv.product_type_id] = (bp.type_id, inv)
-            if bp.reaction:
-                reaction_inputs.update(m.type_id for m in bp.reaction.materials)
-        for bp in inp.game.blueprints.values():
-            r = bp.reaction
-            if r and r.product_type_id is not None and r.product_type_id not in self.producers:
-                self.producers[r.product_type_id] = _Producer(bp.type_id, Activity.REACTION, r)
-        self.reaction_inputs = reaction_inputs
+                    self.invented_from.setdefault(inv.product_type_id, (bp.type_id, inv))
+        # Only the formulas actually chosen decide what counts as a reaction input.
+        self.reaction_inputs: set[TypeId] = {
+            m.type_id
+            for p in self.producers.values()
+            if p.activity == Activity.REACTION
+            for m in p.recipe.materials
+        }
 
         self.owned: dict[TypeId, list[OwnedBlueprint]] = defaultdict(list)
         # Originals already in a job are free when that job ends; their planned jobs wait.
@@ -244,6 +259,13 @@ class _Planner:
     def name(self, type_id: TypeId) -> str:
         t = self.types.get(type_id)
         return t.name if t else f"Type {type_id}"
+
+    def reverse_engineered(self, t2_bp_id: TypeId) -> bool:
+        """Made by invention from a relic: a source with invention but nothing to copy or
+        build (relics have only the invention activity in the SDE). [SDE]"""
+        source = self.invented_from.get(t2_bp_id)
+        data = self.inp.game.blueprints.get(source[0]) if source else None
+        return bool(data and data.copying is None and data.manufacturing is None)
 
     def warn(self, code: ReasonCode, text: str) -> None:
         self.warnings.append(PlanWarning(code, text))
@@ -612,7 +634,14 @@ class _Planner:
                     source_notes.append(_job_note(b))
             remaining = 0
 
-        if remaining > 0 and not is_reaction and bp_id in self.invented_from:
+        if remaining > 0 and not is_reaction and self.reverse_engineered(bp_id):
+            # T3 blueprints come from relics, which are consumed items, not blueprints to copy.
+            self.warn(
+                ReasonCode.SOURCE_MISSING,
+                f"{self.name(bp_id)}: T3 reverse engineering from relics is not planned; "
+                "the jobs are planned as if you had the blueprint.",
+            )
+        elif remaining > 0 and not is_reaction and bp_id in self.invented_from:
             invention, inv_specs, invention_job_ids = self.plan_invention(
                 bp_id, remaining, choice, mat_mult, prod.recipe
             )
@@ -877,21 +906,21 @@ class _Planner:
     def split_long(
         self, prod: _Producer, specs: list[_Spec], time_mult: float, notes: list[str]
     ) -> list[_Spec]:
-        """Jobs on an original (BPO, reaction formula, or a BPO you do not own yet) may not run
-        longer than 30 days; copies are limited only by their runs. [client]"""
+        """No job may run longer than 30 days (its time minus one run), on an original or a
+        copy (`industry/job.py` RUN_LENGTH). Longer runs are split into jobs on the same
+        blueprint item, one after another; a copy the plan has not got yet (bought, made by
+        the plan) gets its own lock so its jobs do not overlap either. [client]"""
         is_reaction = prod.activity == Activity.REACTION
         out = []
-        for sp in specs:
-            if sp.source in (BlueprintSource.BPO, BlueprintSource.MISSING):
-                te_factor = 1.0 if is_reaction else 1 - sp.te / 100
-                cap = f.max_runs(prod.activity, prod.recipe.time_seconds, te_factor * time_mult)
-                if sp.runs > cap:
-                    notes.append(
-                        f"split into jobs of at most {cap} runs (30-day job limit, before skills)"
-                    )
-                out.extend(replace(sp, runs=chunk) for chunk in _split(sp.runs, cap))
-            else:
+        for n, sp in enumerate(specs):
+            te_factor = 1.0 if is_reaction else 1 - sp.te / 100
+            cap = f.max_runs(prod.activity, prod.recipe.time_seconds, te_factor * time_mult)
+            if sp.runs <= cap:
                 out.append(sp)
+                continue
+            notes.append(f"split into jobs of at most {cap} runs (30-day job limit, before skills)")
+            lock = sp.lock or f"split:{prod.blueprint_type_id}:{n}"
+            out.extend(replace(sp, runs=chunk, lock=lock) for chunk in _split(sp.runs, cap))
         return out
 
     def mfg_work(
@@ -978,25 +1007,37 @@ class _Planner:
         ]
         best: Character | None = None
         best_p = f.invention_probability(base, None, enc, sci, 1.0)
+        chances = {}
         for ch in eligible:
-            p = f.invention_probability(base, ch, enc, sci, 1.0)
+            p = chances[ch.character_id] = f.invention_probability(base, ch, enc, sci, 1.0)
             if best is None or p > best_p:
                 best, best_p = ch, p
+        # Attempts are counted with the best chance, so only characters with that chance may
+        # run the jobs; a weaker inventor would need more attempts than planned.
+        pinned = frozenset(cid for cid, p in chances.items() if math.isclose(p, best_p))
         if best:
+            names = ", ".join(ch.name for ch in eligible if ch.character_id in pinned)
+            others = len(eligible) - len(pinned)
             why = Reason(
                 ReasonCode.SCHEDULED,
-                f"Chance uses {best.name}, the best of {len(eligible)} eligible inventor(s).",
+                f"Chance uses {best.name}, the best of {len(eligible)} eligible inventor(s)."
+                + (
+                    f" Invention jobs run only on {names}, so the attempts hold; "
+                    f"{others} weaker inventor(s) are left out."
+                    if others
+                    else ""
+                ),
             )
         else:
             why = Reason(
                 ReasonCode.UNSCHEDULED_NO_CHARACTER,
                 "No character can invent this; chance uses no skills.",
             )
-        return best, enc, sci, why
+        return best, enc, sci, why, pinned or None
 
     def plan_invention(self, t2_bp_id, runs, choice, mat_mult, t2_recipe):
         t1_bp_id, inv = self.invented_from[t2_bp_id]
-        inventor, enc, sci, p_reason = self.best_inventor(inv)
+        inventor, enc, sci, p_reason, inventors = self.best_inventor(inv)
         base_p = inv.probability or 0.0
         in_progress = self.inp.started_attempts.get(t2_bp_id, 0)
         datacore_cost = 0.0
@@ -1189,6 +1230,7 @@ class _Planner:
                     skills=inv.skills,
                     depends_on=[] if used is not None else list(copy_job_ids),
                     lock=_item_lock(used) if used is not None else None,
+                    characters=inventors,
                 ),
                 _JobMeta(
                     me=0,
@@ -1323,6 +1365,7 @@ class _Planner:
                 reason=job.schedule_reason,
             ),
             copies=job.copies if job.activity == Activity.COPYING else 0,
+            blueprint_item_id=_locked_item(job.lock),
         )
 
     def job_cost(self, job: WorkJob, meta: _JobMeta) -> JobCost:
@@ -1426,10 +1469,7 @@ class _Planner:
             if j.cost.fee is not None:
                 fees[j.activity] += j.cost.fee
         if unpriced:
-            self.warn(
-                ReasonCode.PRICE_MISSING,
-                f"{len(unpriced)} shopping item(s) have no price and are left out of totals.",
-            )
+            self.warnings.append(unpriced_warning(len(unpriced)))
         return CostSummary(
             materials=materials,
             invention_inputs=invention,
@@ -1609,6 +1649,13 @@ def _best_bpo(bpos: list[OwnedBlueprint]) -> OwnedBlueprint:
 
 def _item_lock(b: OwnedBlueprint) -> str:
     return f"item:{b.item_id}"
+
+
+def _locked_item(lock: str | None) -> int | None:
+    """The owned blueprint item behind a job's lock (see `_item_lock`), if it is one."""
+    if lock and lock.startswith("item:"):
+        return int(lock.removeprefix("item:"))
+    return None
 
 
 def _water_fill(caps: list[int], need: int) -> list[int]:

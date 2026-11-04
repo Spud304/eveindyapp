@@ -155,6 +155,9 @@ class BlueprintData:
     copying: Recipe | None = None
     invention: tuple[Recipe, ...] = ()
     job_cost_multiplier: float = 1.0  # attr 1954; multiplies the job cost of every activity
+    # Unpublished blueprints (CCP test and retired ones) can make the same product as the
+    # real one, e.g. "Test Reaction Blueprint" 45732 and the Tungsten Carbide formula 46207.
+    published: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,14 +210,18 @@ class TargetFilter:
 @dataclass(frozen=True, slots=True)
 class RigBonus:
     """One entry of a rig's SDE industryModifierSources record. `percent` is
-    the rig's bonus made positive (engineering rigs: attrs 2594 material,
-    2593 time, 2595 cost; reactor rigs: 2714 material, 2713 time). `target`
-    None means every product."""
+    the rig's bonus made positive: the rig attribute its dogma effect feeds into
+    the structure attribute the entry names (usually 2594 material, 2593 time,
+    2595 cost; reactor rigs 2714 / 2713; Thukker rigs 2653; Upwell outpost rigs
+    their own). `target` None means every product. `security_scaled`: the rig's
+    security effect multiplies this attribute by the system's security modifier
+    (effects 6842 / 6976; Upwell outpost rigs have none)."""
 
     activity: Activity
     kind: ModifierKind
     percent: float
     target: TargetFilter | None = None
+    security_scaled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,6 +508,9 @@ class PlannedJob:
     cost: JobCost
     schedule: ScheduledSlot
     copies: int = 0  # copying only: number of copies made (each `runs` runs)
+    # The owned blueprint (OwnedBlueprint.item_id) the job is installed with; None for one the
+    # plan has not got yet (a copy it makes, a bought BPC, an invented T2 copy, a missing one).
+    blueprint_item_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

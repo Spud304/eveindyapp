@@ -244,4 +244,7 @@ def make_input(line_pairs, **kw):
     kw.setdefault("game", game())
     kw.setdefault("systems", SYSTEMS)
     kw.setdefault("lines", lines(*line_pairs))
+    # bpc() derives item ids from type and runs; two equal copies need explicit item_ids.
+    item_ids = [b.item_id for b in kw.get("blueprints", ())]
+    assert len(item_ids) == len(set(item_ids)), f"duplicate owned blueprint item ids {item_ids}"
     return PlanInput(**kw)

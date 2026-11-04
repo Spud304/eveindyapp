@@ -47,6 +47,7 @@ ATTR_DECRYPTOR = {"prob": 1112, "me": 1113, "te": 1114, "runs": 1124}
 ATTR_REQUIRED_SKILL_TIME = 1982  # manufactureTimePerLevel on skills [client][SDE]
 ATTR_JOB_COST_MULTIPLIER = 1954  # jobCostMultiplier on blueprints [client][SDE]
 ATTR_SECURITY = {SecurityClass.HIGH: 2355, SecurityClass.LOW: 2356, SecurityClass.NULL: 2357}
+ATTR_SECURITY_MODIFIER = 2358  # securityModifier: resolves to 2355/2356/2357 [client]
 # Rig bonus attribute per modifier kind (values are negative percentages in the SDE).
 ATTR_ENGINEERING_RIG = {
     ModifierKind.MATERIAL: 2594,
@@ -70,8 +71,10 @@ class UnknownStructure(LookupError):
 
 
 def _build_key() -> int:
+    """Keys every cache below: a new build, or the same build imported again (a fix, or more
+    files), gives a new key, so long-running processes pick it up without a restart."""
     latest = SdeBuild.latest()
-    return latest.pk if latest else 0
+    return hash((latest.pk, latest.imported_at)) if latest else 0
 
 
 def game_data() -> GameData:
@@ -146,6 +149,11 @@ def _game_data(build_key: int) -> GameData:
         return recipe(act, prods[0] if prods else None)
 
     attr_values = _attribute_values((ATTR_REQUIRED_SKILL_TIME, ATTR_JOB_COST_MULTIPLIER))
+    published = set(
+        EveType.objects.filter(published=True, pk__in=Blueprint.objects.values("id")).values_list(
+            "id", flat=True
+        )
+    )
     blueprints = {}
     for bp_id, limit in Blueprint.objects.filter(removed=False).values_list(
         "id", "max_production_limit"
@@ -163,6 +171,7 @@ def _game_data(build_key: int) -> GameData:
             copying=single(a, "copying"),
             invention=invention,
             job_cost_multiplier=attr_values[ATTR_JOB_COST_MULTIPLIER].get(bp_id, 1.0),
+            published=bp_id in published,
         )
 
     decryptors = []
@@ -243,17 +252,48 @@ def _rig(build_key: int, type_id: int) -> Rig:
     if t is None:
         raise UnknownStructure(f"type {type_id} is not in the SDE")
     values = dogma(type_id)
+    feeds, scaled = _rig_effects(type_id)
     bonuses = []
     for activity, kind, entry in _sources(type_id):
-        attrs = ATTR_REACTOR_RIG if activity == Activity.REACTION else ATTR_ENGINEERING_RIG
-        attr = attrs.get(kind)
+        # The structure attribute this entry modifies is fed by one of the rig's attributes
+        # through a dogma effect. Without dogmaEffects (an older import), the usual ones.
+        attr = feeds.get(int(entry["dogmaAttributeID"]))
+        if attr is None and not feeds:
+            attrs = ATTR_REACTOR_RIG if activity == Activity.REACTION else ATTR_ENGINEERING_RIG
+            attr = attrs.get(kind)
         percent = abs(values.get(attr, 0.0)) if attr else 0.0
         if not percent:
             continue
         target = _filter(build_key, int(entry["filterID"])) if "filterID" in entry else None
-        bonuses.append(RigBonus(activity, kind, percent, target))
+        secured = attr in scaled if feeds else True
+        bonuses.append(RigBonus(activity, kind, percent, target, secured))
     sec = {cls: values[attr] for cls, attr in ATTR_SECURITY.items() if attr in values}
     return Rig(type_id, t.name, tuple(bonuses), sec)
+
+
+def _rig_effects(type_id: int) -> tuple[dict[int, int], set[int]]:
+    """From the rig's dogma effects: {structure attribute: rig attribute that feeds it}, and
+    the rig attributes its security effect multiplies by `securityModifier` (attr 2358).
+    Empty when dogmaEffects was not imported. [SDE: effects 6830-6837, 6842, 6976, 7098...]"""
+    record = _raw("typeDogma", type_id) or {}
+    effect_ids = [int(e["effectID"]) for e in record.get("dogmaEffects", [])]
+    effects = SdeRawRecord.objects.filter(
+        file="dogmaEffects", key__in=[str(e) for e in effect_ids], removed=False
+    ).values_list("data", flat=True)
+    feeds: dict[int, int] = {}
+    scaled: set[int] = set()
+    for data in effects:
+        for m in data.get("modifierInfo") or []:
+            if "modifiedAttributeID" not in m or "modifyingAttributeID" not in m:
+                continue
+            if m.get("domain") == "structureID":
+                feeds[int(m["modifiedAttributeID"])] = int(m["modifyingAttributeID"])
+            elif (
+                m.get("domain") == "itemID"
+                and int(m["modifyingAttributeID"]) == ATTR_SECURITY_MODIFIER
+            ):
+                scaled.add(int(m["modifiedAttributeID"]))
+    return feeds, scaled
 
 
 # --- reprocessing (compressed ore calculator) ----------------------------------------------

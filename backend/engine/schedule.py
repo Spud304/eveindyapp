@@ -24,6 +24,9 @@ class WorkJob:
     # Blueprint item the job is installed with: jobs with the same lock never overlap, since
     # one blueprint is in one job at a time. None for a blueprint used by this job only.
     lock: str | None = None
+    # Only these characters may run the job (None: anyone eligible). Invention uses it so the
+    # attempts counted with one character's chance are run at that chance.
+    characters: frozenset[int] | None = None
     depends_on: list[str] = field(default_factory=list)
     dep_items: set[int] = field(default_factory=set)  # resolved into depends_on
     # Required-skill time bonuses (manufacturing only); see GameData.skill_time_bonuses
@@ -105,7 +108,11 @@ def schedule(
 def _place(job: WorkJob, ready_at: float, characters, free) -> None:
     kind = _SLOT_KIND[job.activity]
     eligible = [
-        ch for ch in characters if job.activity in ch.activities and f.skills_met(ch, job.skills)
+        ch
+        for ch in characters
+        if job.activity in ch.activities
+        and f.skills_met(ch, job.skills)
+        and (job.characters is None or ch.character_id in job.characters)
     ]
     best = None
     for ch in eligible:

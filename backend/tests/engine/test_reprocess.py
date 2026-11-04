@@ -78,6 +78,27 @@ def test_cheapest_mix_covers_every_mineral_in_whole_batches():
     assert mix.mineral_cost == pytest.approx(1000 * 4 + 600 * 10)
 
 
+def test_reprocessing_tax_is_charged_on_the_output_and_can_change_the_mix():
+    # Equal prices; ore 1 yields Tritanium, ore 2 Tritanium plus worthless-looking extra
+    # Pyerite. A tax on output at adjusted prices makes the extra Pyerite cost money.
+    plain = ore(1, [(TRIT, 400)], 1.0)
+    extra = ore(2, [(TRIT, 400), (PYE, 400)], 0.99)
+    adjusted = {TRIT: 4.0, PYE: 10.0}
+    untaxed = cheapest_mix(
+        {TRIT: 200}, [plain, extra], NPC, {}, BONUS, GENERAL, {}, adjusted_prices=adjusted
+    )
+    assert [line.type_id for line in untaxed.ores] == [2]  # a little cheaper to buy
+    taxed_npc = Refinery("Taxed", 0.0, SecurityClass.HIGH, tax_percent=5.0)
+    taxed = cheapest_mix(
+        {TRIT: 200}, [plain, extra], taxed_npc, {}, BONUS, GENERAL, {}, adjusted_prices=adjusted
+    )
+    [line] = taxed.ores
+    assert line.type_id == 1
+    # One batch at 50 %: 200 Tritanium out, taxed 5 % at 4 ISK.
+    assert line.tax == pytest.approx(round(200 * 4.0 * 0.05, 2))
+    assert taxed.ore_cost == pytest.approx(line.total + line.tax)
+
+
 def test_floor_losses_are_made_up():
     # 7 per batch at 50% = 3.5 -> floored. Need 7: the linear answer (2 batches) gives 7.0,
     # but floor(7 x 2 x 0.5) = 7 too; need 10 needs 3 batches (floor 10.5 = 10).

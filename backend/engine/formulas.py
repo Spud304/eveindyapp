@@ -65,7 +65,7 @@ def station_bonuses(
                 continue
             if b.target is not None and not b.target.matches(product):
                 continue
-            effect = b.percent * sec_mult / 100
+            effect = b.percent * (sec_mult if b.security_scaled else 1.0) / 100
             mult[b.kind] *= 1 - effect
             target = f" ({b.target.name})" if b.target else ""
             parts.append(f"{rig.name}: {b.kind.value} -{effect * 100:.2f}%{target}")

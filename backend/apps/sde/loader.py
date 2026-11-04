@@ -6,6 +6,7 @@ from datetime import datetime
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 
 from apps.core.importing import ImportFailed, ImportReport
 
@@ -52,6 +53,10 @@ def import_source(
             load_raw_file(source, name, build, report, dry_run=dry_run)
         if not dry_run and not raw_only:
             derive.derive_all(build, release_date, report)
+        elif not dry_run:
+            # Raw files changed without a derivation: mark the build as imported now, so
+            # cached game data (keyed on it) is rebuilt.
+            SdeBuild.objects.filter(build=build).update(imported_at=timezone.now())
     report.finish()
     return report
 

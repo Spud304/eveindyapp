@@ -15,6 +15,7 @@ DEFAULT_INCLUDED_FILES = [
     # raw only
     "typeDogma",
     "dogmaAttributes",
+    "dogmaEffects",  # which rig attribute feeds which structure bonus, and security scaling
     "typeMaterials",
     "compressibleTypes",
     "industryModifierSources",

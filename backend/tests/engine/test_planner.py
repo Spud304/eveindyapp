@@ -3,7 +3,7 @@ from itertools import pairwise
 
 import pytest
 
-from engine import PlanError, plan
+from engine import PlanError
 from engine.formulas import StationBonuses
 from engine.planner import _bpo_layout, _CopyPlan, _Spec, _water_fill
 from engine.types import (
@@ -15,6 +15,7 @@ from engine.types import (
     BuildRules,
     GameData,
     ItemDecision,
+    Material,
     PlanLine,
     Price,
     ReasonCode,
@@ -26,6 +27,7 @@ from engine.types import (
 from .data import (
     ACCELERANT,
     ADV_COMPONENT_TE_RIG,
+    BLUEPRINTS,
     BP_COMP_A,
     BP_HULL,
     BP_T1_MOD,
@@ -63,6 +65,7 @@ from .data import (
     make_input,
     raitaru,
 )
+from .invariants import checked_plan as plan
 
 
 def item(result, type_id):
@@ -219,6 +222,73 @@ def test_reaction_uses_reactor_rig_and_has_no_me():
     assert buy(r, MOON_GOO) == 98
 
 
+# --- which blueprint makes a product -------------------------------------------
+
+
+def _game_with(extra: BlueprintData, first: bool) -> GameData:
+    """The test game data plus `extra`, inserted before or after the others, so a test
+    can show the choice does not depend on load order."""
+    base = game()
+    ordered = [extra, *base.blueprints.values()] if first else [*base.blueprints.values(), extra]
+    return replace(base, blueprints={b.type_id: b for b in ordered})
+
+
+@pytest.mark.parametrize("first", [True, False])
+def test_unpublished_reaction_formula_is_not_the_producer(first):
+    # Like "Test Reaction Blueprint" 45732 next to the Tungsten Carbide formula 46207:
+    # unpublished, a lower type id, and a different recipe for the same product.
+    test_formula = BlueprintData(
+        F_COMPOSITE - 2,
+        1,
+        reaction=Recipe(
+            time_seconds=360,
+            materials=(Material(MOON_GOO, 1),),
+            product_type_id=COMPOSITE,
+            product_quantity=20,
+        ),
+        published=False,
+    )
+    r = plan(
+        make_input(
+            [(COMPOSITE, 200)],
+            game=_game_with(test_formula, first),
+            blueprints=(bpo(F_COMPOSITE), bpo(F_INTERMEDIATE)),
+        )
+    )
+    assert not jobs_for(r, test_formula.type_id)
+    assert jobs_for(r, F_COMPOSITE)[0].materials == (Material(INTERMEDIATE, 100),)
+    assert item(r, INTERMEDIATE).build_category == BuildCategory.REACTION_INTERMEDIATE
+
+
+@pytest.mark.parametrize("first", [True, False])
+def test_unpublished_manufacturing_blueprint_is_not_the_producer(first):
+    old = BlueprintData(
+        BP_HULL - 2, 10, manufacturing=_mfg_recipe(HULL, [(TRIT, 1)]), published=False
+    )
+    r = plan(make_input([(HULL, 1)], game=_game_with(old, first), blueprints=(bpo(BP_HULL),)))
+    assert not jobs_for(r, old.type_id)
+    assert jobs_for(r, BP_HULL, Activity.MANUFACTURING)
+
+
+@pytest.mark.parametrize("published", [True, False])
+@pytest.mark.parametrize("first", [True, False])
+def test_invention_source_is_chosen_by_published_then_type_id(first, published):
+    t1 = BLUEPRINTS[BP_T1_MOD]
+    other = replace(t1, type_id=BP_T1_MOD - 2, published=published)
+    r = plan(t2_input(game=_game_with(other, first)))
+    expected = other.type_id if published else BP_T1_MOD
+    assert bp(r, BP_T2_MOD).invention.t1_blueprint_type_id == expected
+
+
+def _mfg_recipe(product, mats):
+    return Recipe(
+        time_seconds=100,
+        materials=tuple(Material(t, q) for t, q in mats),
+        product_type_id=product,
+        product_quantity=1,
+    )
+
+
 # --- blueprint sources ---------------------------------------------------------
 
 
@@ -352,6 +422,43 @@ def test_t1_copying_and_t1_manufacturing_share_the_bpo():
     )
     assert len(on_bpo) == 2
     assert on_bpo[1].schedule.start_seconds >= on_bpo[0].schedule.end_seconds
+
+
+def test_t3_from_relics_is_not_planned_as_invention():
+    # A relic: an invention activity and nothing to copy or build.
+    t1 = BLUEPRINTS[BP_T1_MOD]
+    relic = BlueprintData(9999, 1, invention=t1.invention)
+    blueprints = {k: v for k, v in BLUEPRINTS.items() if k != BP_T1_MOD} | {9999: relic}
+    r = plan(make_input([(T2_MOD, 10)], game=replace(game(), blueprints=blueprints)))
+    assert bp(r, BP_T2_MOD).invention is None
+    assert [j.source for j in jobs_for(r, BP_T2_MOD)] == [BlueprintSource.MISSING]
+    assert any("reverse engineering" in w.text for w in r.warnings)
+    assert not jobs_for(r, 9999)
+
+
+def test_a_copy_with_more_than_thirty_days_of_runs_is_split_on_the_same_item():
+    # 1000 s a run: 30 days is 2,592 runs; the job check applies to copies too. [client]
+    r = plan(make_input([(HULL, 3000)], blueprints=(bpc(BP_HULL, 3000), bpo(BP_COMP_A))))
+    jobs = sorted(
+        jobs_for(r, BP_HULL, Activity.MANUFACTURING), key=lambda j: j.schedule.start_seconds
+    )
+    assert sorted(j.runs for j in jobs) == [408, 2592]
+    assert {j.blueprint_item_id for j in jobs} == {BP_HULL * 10 + 3000}
+    assert jobs[1].schedule.start_seconds >= jobs[0].schedule.end_seconds  # one copy, one job
+
+
+def test_invention_runs_only_on_the_inventors_whose_chance_was_used():
+    # The weak inventor has 5 science slots and would take jobs if allowed; the strong one 1.
+    weak = character(2, "Weak", skills={ENCRYPTION: 1, SCIENCE_1: 1, SCIENCE_2: 1, 3406: 4})
+    r = plan(t2_input(characters=(character(skills=INVENTOR), weak)))
+    inv = bp(r, BP_T2_MOD).invention
+    assert "Invention jobs run only on Builder" in inv.probability_reason.text
+    inv_jobs = jobs_for(r, BP_T1_MOD, Activity.INVENTION)
+    assert inv_jobs and {j.schedule.character_id for j in inv_jobs} == {1}
+    assert all("1 eligible character" in j.schedule.reason.text for j in inv_jobs)
+    # Copying is not pinned: the weak character may still make the T1 copies.
+    copy_reason = jobs_for(r, BP_T1_MOD, Activity.COPYING)[0].schedule.reason.text
+    assert "2 eligible character" in copy_reason
 
 
 def test_invention_attempts_and_datacores():

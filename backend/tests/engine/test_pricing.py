@@ -1,11 +1,26 @@
+from dataclasses import replace
+
 import pytest
 
-from engine import plan
-from engine.pricing import price_item, reprice
+from engine.pricing import market_prices, price_item, reprice, unpriced_warning
 from engine.types import Price, ReasonCode
 
-from .data import BP_COMP_A, BP_HULL, DATACORE, HULL, PYE, TRIT, bpo, make_input
-from .test_planner import t2_input
+from .data import (
+    ACCELERANT,
+    BP_COMP_A,
+    BP_HULL,
+    BP_T2_MOD,
+    DATACORE,
+    DECRYPTOR,
+    HULL,
+    PYE,
+    TRIT,
+    bpo,
+    game,
+    make_input,
+)
+from .invariants import checked_plan as plan
+from .test_planner import bp, t2_input
 
 
 def hull_plan():
@@ -59,3 +74,43 @@ def test_invention_inputs_stay_in_their_own_total():
 def test_price_item_without_a_book_is_unchanged():
     r = hull_plan()
     assert price_item(item(r, TRIT), None) is item(r, TRIT)
+
+
+# --- market prices for a second planning pass -------------------------------------------------
+
+
+def test_market_prices_price_the_needed_quantity_through_the_book():
+    old = {TRIT: Price(4.0, 4.5), PYE: Price(10.0, 9.0)}
+    books = {TRIT: ((3.0, 50), (5.0, 100)), PYE: (), DATACORE: ((7.0, 1),)}
+    out = market_prices(old, books, {TRIT: 100, PYE: 10})
+    assert out[TRIT] == Price((50 * 3.0 + 50 * 5.0) / 100, 4.5)  # adjusted price kept
+    assert out[PYE] == old[PYE]  # nothing on sale: unchanged
+    assert out[DATACORE] == Price(7.0, None)  # not on the list yet: one unit
+
+
+def test_market_prices_short_book_prices_the_rest_at_the_dearer_of_top_and_old():
+    out = market_prices({TRIT: Price(9.0, None)}, {TRIT: ((3.0, 10),)}, {TRIT: 20})
+    assert out[TRIT].unit_price == pytest.approx((10 * 3.0 + 10 * 9.0) / 20)
+
+
+def test_market_prices_can_change_the_automatic_decryptor():
+    """At the average the decryptor looks too dear; at the market price it pays off. Planning
+    again with market prices makes the choice on the prices the shopping list shows."""
+    average = {DATACORE: Price(1_000_000.0, None), DECRYPTOR: Price(1e12, None)}
+    inp = t2_input(game=game([ACCELERANT]), prices=average)
+    first = plan(inp)
+    assert bp(first, BP_T2_MOD).invention.decryptor_type_id is None
+    priced = market_prices(average, {DECRYPTOR: ((10.0, 1000),)}, {})
+    second = plan(replace(inp, prices=priced))
+    assert bp(second, BP_T2_MOD).invention.decryptor_type_id == DECRYPTOR
+
+
+def test_reprice_replaces_the_planners_unpriced_warning():
+    r = plan(make_input([(HULL, 1)], blueprints=(bpo(BP_HULL), bpo(BP_COMP_A))))
+    assert set(r.costs.unpriced_type_ids) == {TRIT, PYE}
+    assert unpriced_warning(2) in r.warnings
+    out = reprice(r, {TRIT: ((3.0, 10**9),)})
+    assert out.costs.unpriced_type_ids == (PYE,)
+    assert unpriced_warning(1) in out.warnings and unpriced_warning(2) not in out.warnings
+    everything = reprice(r, {TRIT: ((3.0, 10**9),), PYE: ((5.0, 10**9),)})
+    assert not any(w.code == ReasonCode.PRICE_MISSING for w in everything.warnings)

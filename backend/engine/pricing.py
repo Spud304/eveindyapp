@@ -1,9 +1,11 @@
 """Market pricing: buying through sell orders, and repricing a plan result from them.
 
-The planner prices with CCP's average price (`Price.unit_price`); its only price-driven choice is
-the automatic decryptor. `reprice` takes a finished result and prices its shopping list from
-order books instead, then recomputes the cost summary. Job fees do not change: they come from
-CCP's adjusted price, as in the game.
+The planner prices with `Price.unit_price`; its only price-driven choice is the automatic
+decryptor, and some reasons quote ISK. Market pricing is two steps: `market_prices` turns order
+books into unit prices for a second planning pass, so those choices and texts use market prices
+too; `reprice` then prices the final shopping list through the books at its exact quantities
+and recomputes the cost summary. Job fees do not change: they come from CCP's adjusted price,
+as in the game.
 """
 
 from __future__ import annotations
@@ -11,9 +13,26 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Mapping
 
-from .types import CostSummary, PlanResult, PlanWarning, ReasonCode, ShoppingItem, TypeId
+from .types import (
+    CostSummary,
+    PlanResult,
+    PlanWarning,
+    Price,
+    ReasonCode,
+    ShoppingItem,
+    TypeId,
+)
 
 Book = tuple[tuple[float, int], ...]  # sell orders as (price, units), cheapest first
+
+
+def unpriced_warning(count: int) -> PlanWarning:
+    """The warning for shopping items left out of the totals. One function for the planner and
+    `reprice`, so repricing can replace the planner's warning with an up-to-date one."""
+    return PlanWarning(
+        ReasonCode.PRICE_MISSING,
+        f"{count} shopping item(s) have no price and are left out of totals.",
+    )
 
 
 def book_cost(book: Book, units: int) -> tuple[float, float | None, int]:
@@ -51,6 +70,27 @@ def price_item(item: ShoppingItem, book: Book | None) -> ShoppingItem:
     )
 
 
+def market_prices(
+    prices: Mapping[TypeId, Price], books: Mapping[TypeId, Book], quantities: Mapping[TypeId, int]
+) -> dict[TypeId, Price]:
+    """`prices` with each booked type's unit price replaced by what buying `quantities` of it
+    through its book costs per unit (one unit for types not on the list yet, e.g. decryptors
+    the planner may pick). Empty books keep the old price; adjusted prices never change, since
+    job fees use them. Planning again with these makes the price-driven choices (the automatic
+    decryptor) and the ISK in reasons agree with the repriced shopping list."""
+    out = dict(prices)
+    for type_id, book in books.items():
+        if not book:
+            continue
+        units = max(1, quantities.get(type_id, 0))
+        old = prices.get(type_id)
+        cost, top, short = book_cost(book, units)
+        if short:
+            cost += short * max(top or 0.0, (old.unit_price if old else None) or 0.0)
+        out[type_id] = Price(cost / units, old.adjusted_price if old else None)
+    return out
+
+
 def reprice(result: PlanResult, books: Mapping[TypeId, Book]) -> PlanResult:
     """The result with its shopping list priced through `books` and its costs recomputed."""
     shopping = tuple(price_item(s, books.get(s.type_id)) for s in result.shopping_list)
@@ -77,7 +117,11 @@ def reprice(result: PlanResult, books: Mapping[TypeId, Book]) -> PlanResult:
         total=materials + invention + blueprints + fees,
         unpriced_type_ids=tuple(sorted(unpriced)),
     )
-    warnings = list(result.warnings)
+    # The planner's count of unpriced items is out of date once order books price some.
+    before = result.costs.unpriced_type_ids
+    warnings = [w for w in result.warnings if not (before and w == unpriced_warning(len(before)))]
+    if unpriced:
+        warnings.append(unpriced_warning(len(unpriced)))
     short = [s for s in shopping if s.on_sale is not None and 0 < s.on_sale < s.quantity]
     if short:
         warnings.append(

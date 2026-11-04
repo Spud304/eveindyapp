@@ -74,6 +74,9 @@ class Refinery:
     hull_bonus_percent: float  # attr 2722
     security: SecurityClass
     rigs: tuple[RefineryRig, ...] = ()
+    # The owner's reprocessing tax: charged in ISK on what comes out, at CCP's adjusted price
+    # (reprocessing/util.py: round(adjusted price x recovered x take, 2) per material). [client]
+    tax_percent: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +92,7 @@ class OreLine:
     volume: float = 0.0  # m3 for the whole quantity
     top_price: float | None = None  # dearest order bought from (with a book)
     on_sale: int | None = None  # units on sale (with a book)
+    tax: float = 0.0  # reprocessing tax on its output, in ISK (not in `total`)
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +166,7 @@ def cheapest_mix(
     implant_percent: float = 0.0,
     mineral_volumes: Mapping[TypeId, float] | None = None,
     mineral_books: Mapping[TypeId, Book] | None = None,
+    adjusted_prices: Mapping[TypeId, float | None] | None = None,
 ) -> OreMix:
     import numpy as np
     from scipy.optimize import Bounds, LinearConstraint, milp
@@ -251,7 +256,18 @@ def cheapest_mix(
         else:
             tiers.extend((i, p * o.portion_size, u / o.portion_size) for p, u in o.book)
     n_ore, n_tier = len(usable), len(tiers)
-    cost = np.concatenate([np.zeros(n_ore), np.array([t[1] for t in tiers])])
+    adjusted = adjusted_prices or {}
+    take = refinery.tax_percent / 100
+
+    def tax_on(o: Ore, made: Mapping[TypeId, float]) -> float:
+        return sum(round((adjusted.get(m) or 0.0) * q * take, 2) for m, q in made.items())
+
+    # The tax is on what comes out, so it is a cost per batch of each ore (before flooring).
+    batch_tax = [
+        tax_on(o, {mt.type_id: mt.quantity * eff[o.type_id] for mt in o.materials}) if take else 0.0
+        for o in usable
+    ]
+    cost = np.concatenate([np.array(batch_tax), np.array([t[1] for t in tiers])])
     caps = np.concatenate([np.full(n_ore, np.inf), np.array([t[2] for t in tiers])])
     link = np.zeros((n_ore, n_ore + n_tier))  # tiers of an ore add up to its batches
     for i in range(n_ore):
@@ -309,6 +325,8 @@ def cheapest_mix(
                 total += short_units * (top or 0.0)
                 warnings.append(f"{o.name}: {short_units:,} more units than are on sale.")
         e = eff[o.type_id]
+        tax = tax_on(o, produced(o, b, e)) if take else 0.0
+        tax_text = f" Reprocessing tax {tax:,.0f} ISK." if tax else ""
         lines.append(
             OreLine(
                 o.type_id,
@@ -320,18 +338,19 @@ def cheapest_mix(
                 e,
                 Reason(
                     ReasonCode.BUY_RULE,
-                    f"{b} batch(es) of {o.portion_size} at {e:.2%} efficiency.",
+                    f"{b} batch(es) of {o.portion_size} at {e:.2%} efficiency.{tax_text}",
                 ),
                 o.volume * units,
                 top,
                 on_sale,
+                tax,
             )
         )
     lines.sort(key=lambda line: -line.total)
     return OreMix(
         tuple(lines),
         mineral_lines(made),
-        sum(line.total for line in lines),
+        sum(line.total + line.tax for line in lines),  # buying the ore and reprocessing it
         mineral_cost,
         station_reason,
         tuple(warnings),

@@ -117,6 +117,20 @@ def test_game_data_types_and_blueprints(imported):
     assert inv.product_type_id == 11371 and inv.probability == 0.3
 
 
+def test_reimporting_the_same_build_refreshes_cached_game_data(imported, tmp_path):
+    before = gamedata.game_data()
+    assert gamedata.game_data() is before  # cached
+    records = industry_records()
+    records["typeDogma"][691] = {"dogmaAttributes": [{"attributeID": 1954, "value": 0.5}]}
+    path = tmp_path / "again.zip"
+    path.write_bytes(make_sde_zip(records))
+    with ZipSource(path) as source:
+        import_source(source, build=BUILD, files=["typeDogma"], raw_only=True)
+    after = gamedata.game_data()
+    assert after is not before
+    assert after.blueprints[691].job_cost_multiplier == 0.5
+
+
 def test_skill_time_bonuses_and_blueprint_cost_multiplier(imported):
     g = gamedata.game_data()
     assert g.skill_time_bonuses == {3397: -1.0}
