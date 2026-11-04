@@ -13,7 +13,7 @@ from ninja.errors import HttpError
 
 from apps.accounts.models import User
 from apps.sde.models import EveType
-from engine.types import BuildCategory
+from engine.types import BuildCategory, PlanResult
 
 from . import reservation
 from .models import Plan, PlanLine, Visibility
@@ -231,7 +231,39 @@ def delete_plan(request: HttpRequest, plan_id: int):
     return Status(204, None)
 
 
-@router.get("/plans/{plan_id}/result")
+class RuleOverridesOut(Schema):
+    blacklist_add: list[int]
+    blacklist_remove: list[int]
+    categories: dict[str, str]
+
+
+class EffectiveRulesOut(Schema):
+    item_blacklist: list[int]
+    buy_categories: list[BuildCategory]
+    overrides: RuleOverridesOut
+
+
+class HolderOut(Schema):
+    plan_id: int
+    plan_name: str
+    quantity: int
+
+
+class ReservationOut(Schema):
+    reserves: bool
+    claims: dict[int, int]  # type id -> quantity this plan reserves
+    held_elsewhere: dict[int, list[HolderOut]]  # type id -> earlier plans holding stock
+
+
+class PlanResultOut(Schema):
+    plan_id: int
+    error: str
+    result: PlanResult | None
+    effective_rules: EffectiveRulesOut
+    reservation: ReservationOut
+
+
+@router.get("/plans/{plan_id}/result", response=PlanResultOut)
 def plan_result(request: HttpRequest, plan_id: int):
     """The engine's result for this plan, with the assets other plans reserve."""
     p = _plan(request, plan_id)
@@ -240,10 +272,10 @@ def plan_result(request: HttpRequest, plan_id: int):
     return {
         "plan_id": p.pk,
         "error": run.error,
-        "result": asdict(run.result) if run.result else None,
+        "result": run.result,
         "effective_rules": {
             "item_blacklist": sorted(rules.item_blacklist) if rules else [],
-            "buy_categories": sorted(c.value for c in rules.buy_categories) if rules else [],
+            "buy_categories": sorted(rules.buy_categories) if rules else [],
             "overrides": {
                 "blacklist_add": p.blacklist_add,
                 "blacklist_remove": p.blacklist_remove,

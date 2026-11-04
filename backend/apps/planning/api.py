@@ -1,4 +1,3 @@
-from dataclasses import asdict
 from typing import cast
 
 from django.http import HttpRequest
@@ -9,7 +8,7 @@ from ninja.errors import HttpError
 from apps.accounts.models import User
 from apps.sde.models import EveType, SolarSystem
 from engine import PlanError, plan
-from engine.types import Activity, BlueprintChoice, BuildCategory, PlanLine
+from engine.types import Activity, BlueprintChoice, BuildCategory, PlanLine, PlanResult
 
 from . import inputs, stations
 from .models import BuildRules, Station, StationSource
@@ -208,16 +207,15 @@ def put_rules(request: HttpRequest, body: BuildRulesIO):
     return row
 
 
-@router.post("/plan/preview")
+@router.post("/plan/preview", response=PlanResult)
 def preview(request: HttpRequest, body: PreviewIn):
-    """Run the engine on the account's data without saving a plan (plans are step 3)."""
+    """Run the engine on the account's data without saving a plan."""
     lines = [PlanLine(f"l{i}", ln.type_id, ln.quantity) for i, ln in enumerate(body.lines)]
     choices = {}
     for c in body.choices:
         dec = c.decryptor if c.decryptor in ("auto", "none") else int(c.decryptor)
         choices[c.blueprint_type_id] = BlueprintChoice(c.me_override, c.te_override, dec)
     try:
-        result = plan(inputs.plan_input(_user(request), lines, choices))
+        return plan(inputs.plan_input(_user(request), lines, choices))
     except PlanError as exc:
         raise HttpError(422, str(exc)) from exc
-    return asdict(result)
