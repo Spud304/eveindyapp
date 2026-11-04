@@ -174,10 +174,10 @@ export function useBlueprintOptions(planId: number, bpId: number, enabled: boole
 }
 
 /** The engine's result. Recomputed on the server each time; kept while a new one loads. */
-export function usePlanResult(id: number) {
+export function usePlanResult(id: number, prices: 'jita' | 'average' = 'jita') {
   return useQuery({
-    queryKey: keys.planResult(id),
-    queryFn: async () => unwrap(await api.GET('/api/plans/{plan_id}/result', { params: { path: { plan_id: id } } })),
+    queryKey: [...keys.planResult(id), prices],
+    queryFn: async () => unwrap(await api.GET('/api/plans/{plan_id}/result', { params: { path: { plan_id: id }, query: { prices } } })),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   })

@@ -260,3 +260,18 @@ def test_minerals_as_compressed_ore(login):
     by_test_id(page, "plan.ore.class.moon").check()
     expect(by_test_id(page, "plan.ore.class.moon")).to_be_checked()
     expect(trit).to_contain_text("Tritanium")
+
+
+def test_prices_switch_between_jita_and_average(login):
+    s = login()
+    s.add_station()
+    plan = s.add_plan(uniq("prices"), [(RIFTER, 1)])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    expect(by_test_id(page, "plan.prices")).to_have_value("jita")
+    by_test_id(page, "plan.tabs.cost").click()
+    expect(by_test_id(page, "plan.cost.prices")).to_contain_text("Prices:")
+    by_test_id(page, "plan.prices").select_option("average")
+    expect(by_test_id(page, "plan.cost.prices")).to_contain_text("CCP average prices")
+    page.reload()  # remembered in this browser
+    expect(by_test_id(page, "plan.prices")).to_have_value("average")

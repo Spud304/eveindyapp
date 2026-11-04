@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { usePriceSource, type PriceSource } from '@/hooks/usePriceSource'
 import { useLocalCopy } from '@/hooks/useLocalCopy'
 import { useCorporations, useLibrary, useMe, usePlan, usePlanMutations, usePlanResult, useStations, useTypeSearch } from '@/lib/api/hooks'
 import { useCopy } from '@/hooks/useCopy'
@@ -41,7 +42,8 @@ export function PlanPage() {
   const { planId } = useParams({ from: '/plans/$planId' })
   const id = Number(planId)
   const plan = usePlan(id)
-  const result = usePlanResult(id)
+  const [prices, setPrices] = usePriceSource()
+  const result = usePlanResult(id, prices)
   const me = useMe()
   const stations = useStations()
   const [tab, setTab] = useState<TabKey>('shopping')
@@ -57,7 +59,7 @@ export function PlanPage() {
   const r = result.data
   return (
     <>
-      <PlanHeader plan={p} result={r} computing={result.isFetching} />
+      <PlanHeader plan={p} result={r} computing={result.isFetching} prices={prices} onPrices={setPrices} />
       <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
         <div className="min-w-0">
           <Tabs tabs={TABS} value={tab} onChange={setTab} testId="plan.tabs" />
@@ -93,7 +95,19 @@ export function PlanPage() {
   )
 }
 
-function PlanHeader({ plan: p, result, computing }: { plan: PlanOut; result: PlanResultOut | undefined; computing: boolean }) {
+function PlanHeader({
+  plan: p,
+  result,
+  computing,
+  prices,
+  onPrices,
+}: {
+  plan: PlanOut
+  result: PlanResultOut | undefined
+  computing: boolean
+  prices: PriceSource
+  onPrices: (p: PriceSource) => void
+}) {
   const { edit, activate, deactivate, remove } = usePlanMutations()
   const navigate = useNavigate()
   const [name, setName] = useState(p.name)
@@ -133,6 +147,10 @@ function PlanHeader({ plan: p, result, computing }: { plan: PlanOut; result: Pla
       }
       actions={
         <>
+          <Select value={prices} testId="plan.prices" onChange={(e) => onPrices(e.target.value as PriceSource)} title="where the shopping list and costs are priced from">
+            <option value="jita">Jita prices</option>
+            <option value="average">CCP average prices</option>
+          </Select>
           {p.is_active ? (
             <Button small onClick={() => deactivate.mutate(p.id)} testId="plan.deactivate">
               Deactivate

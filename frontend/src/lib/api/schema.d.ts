@@ -303,7 +303,8 @@ export interface paths {
         };
         /**
          * Plan Result
-         * @description The engine's result for this plan, with the assets other plans reserve.
+         * @description The engine's result for this plan, with the assets other plans reserve. The shopping
+         *     list and costs are priced from Jita 4-4 sell orders unless `prices=average`.
          */
         get: operations["apps_planning_plans_api_plan_result"];
         put?: never;
@@ -1060,6 +1061,13 @@ export interface components {
              * @default 0
              */
             volume: number;
+            /**
+             * Price Source
+             * @default average
+             */
+            price_source: string;
+            /** On Sale */
+            on_sale?: number | null;
         };
         /** StationChoice */
         StationChoice: {
@@ -1343,6 +1351,17 @@ export interface components {
         };
         /** PlanResultOut */
         PlanResultOut: {
+            /**
+             * Prices
+             * @default average
+             * @enum {string}
+             */
+            prices: "jita" | "average";
+            /**
+             * Priced At Average
+             * @default 0
+             */
+            priced_at_average: number;
             /** Plan Id */
             plan_id: number;
             /** Error */
@@ -2417,7 +2436,9 @@ export interface operations {
     };
     apps_planning_plans_api_plan_result: {
         parameters: {
-            query?: never;
+            query?: {
+                prices?: "jita" | "average";
+            };
             header?: never;
             path: {
                 plan_id: number;

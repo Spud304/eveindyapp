@@ -39,6 +39,8 @@ function SharedView({ data }: { data: SharedPlanOut }) {
   const asResult = {
     plan_id: data.plan_id ?? 0,
     error: data.error,
+    prices: 'jita',
+    priced_at_average: 0,
     result: r,
     effective_rules: { item_blacklist: [], buy_categories: [], overrides: { blacklist_add: [], blacklist_remove: [], categories: {} } },
     reservation: { reserves: false, claims: {}, held_elsewhere: {} },

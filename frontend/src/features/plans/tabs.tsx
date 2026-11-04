@@ -55,7 +55,7 @@ export function ShoppingTab({ data }: { data: PlanResultOut }) {
               <tr>
                 <th>Item</th>
                 <th className="text-right">Quantity</th>
-                <th className="text-right" title="CCP average price until a buy-price source exists">
+                <th className="text-right" title={data.prices === 'jita' ? 'average paid per unit, buying Jita 4-4 sell orders cheapest first' : 'CCP average price'}>
                   Unit
                 </th>
                 <th className="text-right">Total</th>
@@ -70,7 +70,19 @@ export function ShoppingTab({ data }: { data: PlanResultOut }) {
                 <tr key={s.type_id} data-testid={`plan.shopping.${s.type_id}`}>
                   <td>{s.name}</td>
                   <Num>{qty(s.quantity)}</Num>
-                  <Num className="text-muted">{s.unit_price == null ? <span className="text-warn">no price</span> : isk(s.unit_price)}</Num>
+                  <Num className="text-muted">
+                    {s.unit_price == null ? <span className="text-warn">no price</span> : isk(s.unit_price)}
+                    {data.prices === 'jita' && s.price_source === 'average' && s.unit_price != null ? (
+                      <span className="ml-1 text-label text-warn" title={s.on_sale === 0 ? 'nothing on sale at Jita 4-4: CCP average price' : 'not looked up at Jita: CCP average price'}>
+                        avg
+                      </span>
+                    ) : null}
+                    {s.on_sale != null && s.on_sale > 0 && s.on_sale < s.quantity ? (
+                      <span className="ml-1 text-label text-warn" title="the rest is priced at the dearest order">
+                        only {qty(s.on_sale)} on sale
+                      </span>
+                    ) : null}
+                  </Num>
                   <Num title={iskExact(s.total_price)}>{isk(s.total_price)}</Num>
                   <Num className="text-muted">{m3(s.volume)}</Num>
                   <td>
@@ -380,7 +392,10 @@ export function CostTab({ data }: { data: PlanResultOut }) {
           </tbody>
         </table>
         {c.unpriced_type_ids.length ? <p className="mt-2 text-label text-warn">{c.unpriced_type_ids.length} items have no price and are left out.</p> : null}
-        <p className="mt-2 text-label text-muted">Prices are CCP average prices. Job fees total {isk(feeTotal)}.</p>
+        <p className="mt-2 text-label text-muted" data-testid="plan.cost.prices">
+          {data.prices === 'jita' ? 'Prices: Jita 4-4 sell orders, cheapest first (refreshed every 5 minutes).' : 'Prices: CCP average prices.'}
+          {data.priced_at_average ? ` ${data.priced_at_average} item(s) could not be fetched and use the CCP average.` : ''} Job fees total {isk(feeTotal)}.
+        </p>
       </Panel>
       <Panel title="Job fees" testId="plan.cost.jobs" flush>
         <Table hover>
