@@ -4,6 +4,7 @@ ores, so the ore list and skill bonuses are stubbed)."""
 import pytest
 from django.test import Client
 
+from apps.esidata import market
 from apps.esidata.models import CharacterSkill, MarketPrice
 from apps.planning.models import Plan, PlanLine, Station
 from apps.sde import gamedata
@@ -42,6 +43,12 @@ def setup(sde, user, monkeypatch):
     )
     monkeypatch.setattr(gamedata, "ores", lambda: ores)
     monkeypatch.setattr(gamedata, "reprocessing_skill_bonuses", lambda: {3385: 3.0, 3389: 2.0})
+    # Never call ESI from tests: Jita has 10,000 units of the ore at 2 ISK, then more at 9 ISK,
+    # and Tritanium at 5 ISK.
+    books = {ORE: ((2.0, 10_000), (9.0, 1_000_000)), 34: ((5.0, 10_000_000),)}
+    monkeypatch.setattr(
+        market, "jita_sell_books", lambda ids: ({t: books[t] for t in ids if t in books}, set())
+    )
     c = Client()
     c.force_login(user)
     return c, p, station
@@ -49,7 +56,7 @@ def setup(sde, user, monkeypatch):
 
 def test_tritanium_bought_as_ore(setup):
     c, p, station = setup
-    resp = c.get(f"/api/plans/{p.pk}/compressed-ore")
+    resp = c.get(f"/api/plans/{p.pk}/compressed-ore?prices=average")
     assert resp.status_code == 200, resp.content
     body = resp.json()
     assert body["station_id"] == station.pk
@@ -76,3 +83,22 @@ def test_bad_choices_are_refused(setup):
         c.get(f"/api/plans/{p.pk}/compressed-ore?ore_classes=moon").json()["mix"]["feasible"]
         is False
     )
+
+
+def test_priced_from_jita_orders(setup):
+    c, p, _ = setup
+    body = c.get(f"/api/plans/{p.pk}/compressed-ore").json()
+    assert body["prices"] == "jita" and body["priced_at_average"] == 0
+    [line] = body["mix"]["ores"]
+    # 138 batches = 13,800 units: 10,000 at 2 ISK, 3,800 at 9 ISK.
+    assert line["total"] == pytest.approx(10_000 * 2 + 3_800 * 9)
+    assert line["top_price"] == 9.0 and line["on_sale"] == 1_010_000
+    assert body["mix"]["mineral_cost"] == pytest.approx(31680 * 5.0)
+
+
+def test_failed_fetch_falls_back_to_average(setup, monkeypatch):
+    c, p, _ = setup
+    monkeypatch.setattr(market, "jita_sell_books", lambda ids: ({}, set(ids)))
+    body = c.get(f"/api/plans/{p.pk}/compressed-ore").json()
+    assert body["priced_at_average"] == 2
+    assert body["mix"]["ore_cost"] == pytest.approx(13800 * 3.0)

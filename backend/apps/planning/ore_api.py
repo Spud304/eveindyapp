@@ -1,7 +1,7 @@
 """Compressed ore calculator (step 8): the cheapest compressed ore for a plan's mineral shortfall."""
 
 import dataclasses
-from typing import cast
+from typing import Literal, cast
 
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404
@@ -9,6 +9,7 @@ from ninja import Router, Schema
 from ninja.errors import HttpError
 
 from apps.accounts.models import User
+from apps.esidata import market
 from apps.sde import gamedata
 from apps.sde.models import EveType
 from engine import formulas as f
@@ -37,6 +38,8 @@ class CompressedOreOut(Schema):
     names: dict[int, str]  # minerals in the mix
     mix: OreMix | None
     note: str = ""
+    prices: Literal["jita", "average"]
+    priced_at_average: int = 0  # items whose Jita orders could not be fetched
 
 
 @router.get("/plans/{plan_id}/compressed-ore", response=CompressedOreOut)
@@ -46,9 +49,11 @@ def compressed_ore(
     station_id: int | None = None,
     character_id: int | None = None,
     ore_classes: str = "asteroid",
+    prices: Literal["jita", "average"] = "jita",
 ):
     """Minerals on the plan's shopping list, bought as compressed ore and reprocessed at one of
-    your stations by one of your characters. Defaults: the station with the best yield on
+    your stations by one of your characters, priced from Jita 4-4 sell orders (or CCP's average
+    price). Defaults: the station with the best yield on
     asteroid ore, and the character whose mix costs least."""
     user = cast(User, request.user)
     p = get_object_or_404(Plan, pk=plan_id, user=user)
@@ -92,12 +97,18 @@ def compressed_ore(
     if station_id not in refineries:
         raise HttpError(422, "not one of your stations")
 
-    prices = {t: pr.unit_price for t, pr in data.prices.items()}
+    average = {t: pr.unit_price for t, pr in data.prices.items()}
     ores = [
-        dataclasses.replace(o, price=prices.get(o.type_id))
+        dataclasses.replace(o, price=average.get(o.type_id))
         for o in gamedata.ores()
-        if o.ore_class in classes
+        if o.ore_class in classes and any(m.type_id in need for m in o.materials)
     ]
+    books: dict[int, tuple] = {}
+    failed: set[int] = set()
+    if prices == "jita" and need:
+        books, failed = market.jita_sell_books([o.type_id for o in ores] + list(need))
+        # A failed fetch keeps the average price (book None); no orders means none on sale.
+        ores = [dataclasses.replace(o, book=books.get(o.type_id)) for o in ores]
     bonuses = gamedata.reprocessing_skill_bonuses()
     chars = {c.character_id: c for c in data.characters}
     character_choices = [Choice(id=c.character_id, name=c.name) for c in data.characters]
@@ -111,8 +122,9 @@ def compressed_ore(
             skills,
             bonuses,
             gamedata.GENERAL_REPROCESSING_SKILLS,
-            {m: prices.get(m) for m in minerals},
+            {m: average.get(m) for m in minerals},
             mineral_volumes={m: data.game.types[m].volume for m in minerals},
+            mineral_books={m: books[m] for m in need if m in books},
         )
 
     if character_id is not None and character_id not in chars:
@@ -135,4 +147,6 @@ def compressed_ore(
         "names": names,
         "mix": mix,
         "note": "" if need else "The shopping list has no minerals.",
+        "prices": prices,
+        "priced_at_average": len(failed),
     }
