@@ -81,7 +81,7 @@ export function PlanPage() {
               {tab === 'shopping' ? (
                 <div className="flex flex-col gap-4">
                   <ShoppingTab data={r} stale={stale} />
-                  <OrePanel planId={p.id} data={r} stale={stale} />
+                  <OrePanel planId={p.id} data={r} prices={prices} stale={stale} />
                 </div>
               ) : null}
               {tab === 'items' ? <ItemsTab data={r} plan={p} /> : null}

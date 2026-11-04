@@ -345,9 +345,10 @@ def test_minerals_as_compressed_ore(login):
         by_test_id(page, "plan.ore.refresh").click()
         expect(by_test_id(page, "plan.ore.refresh")).to_have_text("Refresh prices")
         expect(by_test_id(page, "plan.ore.priced-at")).to_contain_text("priced")
-    # Jita 4-4 sell orders by default (the CCP average if ESI cannot be reached); switchable.
+    # Jita 4-4 sell orders by default (the CCP average if ESI cannot be reached); the plan
+    # header's price switch prices the ore too.
     expect(by_test_id(page, "plan.ore.price-note")).to_contain_text("Prices:")
-    by_test_id(page, "plan.ore.prices").select_option("average")
+    by_test_id(page, "plan.prices").select_option("average")
     expect(by_test_id(page, "plan.ore.price-note")).to_contain_text("CCP average price")
     # Adding moon ore to the choice recomputes; Tritanium is still covered.
     by_test_id(page, "plan.ore.class.moon").check()

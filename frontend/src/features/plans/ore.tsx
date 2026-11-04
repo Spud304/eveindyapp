@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useCopy } from '@/hooks/useCopy'
 import { useCompressedOre, useRefreshOre, type OreQuery } from '@/lib/api/hooks'
 import type { PlanResultOut } from '@/lib/api/client'
+import type { PriceSource } from '@/hooks/usePriceSource'
 import { isk, m3, pct, qty, since } from '@/lib/format'
 import { Badge, Button, Checkbox, Empty, ErrorText, Field, Mono, Num, Panel, Select, Table } from '@/components/ui'
 
@@ -30,9 +31,11 @@ const CLASSES = [
 ] as const
 
 /** Minerals on the shopping list bought as compressed ore and reprocessed: the cheapest mix. */
-export function OrePanel({ planId, data, stale = false }: { planId: number; data: PlanResultOut; stale?: boolean }) {
+export function OrePanel({ planId, data, prices, stale = false }: { planId: number; data: PlanResultOut; prices: PriceSource; stale?: boolean }) {
   const [open, setOpen] = useState(false)
-  const [q, setQ] = useState<OreQuery>({ ore_classes: 'asteroid' })
+  const [choice, setQ] = useState<OreQuery>({ ore_classes: 'asteroid' })
+  // Priced like the shopping list above it: the plan header's Jita / CCP average switch.
+  const q: OreQuery = { ...choice, prices }
   const ore = useCompressedOre(planId, q, open)
   const refresh = useRefreshOre(planId, q)
   // While the plan or the mix is recomputing, the lists on screen are the old ones.
@@ -94,12 +97,6 @@ export function OrePanel({ planId, data, stale = false }: { planId: number; data
                       {c.name}
                     </option>
                   ))}
-                </Select>
-              </Field>
-              <Field label="Prices">
-                <Select value={d.prices} testId="plan.ore.prices" onChange={(e) => setQ({ ...q, prices: e.target.value as 'jita' | 'average' })}>
-                  <option value="jita">Jita 4-4 sell orders</option>
-                  <option value="average">CCP average price</option>
                 </Select>
               </Field>
               <div className="flex gap-3 pb-1">
