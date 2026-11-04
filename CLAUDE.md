@@ -22,3 +22,5 @@ Dev setup:
   - Flask app: `uv run --group test pytest tests/unit/ -q` from the repo root.
   - Backend: `uv run pytest -q` from `backend/` (needs the dev Postgres up), and `uvx ruff check` + `uvx ruff format` there.
   - Frontend: `npx tsc -b`, `npx eslint .` and `npx vite build` from `frontend/`.
+  - UI changes: browser tests with both dev servers running, `uv run pytest playwright_tests --browser chromium --tracing retain-on-failure -q` from `backend/`. They log in as reserved character ids 900000001–900000099 and `playwright_cleanup` wipes those accounts first; real accounts are never touched.
+- Playwright is pinned to 1.58.0: newer versions have no Chromium build for this box's Ubuntu 20.04, and `playwright install` deletes browsers no installed version uses.

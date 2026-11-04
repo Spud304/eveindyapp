@@ -312,14 +312,23 @@ Step 2 is done apart from per-character settings (alpha clone, allowed activitie
   - Plan view: inline rename, make active, delete. Tabs: Shopping list (with "held by plan X", copy as multibuy), Blueprints (source, ME/TE and station, each with its reason; invention chance and decryptor), Schedule (start, duration, character, station), Cost (totals and per-job fee parts), Progress (placeholder until step 5). Side column: lines editor with item search, settings (reserve, priority, stations, hangars, per-plan rule overrides), warnings.
   - Setup: characters and ESI status (link, re-link, main, remove), ESI feed status with "refresh now", stations (discover, enable, activities, rigs via search, tax), account build rules.
 - Checked: `tsc`, `eslint` and the production build are clean; Vite compiles every module; the API answers through the Vite proxy with a real session (indy 1 result: 102 jobs in 1.3 s); login redirects to the registered callback. Not checked: rendering in a browser. Headless Chromium in this WSL distro lacks system libraries (`libatk` and others), and the Chrome extension was not connected.
-- Not built: Library and Dashboard pages (they need list endpoints for blueprints and jobs), Playwright tests.
+- Dashboard (home page) and Library (2026-11-03):
+  - "Library" was not defined in this doc. Taken to mean every blueprint the account's characters and readable corps hold (BPO / BPC / stack of unresearched originals, ME / TE, runs, owner, structure, corp division name), with search, kind and location filters and sortable columns. `GET /api/library/blueprints`.
+  - Dashboard: open jobs (characters' and readable corps', ready first, then by end time, delivered in the last day last), slots per character, finishing within 24 h, the active plan, and problems (ESI access, failing feeds, one line per station with missing tax / rigs / activities). `GET /api/dashboard`.
+  - Job state: an installed job past its end date shows as "ready", as the client does (`industryCommon.JobStatus`); ESI's status lags until the next sync. [client]
+  - Slots: running jobs (active or paused) against slots from skills; ready-but-undelivered jobs are shown apart because whether they still hold a slot comes from the server (`GetJobCounts`) and is not visible in client code. Idle reaction slots are not flagged.
+  - Names: corpmates and NPC stations via ESI `/universe/names` (cached a day; structure ids are not accepted there, so structures are named from the account's stations).
+- Inputs that save on change (checkboxes, selects) keep a local copy (`useLocalCopy`) so they change within the click and follow the server afterwards; station and build-rule saves are also optimistic with rollback. Found by the browser tests: with the server value alone, a click snapped back until the refetch.
+- Playwright (`backend/playwright_tests`, AT Tool pattern): 14 specs against the running dev servers. They cover signed-out state, navigation and titles, theme persistence, the no-ESI flag, adding a station by hand with system and hull search, rigs / tax / activities, build rules, creating a plan and editing lines, the reasons shown in every tab, the no-station warning, switching the active plan, rule overrides, settings toggles, and delete confirmation. Reserved character ids 900000001-900000099; `playwright_cleanup` wipes them (unit-tested to stay inside the range). Stable over three consecutive runs (~12 s each).
+
+Step 4 is done apart from per-plan sharing views (step 7).
 
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
 1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
 2. **Account + data layer** — account-scoped config, all-character + corp fetches (assets, blueprints, jobs, divisions), role detection, token fix, Postgres. In progress; see Step 2 progress.
 3. **Plans** — model + JSON API, asset reservation. Done; see Step 3 progress.
-4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard. In progress; see Step 4 progress.
+4. **React frontend** — Plans list, Plan view (tabs), Setup, Library, Dashboard. Done; see Step 4 progress.
 5. **Tracker** — active-plan job matching, progress tab, reservation release.
 6. **BPO/BPC trade-off** — auto-copy to fill slots, opt-in buy BPC / extra BPO with cost vs time shown.
 7. **Sharing** — corp/link visibility.
