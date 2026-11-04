@@ -16,7 +16,10 @@ Progress fed to the engine, per linked job (cancelled and reverted jobs count fo
 - delivered: only when the product is a plan line. Other delivered output is in a hangar and
   arrives through the next asset sync, so counting it here would count it twice;
 - invention not yet delivered: its attempts count; delivered copies arrive as owned blueprints;
-- copying: linked and shown, but not fed to the engine yet.
+- copying: not fed here. The copies an open copy job is making reach the engine as owned
+  blueprints usable when the job ends (`inputs.incoming_copies`), for the plan the job is
+  linked to, or for every plan when it is linked to none; delivered copies arrive through the
+  blueprint sync.
 """
 
 import dataclasses
@@ -51,10 +54,11 @@ def plan_keys(base: PlanResult) -> set[tuple[int, Activity]]:
 
 
 def base_result(p: Plan, data) -> PlanResult | None:
-    """The plan with no progress and no stock: every blueprint it could need."""
+    """The plan with no progress, no stock and no copies in the making: every blueprint and
+    activity it could need, so a new copy job still matches after copies are under way."""
     from . import reservation
 
-    inp = reservation.plan_input(p, data, {})
+    inp = reservation.plan_input(p, data, {}, incoming=False)
     if not inp.lines:
         return None
     try:

@@ -57,6 +57,8 @@ class AccountData:
     buckets: dict[AssetBucket, int]
     # BPC item id -> the plan whose line picked it; other plans do not see it.
     picked: dict[int, int] = field(default_factory=dict)
+    # Copies open copy jobs are making, with the plan the job is linked to (None: any plan).
+    incoming: list[tuple[EngineBlueprint, int | None]] = field(default_factory=list)
 
 
 @dataclass
@@ -92,6 +94,7 @@ def load(user: User) -> AccountData:
         default_rules=inputs.build_rules(user),
         buckets=inputs.asset_buckets(user),
         picked=picked_blueprints(user),
+        incoming=inputs.incoming_copies(user),
     )
 
 
@@ -155,7 +158,11 @@ def _choices(p: Plan) -> dict[int, BlueprintChoice]:
     return out
 
 
-def plan_input(p: Plan, data: AccountData, pool: dict[AssetBucket, int]) -> PlanInput:
+def plan_input(
+    p: Plan, data: AccountData, pool: dict[AssetBucket, int], incoming: bool = True
+) -> PlanInput:
+    """`incoming`: include copies open copy jobs are making (those linked to this plan or to
+    no plan). Off for the tracker's base run, which must still plan the copy jobs."""
     locations, flags = plan_scope(p, data)
     assets: dict[int, int] = defaultdict(int)
     for bucket, qty in pool.items():
@@ -172,7 +179,10 @@ def plan_input(p: Plan, data: AccountData, pool: dict[AssetBucket, int]) -> Plan
         stations=tuple(data.stations[s] for s in stations),
         systems=data.systems,
         characters=data.characters,
-        blueprints=tuple(b for b in data.blueprints if data.picked.get(b.item_id, p.pk) == p.pk),
+        blueprints=(
+            *(b for b in data.blueprints if data.picked.get(b.item_id, p.pk) == p.pk),
+            *(b for b, plan_id in data.incoming if incoming and plan_id in (None, p.pk)),
+        ),
         assets=dict(assets),
         prices=data.prices,
         rules=effective_rules(data.default_rules, p),

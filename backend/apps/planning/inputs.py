@@ -18,12 +18,13 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.esidata.access import owner_q
-from apps.esidata.jobs import blueprint_jobs
+from apps.esidata.jobs import OPEN_STATUSES, blueprint_jobs
 from apps.esidata.models import (
     Asset,
     BlueprintItem,
     CharacterSkill,
     Feed,
+    IndustryJob,
     MarketPrice,
     SystemCostIndex,
 )
@@ -43,6 +44,7 @@ from engine.types import (
 )
 
 from .models import BuildRules as BuildRulesRow
+from .models import JobLink
 from .stations import engine_station
 
 AVAILABLE_FLAGS = ("Hangar", "CorpDeliveries", "Deliveries")
@@ -88,6 +90,42 @@ def owned_blueprints(user: User) -> tuple[OwnedBlueprint, ...]:
             )
         )
     return tuple(out)
+
+
+def incoming_copies(user: User) -> list[tuple[OwnedBlueprint, int | None]]:
+    """Copies that open copy jobs are making, as engine blueprints usable when the job ends,
+    with the plan the job is linked to (None: not linked to a plan, so any plan may use them).
+    A job makes `runs` copies of `licensed_runs` runs, at the original's ME / TE. Item ids are
+    negative and made up (job id x 1000 + n); the copies have none until they exist."""
+    jobs = list(
+        IndustryJob.objects.filter(
+            owner_q(user, Feed.JOBS), activity_id=5, status__in=OPEN_STATUSES
+        ).exclude(licensed_runs=None)
+    )
+    originals = {
+        b.item_id: b
+        for b in BlueprintItem.objects.filter(item_id__in=[j.blueprint_id for j in jobs])
+    }
+    links = dict(JobLink.objects.filter(user=user, job__in=jobs).values_list("job_id", "plan_id"))
+    now = timezone.now()
+    out = []
+    for j in jobs:
+        bpo = originals.get(j.blueprint_id)
+        for n in range(j.runs):
+            copy = OwnedBlueprint(
+                item_id=-(j.job_id * 1000 + n),
+                type_id=j.blueprint_type_id,
+                is_copy=True,
+                runs=j.licensed_runs or 0,
+                me=bpo.material_efficiency if bpo else 0,
+                te=bpo.time_efficiency if bpo else 0,
+                owner_id=j.owner_id,
+                location_id=j.output_location_id,
+                source_job_id=j.job_id,
+                available_in=(j.end_date - now).total_seconds(),
+            )
+            out.append((copy, links.get(j.job_id)))
+    return out
 
 
 AssetBucket = tuple[int, int, str]  # (type_id, root location id, hangar flag)

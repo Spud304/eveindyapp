@@ -229,3 +229,28 @@ def test_cannot_link_another_accounts_job(api, setup):
     )
     job(9, owner_kind="character", owner=OTHER_CHAR, installer=OTHER_CHAR)
     assert api.post(f"/api/plans/{setup.pk}/jobs/9").status_code == 404
+
+
+# --- copies being made -------------------------------------------------------------------------
+
+
+def test_copies_being_made_belong_to_the_linked_plan(setup, user):
+    other = Plan.objects.create(user=user, name="Q")
+    PlanLine.objects.create(plan=other, type_id=RIFTER, quantity=3)
+    copying = job(20, activity=5, product=None, runs=3)  # 3 copies...
+    IndustryJob.objects.filter(pk=20).update(licensed_runs=1)  # ...of 1 run each
+    link = JobLink.objects.create(user=user, plan=setup, job=copying, source="manual")
+
+    def sources(p):
+        result = reservation.run_plans(user)[p.pk].result
+        return sorted(str(j.source) for j in result.jobs if j.activity == "manufacturing")
+
+    assert sources(setup) == ["bpc", "bpc", "bpc"]  # one job per copy, usable when it ends
+    assert sources(other) == ["missing"]  # the copies are for plan P
+    # The tracker's base run leaves them out, so copy jobs stay matchable.
+    base = tracker.base_result(setup, reservation.load(user))
+    assert [str(j.source) for j in base.jobs] == ["missing"]
+
+    link.plan = None  # unlinked by hand: any plan may use the copies
+    link.save()
+    assert sources(other) == ["bpc", "bpc", "bpc"]
