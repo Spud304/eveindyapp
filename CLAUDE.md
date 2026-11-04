@@ -18,7 +18,7 @@ Dev setup:
 - Production stack: `deploy/docker-compose.yml` (README "Production"). Do not create `deploy/.env` on a dev machine: the dev backend reads it too.
 
 ## Status (2026-11-03)
-Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. Plan results, shared views and the ore calculator price from Jita 4-4 sell orders (`apps/esidata/market.py`, `engine/pricing.py`); tests stub the market (`no_market` fixture in `tests/planning/conftest.py`). The Flask app is removed and the production stack (Caddy + frontend, web, worker, scheduler, Postgres, Redis) was checked locally; see "Deployment" in `docs/redesign.md`. **Next:** deploy to a server (needs the user's domain and an EVE application with its callback).
+Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. Plan results, shared views and the ore calculator price from Jita 4-4 sell orders (`apps/esidata/market.py`, `engine/pricing.py`); tests stub the market (`no_market` fixture in `tests/planning/conftest.py`). The Flask app is removed and the production stack (Caddy + frontend, web, worker, scheduler, Postgres, Redis) was checked locally; see "Deployment" in `docs/redesign.md`. The user runs it on localhost only for now (decided 2026-11-04); a server deploy is not planned.
 
 Open from steps 6–7:
 - Copies attributed to a plan lose that attribution once delivered; a picked BPC that disappears is skipped without a warning.

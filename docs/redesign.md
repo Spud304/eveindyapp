@@ -394,6 +394,7 @@ Step 4 is done apart from per-plan sharing views (step 7).
 - `deploy/docker-compose.yml` gained the frontend: `deploy/Dockerfile.frontend` builds it and serves it from Caddy, which proxies `/api`, `/auth`, `/callback`, `/admin`, `/static` to `web` and gets the certificate (`deploy/Caddyfile`, from the AT Tool). `ACME_EMAIL` is required; compose stops with a message without it.
 - Only `web` builds the backend image; `worker` and `scheduler` use it. All three building it at once failed with containerd "parent snapshot does not exist".
 - Checked locally with throwaway settings (project `eveindy-prodtest`, ports 8081 / 8444, removed afterwards), starting with no backend image: migrations, health, the app and SPA deep links, the SSO redirect with the https callback, dev-login 404, admin and static files, http → https, the worker and scheduler starting, and `sync_esi --public` from the container (16k prices, 33k cost indices). Not checked: a real SSO login (needs a registered domain callback) and the SDE import (a large download).
+- Decided (2026-11-04): the app runs on localhost for the user only; no server deploy for now. The production stack stays ready.
 - Never create `deploy/.env` on a dev machine: the dev backend reads it too (`config/settings/base.py`), and its production `EVE_CALLBACK_URL` would break dev login.
 
 ## Build order
