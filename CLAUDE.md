@@ -18,10 +18,9 @@ Dev setup:
 - Production stack: `deploy/docker-compose.yml`.
 
 ## Status (2026-11-03)
-Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Step 6 (BPO/BPC trade-off) is in progress**: blueprint locks in the scheduler, automatic copying when it makes the plan finish sooner, owned BPCs used next to a BPO, BPC lines (pick owned BPCs for a line, kept out of other plans), and blueprints in open jobs (not free until the job ends or is delivered) are done; see "Step 6 progress" in `docs/redesign.md`.
+Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Step 6 (BPO/BPC trade-off) is in progress**: blueprint locks in the scheduler, automatic copying when it makes the plan finish sooner, owned BPCs used next to a BPO, BPC lines (pick owned BPCs for a line, kept out of other plans), blueprints in open jobs (not free until the job ends or is delivered), and copies being made by open copy jobs are done; see "Step 6 progress" in `docs/redesign.md`.
 
 Where step 6 continues:
-- Let copy jobs linked by the tracker reduce planned copies (`apps/planning/tracker.py`).
 - Opt-in "buy N BPCs" / "extra BPO" with cost vs time per blueprint. Per-blueprint user choices live in `engine.types.BlueprintChoice` (stored in `Plan.choices`, edited via `PATCH /api/plans/{id}`); extend it. Compare options with the scheduler's finish time, as `_search_parallel` in `backend/engine/planner.py` does.
 - The old Flask `src/industry.py` `_compute_build_strategy` is a reference only; it predates the client-verified formulas and ignores that a BPO is locked while copying.
 - Browser tests make test BPCs with `manage.py playwright_blueprint` (reserved ids only).
