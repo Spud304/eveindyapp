@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { useLocalCopy } from '@/hooks/useLocalCopy'
 import { useMe, usePlan, usePlanMutations, usePlanResult, useStations, useTypeSearch } from '@/lib/api/hooks'
 import type { PlanOut, PlanResultOut, TypeOut } from '@/lib/api/client'
 import { BUILD_CATEGORY_LABELS } from '@/lib/format'
@@ -221,18 +222,29 @@ function SettingsPanel({ plan: p }: { plan: PlanOut }) {
   const [priority, setPriority] = useState(String(p.priority))
   useEffect(() => setPriority(String(p.priority)), [p.priority])
   const save = (body: Parameters<typeof edit.mutate>[0]['body']) => edit.mutate({ id: p.id, body })
+  // Local copies so toggles change at once; they follow the server after each save.
+  const [reserve, setReserve] = useLocalCopy(p.reserve_assets)
+  const [stationIds, setStationIds] = useLocalCopy(p.station_ids)
+  const [overrides, setOverrides] = useLocalCopy(p.category_overrides as Record<string, string>)
+  const saveStations = (ids: number[]) => {
+    setStationIds(ids)
+    save({ station_ids: ids })
+  }
   const enabled = (stations.data ?? []).filter((s) => s.enabled)
-  const allStations = p.station_ids.length === 0
+  const allStations = stationIds.length === 0
   return (
     <Panel title="Settings" testId="plan.settings">
       <div className="flex flex-col gap-3">
         <div className="flex items-end gap-3">
           <Checkbox
             label="Reserve assets"
-            checked={p.reserve_assets}
+            checked={reserve}
             testId="plan.reserve"
             title="claim hangar stock before plans that do not reserve, in priority order"
-            onChange={(e) => save({ reserve_assets: e.target.checked })}
+            onChange={(e) => {
+              setReserve(e.target.checked)
+              save({ reserve_assets: e.target.checked })
+            }}
           />
           <Field label="Priority (lower first)">
             <Input
@@ -250,16 +262,20 @@ function SettingsPanel({ plan: p }: { plan: PlanOut }) {
         </div>
         <div className="flex flex-col gap-1">
           <span className="text-label font-semibold uppercase tracking-wide text-muted">Stations</span>
-          <Checkbox label="All enabled stations" checked={allStations} onChange={(e) => save({ station_ids: e.target.checked ? [] : enabled.map((s) => s.id) })} />
+          <Checkbox
+            label="All enabled stations"
+            checked={allStations}
+            testId="plan.stations.all"
+            onChange={(e) => saveStations(e.target.checked ? [] : enabled.map((s) => s.id))}
+          />
           {!allStations
             ? enabled.map((s) => (
                 <Checkbox
                   key={s.id}
                   label={s.name}
-                  checked={p.station_ids.includes(s.id)}
-                  onChange={(e) =>
-                    save({ station_ids: e.target.checked ? [...p.station_ids, s.id] : p.station_ids.filter((x) => x !== s.id) })
-                  }
+                  testId={`plan.stations.${s.id}`}
+                  checked={stationIds.includes(s.id)}
+                  onChange={(e) => saveStations(e.target.checked ? [...stationIds, s.id] : stationIds.filter((x) => x !== s.id))}
                 />
               ))
             : null}
@@ -273,13 +289,14 @@ function SettingsPanel({ plan: p }: { plan: PlanOut }) {
             <label key={key} className="flex items-center justify-between gap-2 text-ui">
               {label}
               <Select
-                value={p.category_overrides[key] ?? ''}
+                value={overrides[key] ?? ''}
                 testId={`plan.rule.${key}`}
                 onChange={(e) => {
                   const next: Record<string, 'buy' | 'build'> = {}
-                  for (const [k, mode] of Object.entries(p.category_overrides)) if (mode === 'buy' || mode === 'build') next[k] = mode
+                  for (const [k, mode] of Object.entries(overrides)) if (mode === 'buy' || mode === 'build') next[k] = mode
                   if (e.target.value === 'buy' || e.target.value === 'build') next[key] = e.target.value
                   else delete next[key]
+                  setOverrides(next)
                   save({ category_overrides: next })
                 }}
               >

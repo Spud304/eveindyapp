@@ -7,6 +7,7 @@ import {
   type PlanCreate,
   type PlanSettings,
   type StationIn,
+  type StationOut,
   type StationPatch,
 } from './client'
 
@@ -93,7 +94,22 @@ export function useStationMutations() {
     edit: useMutation({
       mutationFn: async ({ id, body }: { id: number; body: StationPatch }) =>
         unwrap(await api.PATCH('/api/stations/{station_id}', { params: { path: { station_id: id } }, body })),
-      onSuccess: done,
+      // Optimistic: checkboxes and inputs reflect the change at once, and roll back if refused.
+      // The cache is written before the first await, so the input changes within the same event.
+      onMutate: async ({ id, body }) => {
+        const before = qc.getQueryData<StationOut[]>(keys.stations)
+        if (before) {
+          // Rig changes wait for the server, which supplies the rig names.
+          const patch = Object.fromEntries(Object.entries(body).filter(([k, v]) => v != null && k !== 'rig_type_ids'))
+          qc.setQueryData<StationOut[]>(keys.stations, before.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+        }
+        await qc.cancelQueries({ queryKey: keys.stations }) // an older refetch must not overwrite it
+        return { before }
+      },
+      onError: (_err, _vars, ctx) => {
+        if (ctx?.before) qc.setQueryData(keys.stations, ctx.before)
+      },
+      onSettled: done,
       meta: { toast: 'Station saved' },
     }),
     remove: useMutation({
@@ -112,7 +128,17 @@ export function useSaveBuildRules() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (body: BuildRulesIO) => unwrap(await api.PUT('/api/build-rules', { body })),
-    onSuccess: () => {
+    // Optimistic, so a ticked box stays ticked while the save is in flight.
+    onMutate: async (body) => {
+      const before = qc.getQueryData<BuildRulesIO>(keys.rules)
+      qc.setQueryData(keys.rules, body) // before the first await: the box changes within the click
+      await qc.cancelQueries({ queryKey: keys.rules })
+      return { before }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.before) qc.setQueryData(keys.rules, ctx.before)
+    },
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: keys.rules })
       void qc.invalidateQueries({ queryKey: keys.plans })
     },

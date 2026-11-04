@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { useLocalCopy } from '@/hooks/useLocalCopy'
 import {
   useBuildRules,
   useCharacterMutations,
@@ -255,12 +256,24 @@ function StationRow({ station: s }: { station: StationOut }) {
   const rigSearch = useTypeSearch(useDebouncedValue(rigQuery), 'rig')
   const save = (body: Parameters<typeof edit.mutate>[0]['body']) => edit.mutate({ id: s.id, body })
   // StationOut.activities is plain strings; the server only stores Activity values.
-  const toggleActivity = (a: Activity) =>
-    save({ activities: (s.activities.includes(a) ? s.activities.filter((x) => x !== a) : [...s.activities, a]) as Activity[] })
+  const [activities, setActivities] = useLocalCopy(s.activities as Activity[])
+  const [enabled, setEnabled] = useLocalCopy(s.enabled)
+  const toggleActivity = (a: Activity) => {
+    const next = activities.includes(a) ? activities.filter((x) => x !== a) : [...activities, a]
+    setActivities(next)
+    save({ activities: next })
+  }
   return (
-    <tr data-testid={`setup.station.${s.id}`} className={s.enabled ? '' : 'opacity-60'}>
+    <tr data-testid={`setup.station.${s.id}`} className={enabled ? '' : 'opacity-60'}>
       <td>
-        <Checkbox checked={s.enabled} onChange={(e) => save({ enabled: e.target.checked })} title="plans only use enabled stations" />
+        <Checkbox
+          checked={enabled}
+          onChange={(e) => {
+            setEnabled(e.target.checked)
+            save({ enabled: e.target.checked })
+          }}
+          title="plans only use enabled stations"
+        />
       </td>
       <td className="min-w-56">
         <div className="font-medium">{s.name}</div>
@@ -274,7 +287,7 @@ function StationRow({ station: s }: { station: StationOut }) {
       <td>
         <div className="flex flex-wrap gap-x-2 gap-y-0.5">
           {ACTIVITIES.map((a) => (
-            <Checkbox key={a} label={a} checked={s.activities.includes(a)} onChange={() => toggleActivity(a)} />
+            <Checkbox key={a} label={a} checked={activities.includes(a)} onChange={() => toggleActivity(a)} />
           ))}
         </div>
       </td>
@@ -402,10 +415,13 @@ function RulesPanel() {
   const [q, setQ] = useState('')
   const search = useTypeSearch(useDebouncedValue(q), 'buildable')
   const blacklist = rules.data?.item_blacklist ?? []
-  const buy = rules.data?.buy_categories ?? []
+  const [buy, setBuy] = useLocalCopy(rules.data?.buy_categories ?? [])
   const names = useTypeNames(blacklist)
-  const put = (next: { item_blacklist?: number[]; buy_categories?: string[] }) =>
-    save.mutate({ item_blacklist: next.item_blacklist ?? blacklist, buy_categories: (next.buy_categories ?? buy) as typeof buy })
+  const put = (next: { item_blacklist?: number[]; buy_categories?: string[] }) => {
+    const categories = (next.buy_categories ?? buy) as typeof buy
+    setBuy(categories)
+    save.mutate({ item_blacklist: next.item_blacklist ?? blacklist, buy_categories: categories })
+  }
   return (
     <Panel title="Build rules" testId="setup.rules">
       <p className="mb-2 text-ui text-muted">Account defaults. Each plan can flip them for itself. Anything bought stops the tree there.</p>
