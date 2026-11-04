@@ -50,6 +50,20 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # The committed API types must match the backend's schema (npm run gen:api after a change).
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync
+        working-directory: backend
+      - run: >-
+          uv run python manage.py export_openapi_schema --api config.api.api
+          --output "$RUNNER_TEMP/openapi.json"
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+      - run: npx openapi-typescript "$RUNNER_TEMP/openapi.json" -o "$RUNNER_TEMP/schema.d.ts"
+      - run: diff -u src/lib/api/schema.d.ts "$RUNNER_TEMP/schema.d.ts"
       - run: npx tsc -b
       - run: npx eslint .
       - run: npx vite build

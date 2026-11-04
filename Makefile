@@ -1,5 +1,5 @@
 .PHONY: help run dev services services-recreate services-down dev-backend dev-frontend stop logs \
-        migrate sync sde gen-api test test-backend test-frontend lint format check playwright \
+        migrate sync sde gen-api api-check test test-backend test-frontend lint format check playwright \
         backup prod-build prod-up prod-logs
 
 SHELL := /bin/bash
@@ -87,7 +87,14 @@ lint:              ## ruff check and format check (backend), eslint (frontend)
 format:            ## ruff format the backend (no Prettier on the frontend: see CLAUDE.md)
 	cd backend && uvx ruff format
 
-check: lint test   ## everything CLAUDE.md asks for before a commit, except the browser tests
+api-check:         ## the committed frontend API types match the backend schema (no server needed)
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	  (cd backend && DJANGO_SETTINGS_MODULE=config.settings.test uv run python manage.py \
+	    export_openapi_schema --api config.api.api --output "$$tmp/openapi.json") && \
+	  (cd frontend && npx openapi-typescript "$$tmp/openapi.json" -o "$$tmp/schema.d.ts" >/dev/null) && \
+	  diff -u frontend/src/lib/api/schema.d.ts "$$tmp/schema.d.ts" && echo "API types match the schema"
+
+check: lint api-check test   ## everything CLAUDE.md asks for before a commit, except the browser tests
 
 playwright:        ## browser tests against the running dev servers (`make run` in another terminal)
 	cd backend && uv run python manage.py playwright_cleanup
