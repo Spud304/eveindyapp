@@ -234,7 +234,7 @@ export function usePlanMutations() {
 
 // --- compressed ore ------------------------------------------------------------------------
 
-export type OreQuery = { station_id?: number; character_id?: number; ore_classes: string }
+export type OreQuery = { station_id?: number; character_id?: number; ore_classes: string; prices?: 'jita' | 'average' }
 
 /** The cheapest compressed ore for the plan's minerals. Under the plans key, so it refreshes
  * with the plan. */

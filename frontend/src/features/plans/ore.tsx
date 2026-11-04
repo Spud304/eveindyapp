@@ -66,6 +66,12 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                   ))}
                 </Select>
               </Field>
+              <Field label="Prices">
+                <Select value={d.prices} testId="plan.ore.prices" onChange={(e) => setQ({ ...q, prices: e.target.value as 'jita' | 'average' })}>
+                  <option value="jita">Jita 4-4 sell orders</option>
+                  <option value="average">CCP average price</option>
+                </Select>
+              </Field>
               <div className="flex gap-3 pb-1">
                 {CLASSES.map((c) => (
                   <Checkbox key={c.key} label={c.label} checked={classes.includes(c.key)} testId={`plan.ore.class.${c.key}`} onChange={(e) => toggleClass(c.key, e.target.checked)} />
@@ -102,7 +108,13 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                   </Button>
                 </span>
               </div>
-              <p className="text-label text-muted">{mix.station_reason.text}. Prices are CCP average prices.</p>
+              <p className="text-label text-muted" data-testid="plan.ore.price-note">
+                {mix.station_reason.text}.{' '}
+                {d?.prices === 'jita'
+                  ? 'Prices: Jita 4-4 sell orders, cheapest first, as many as each buy needs (refreshed every 5 minutes).'
+                  : 'Prices: CCP average price, no limit on what can be bought.'}
+                {d?.priced_at_average ? ` ${d.priced_at_average} item(s) could not be fetched from Jita and use the CCP average price.` : ''}
+              </p>
               {mix.warnings.map((w) => (
                 <p key={w} className="text-label text-warn">
                   {w}
@@ -114,6 +126,15 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                     <th>Ore</th>
                     <th className="text-right">Units</th>
                     <th className="text-right">Yield</th>
+                    <th className="text-right" title="average paid per unit">
+                      Avg
+                    </th>
+                    <th className="text-right" title="the dearest sell order bought from">
+                      Up to
+                    </th>
+                    <th className="text-right" title="units on sale at Jita 4-4">
+                      On sale
+                    </th>
                     <th className="text-right">ISK</th>
                     <th className="text-right">Volume</th>
                   </tr>
@@ -124,6 +145,9 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                       <td title={o.reason.text}>{o.name}</td>
                       <Num>{qty(o.quantity)}</Num>
                       <Num>{pct(o.efficiency * 100, 1)}</Num>
+                      <Num className="text-muted">{isk(o.unit_price)}</Num>
+                      <Num className="text-muted">{o.top_price != null ? isk(o.top_price) : ''}</Num>
+                      <Num className="text-muted">{o.on_sale != null ? qty(o.on_sale) : ''}</Num>
                       <Num>{isk(o.total)}</Num>
                       <Num className="text-muted">{m3(o.volume)}</Num>
                     </tr>
@@ -139,6 +163,12 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                     <th className="text-right" title="made beyond what the plan needs">
                       Spare
                     </th>
+                    <th className="text-right" title="average per unit when bought as minerals">
+                      Avg
+                    </th>
+                    <th className="text-right" title="units on sale at Jita 4-4">
+                      On sale
+                    </th>
                     <th className="text-right" title="volume of the needed amount, bought as minerals">
                       Volume
                     </th>
@@ -151,6 +181,8 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                       <Num>{qty(m.needed)}</Num>
                       <Num>{qty(m.produced)}</Num>
                       <Num className="text-muted">{m.surplus ? qty(m.surplus) : ''}</Num>
+                      <Num className="text-muted">{m.needed && m.unit_price != null ? isk(m.unit_price) : ''}</Num>
+                      <Num className={m.on_sale != null && m.on_sale < m.needed ? 'text-warn' : 'text-muted'}>{m.on_sale != null ? qty(m.on_sale) : ''}</Num>
                       <Num className="text-muted">{m.volume ? m3(m.volume) : ''}</Num>
                     </tr>
                   ))}

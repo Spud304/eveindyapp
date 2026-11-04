@@ -451,7 +451,8 @@ export interface paths {
         /**
          * Compressed Ore
          * @description Minerals on the plan's shopping list, bought as compressed ore and reprocessed at one of
-         *     your stations by one of your characters. Defaults: the station with the best yield on
+         *     your stations by one of your characters, priced from Jita 4-4 sell orders (or CCP's average
+         *     price). Defaults: the station with the best yield on
          *     asteroid ore, and the character whose mix costs least.
          */
         get: operations["apps_planning_ore_api_compressed_ore"];
@@ -1657,6 +1658,16 @@ export interface components {
              * @default
              */
             note: string;
+            /**
+             * Prices
+             * @enum {string}
+             */
+            prices: "jita" | "average";
+            /**
+             * Priced At Average
+             * @default 0
+             */
+            priced_at_average: number;
         };
         /** MineralLine */
         MineralLine: {
@@ -1677,6 +1688,8 @@ export interface components {
              * @default 0
              */
             volume: number;
+            /** On Sale */
+            on_sale?: number | null;
         };
         /**
          * OreClass
@@ -1705,6 +1718,10 @@ export interface components {
              * @default 0
              */
             volume: number;
+            /** Top Price */
+            top_price?: number | null;
+            /** On Sale */
+            on_sale?: number | null;
         };
         /** OreMix */
         OreMix: {
@@ -2583,6 +2600,7 @@ export interface operations {
                 station_id?: number | null;
                 character_id?: number | null;
                 ore_classes?: string;
+                prices?: "jita" | "average";
             };
             header?: never;
             path: {
