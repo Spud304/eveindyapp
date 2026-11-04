@@ -18,12 +18,13 @@ Dev setup:
 - Production stack: `deploy/docker-compose.yml`.
 
 ## Status (2026-11-03)
-Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Step 6 (BPO/BPC trade-off) is in progress**: blueprint locks in the scheduler and automatic copying when it makes the plan finish sooner are done; see "Step 6 progress" in `docs/redesign.md`.
+Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Step 6 (BPO/BPC trade-off) is in progress**: blueprint locks in the scheduler, automatic copying when it makes the plan finish sooner, owned BPCs used next to a BPO, and BPC lines (pick owned BPCs for a line, kept out of other plans) are done; see "Step 6 progress" in `docs/redesign.md`.
 
 Where step 6 continues:
-- Reuse owned BPCs next to an owned BPO (today `plan_blueprint` ignores BPCs when a BPO is owned), and let copy jobs linked by the tracker reduce planned copies (`apps/planning/tracker.py`).
+- Let copy jobs linked by the tracker reduce planned copies (`apps/planning/tracker.py`).
 - Opt-in "buy N BPCs" / "extra BPO" with cost vs time per blueprint. Per-blueprint user choices live in `engine.types.BlueprintChoice` (stored in `Plan.choices`, edited via `PATCH /api/plans/{id}`); extend it. Compare options with the scheduler's finish time, as `_search_parallel` in `backend/engine/planner.py` does.
 - The old Flask `src/industry.py` `_compute_build_strategy` is a reference only; it predates the client-verified formulas and ignores that a BPO is locked while copying.
+- Browser tests make test BPCs with `manage.py playwright_blueprint` (reserved ids only).
 
 Reference sources (prefer these over memory for game mechanics):
 - Decompiled game client: `/mnt/g/eve projects/src` (`industry/` for job cost, time, materials, max runs; `eve/common/script/util/industryCommon.py` for how modifiers are built). Findings are recorded under "Client code" in `docs/redesign.md`.
