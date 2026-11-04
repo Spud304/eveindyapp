@@ -1,8 +1,10 @@
 """Lookups the frontend needs: item, structure and rig search, solar systems, type names."""
 
+from django.db.models import Q
 from django.http import HttpRequest
 from ninja import Field, Query, Router, Schema
 
+from . import gamedata
 from .models import BlueprintProduct, EveType, SdeRawRecord, SolarSystem
 
 router = Router(tags=["sde"])
@@ -43,7 +45,7 @@ def _ranked(qs, q: str, limit: int):
 @router.get("/types/search", response=list[TypeOut])
 def search_types(request: HttpRequest, params: Query[SearchIn]):
     """`buildable`: products of manufacturing or reactions (plan lines). `structure`: Upwell
-    hulls. `rig`: structure modules with industry bonuses. `any`: every published type."""
+    hulls. `rig`: structure modules with industry or reprocessing bonuses. `any`: every published type."""
     qs = EveType.objects.filter(published=True, removed=False)
     if params.kind == "buildable":
         product_ids = BlueprintProduct.objects.filter(
@@ -59,7 +61,11 @@ def search_types(request: HttpRequest, params: Query[SearchIn]):
                 file="industryModifierSources", removed=False
             ).values_list("key", flat=True)
         ]
-        qs = qs.filter(pk__in=rig_ids, group__category_id=STRUCTURE_MODULE_CATEGORY)
+        # Reprocessing rigs have no industryModifierSources record; they are found by group.
+        qs = qs.filter(
+            Q(pk__in=rig_ids) | Q(group_id__in=list(gamedata.REFINERY_RIG_GROUPS)),
+            group__category_id=STRUCTURE_MODULE_CATEGORY,
+        )
     return [
         {"id": t.id, "name": t.name, "group_id": t.group_id}
         for t in _ranked(qs, params.q, params.limit)

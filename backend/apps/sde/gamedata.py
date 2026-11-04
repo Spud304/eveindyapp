@@ -11,6 +11,7 @@ without a restart.
 from collections import defaultdict
 from functools import lru_cache
 
+from engine.reprocess import Ore, OreClass, RefineryRig
 from engine.types import (
     Activity,
     BlueprintData,
@@ -253,3 +254,91 @@ def _rig(build_key: int, type_id: int) -> Rig:
         bonuses.append(RigBonus(activity, kind, percent, target))
     sec = {cls: values[attr] for cls, attr in ATTR_SECURITY.items() if attr in values}
     return Rig(type_id, t.name, tuple(bonuses), sec)
+
+
+# --- reprocessing (compressed ore calculator) ----------------------------------------------
+
+ASTEROID_CATEGORY = 25
+ICE_GROUP = 465
+MOON_ORE_GROUPS = frozenset({1884, 1920, 1921, 1922, 1923})
+ATTR_REPROCESSING_SKILL = 790  # reprocessingSkillType on ores [client][SDE]
+ATTR_SKILL_YIELD = 379  # refiningYieldMutator on skills: percent per level [client][SDE]
+ATTR_RIG_YIELD = 717  # refiningYieldMultiplier on reprocessing rigs [SDE]
+ATTR_HULL_YIELD = 2722  # strRefiningYieldBonus on refineries, percent [SDE]
+GENERAL_REPROCESSING_SKILLS = (3385, 3389)  # Reprocessing, Reprocessing Efficiency [client]
+# Reprocessing rig groups and what they bonus. M-sets name their ore class; L / XL
+# "Reprocessing Monitor" rigs are assumed to cover every class [unverified].
+REFINERY_RIG_GROUPS = {
+    1941: frozenset({OreClass.ASTEROID}),
+    1942: frozenset({OreClass.ICE}),
+    1943: frozenset({OreClass.MOON}),
+    1944: frozenset(OreClass),
+    1945: frozenset(OreClass),
+}
+
+
+def ores() -> tuple[Ore, ...]:
+    """Every published compressed asteroid ore, moon ore and ice, without prices."""
+    return _ores(_build_key())
+
+
+def reprocessing_skill_bonuses() -> dict[int, float]:
+    return _skill_bonuses(_build_key())
+
+
+def refinery_rig(type_id: int) -> RefineryRig | None:
+    t = EveType.objects.filter(pk=type_id).first()
+    if t is None or t.group_id not in REFINERY_RIG_GROUPS:
+        return None
+    values = dogma(type_id)
+    sec = {cls: values[attr] for cls, attr in ATTR_SECURITY.items() if attr in values}
+    return RefineryRig(
+        type_id, t.name, REFINERY_RIG_GROUPS[t.group_id], values.get(ATTR_RIG_YIELD, 0.5), sec
+    )
+
+
+def hull_refining_bonus(type_id: int | None) -> float:
+    return dogma(type_id).get(ATTR_HULL_YIELD, 0.0) if type_id else 0.0
+
+
+@lru_cache(maxsize=2)
+def _ores(build_key: int) -> tuple[Ore, ...]:
+    compressed = {
+        int(r["compressedTypeID"])
+        for r in SdeRawRecord.objects.filter(file="compressibleTypes", removed=False).values_list(
+            "data", flat=True
+        )
+    }
+    out = []
+    for t in EveType.objects.filter(
+        pk__in=compressed, published=True, removed=False, group__category_id=ASTEROID_CATEGORY
+    ):
+        mats = (_raw("typeMaterials", t.id) or {}).get("materials", [])
+        if not mats:
+            continue
+        cls = (
+            OreClass.ICE
+            if t.group_id == ICE_GROUP
+            else OreClass.MOON
+            if t.group_id in MOON_ORE_GROUPS
+            else OreClass.ASTEROID
+        )
+        skill = dogma(t.id).get(ATTR_REPROCESSING_SKILL)
+        out.append(
+            Ore(
+                t.id,
+                t.name,
+                cls,
+                t.portion_size or 1,
+                tuple(Material(int(m["materialTypeID"]), int(m["quantity"])) for m in mats),
+                int(skill) if skill else None,
+                None,
+            )
+        )
+    return tuple(sorted(out, key=lambda o: o.name))
+
+
+@lru_cache(maxsize=2)
+def _skill_bonuses(build_key: int) -> dict[int, float]:
+    skills = {o.skill_id for o in _ores(build_key) if o.skill_id} | set(GENERAL_REPROCESSING_SKILLS)
+    return {s: dogma(s).get(ATTR_SKILL_YIELD, 0.0) for s in skills}

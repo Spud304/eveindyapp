@@ -6,6 +6,7 @@ from apps.core.api import router as core_router
 from apps.esidata.api import router as sync_router
 from apps.esidata.overview_api import router as overview_router
 from apps.planning.api import router as planning_router
+from apps.planning.ore_api import router as ore_router
 from apps.planning.plans_api import router as plans_router
 from apps.sde.api import router as sde_router
 
@@ -21,6 +22,7 @@ api.add_router("/", core_router)
 api.add_router("/", accounts_router)
 api.add_router("/", planning_router)
 api.add_router("/", plans_router)
+api.add_router("/", ore_router)
 api.add_router("/", sde_router)
 api.add_router("/", sync_router)
 api.add_router("/", overview_router)
