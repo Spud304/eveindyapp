@@ -17,6 +17,24 @@ Dev setup:
 - Never use `/auth/dev-login` with a real character id: it upserts the character with a dev owner hash, which counts as a transfer and deletes its ESI token.
 - Production stack: `deploy/docker-compose.yml`.
 
+## Status (2026-11-03)
+Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Next: step 6, BPO/BPC trade-off** (spec: "BPO vs BPC trade-off" in `docs/redesign.md`).
+
+Where step 6 starts:
+- `backend/engine/planner.py` `plan_blueprint`: an owned BPO is one job for all runs, split only at the client's 30-day limit (`formulas.max_runs`). Owned BPCs are one job each. Copy jobs are only planned for invention (`plan_invention`). Step 6 adds copies to fill idle manufacturing slots automatically, plus opt-in "buy N BPCs" / "extra BPO" with cost vs time per blueprint.
+- `backend/engine/schedule.py` is the list scheduler; use its finish time to compare options instead of a separate time formula.
+- Per-blueprint user choices live in `engine.types.BlueprintChoice` (stored in `Plan.choices`, edited via `PATCH /api/plans/{id}`). Extend it for the opt-ins.
+- The old Flask `src/industry.py` `_compute_build_strategy` shows the earlier attempt. It is a reference only; it predates the client-verified formulas.
+- Also open: copy jobs linked by the tracker do not yet reduce planned copies (`apps/planning/tracker.py`).
+
+Reference sources (prefer these over memory for game mechanics):
+- Decompiled game client: `/mnt/g/eve projects/src` (`industry/` for job cost, time, materials, max runs; `eve/common/script/util/industryCommon.py` for how modifiers are built). Findings are recorded under "Client code" in `docs/redesign.md`.
+- SDE: imported in the dev DB; `apps/sde/gamedata.py` builds engine inputs. `industryModifierSources` and `industryTargetFilters` drive structure and rig bonuses.
+- ESI: the live OpenAPI spec at `https://esi.evetech.net/meta/openapi.json` for routes, scopes and fields.
+- The AT Tool repo (`/mnt/g/SpudsATTool`) for stack patterns.
+
+Dev data: the account with id 1 is the user's real account (main Starch Man, ESI linked as Director of The Fry Cooks). Plans "indy 1" and "dreadbatch 1" and 8 discovered stations are real dev data. Test with the Playwright reserved ids, not with this account.
+
 ## Commits
 - Commit directly to `master` (solo project); no feature branches unless asked.
 - Before committing code:
