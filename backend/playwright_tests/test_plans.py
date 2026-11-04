@@ -227,3 +227,26 @@ def test_buy_options_apply_and_remove(login):
     by_test_id(page, f"plan.blueprint.{RIFTER_BP}.buy").click()
     by_test_id(page, f"plan.blueprint.{RIFTER_BP}.unbuy").click()
     expect(row).not_to_contain_text("bought")
+
+
+def test_minerals_as_compressed_ore(login):
+    s = login()
+    s.add_station()
+    plan = s.add_plan(uniq("ore"), [(RIFTER, 1)])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    by_test_id(page, "plan.ore.toggle").click()
+    expect(by_test_id(page, "plan.ore.summary")).to_contain_text("vs minerals")
+    trit = by_test_id(page, f"plan.ore.mineral.{TRITANIUM}")
+    expect(trit).to_contain_text("Tritanium")
+
+    def cell(n):
+        return int(trit.locator("td").nth(n).inner_text().replace(",", ""))
+
+    assert cell(2) >= cell(1) > 0  # made covers what is needed
+    expect(page.locator('[data-testid^="plan.ore.line."]').first).to_be_visible()
+    expect(by_test_id(page, "plan.ore.copy-all")).to_be_enabled()
+    # Adding moon ore to the choice recomputes; Tritanium is still covered.
+    by_test_id(page, "plan.ore.class.moon").check()
+    expect(by_test_id(page, "plan.ore.class.moon")).to_be_checked()
+    expect(trit).to_contain_text("Tritanium")

@@ -25,6 +25,7 @@ import {
 } from '@/components/ui'
 import { BlueprintsTab, CostTab, ScheduleTab, ShoppingTab, type Lookups } from './tabs'
 import { ProgressTab } from './progress'
+import { OrePanel } from './ore'
 
 type TabKey = 'shopping' | 'blueprints' | 'schedule' | 'cost' | 'progress'
 
@@ -68,7 +69,12 @@ export function PlanPage() {
           ) : null}
           {r?.result ? (
             <>
-              {tab === 'shopping' ? <ShoppingTab data={r} /> : null}
+              {tab === 'shopping' ? (
+                <div className="flex flex-col gap-4">
+                  <ShoppingTab data={r} />
+                  <OrePanel planId={p.id} data={r} />
+                </div>
+              ) : null}
               {tab === 'blueprints' ? <BlueprintsTab data={r} lookups={lookups} plan={p} /> : null}
               {tab === 'schedule' ? <ScheduleTab data={r} lookups={lookups} /> : null}
               {tab === 'cost' ? <CostTab data={r} /> : null}

@@ -441,6 +441,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plans/{plan_id}/compressed-ore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compressed Ore
+         * @description Minerals on the plan's shopping list, bought as compressed ore and reprocessed at one of
+         *     your stations by one of your characters. Defaults: the station with the best yield on
+         *     asteroid ore, and the character whose mix costs least.
+         */
+        get: operations["apps_planning_ore_api_compressed_ore"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/types/search": {
         parameters: {
             query?: never;
@@ -451,7 +473,7 @@ export interface paths {
         /**
          * Search Types
          * @description `buildable`: products of manufacturing or reactions (plan lines). `structure`: Upwell
-         *     hulls. `rig`: structure modules with industry bonuses. `any`: every published type.
+         *     hulls. `rig`: structure modules with industry or reprocessing bonuses. `any`: every published type.
          */
         get: operations["apps_sde_api_search_types"];
         put?: never;
@@ -1596,6 +1618,101 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** Choice */
+        Choice: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+        };
+        /** CompressedOreOut */
+        CompressedOreOut: {
+            /** Station Id */
+            station_id: number | null;
+            /** Character Id */
+            character_id: number | null;
+            /** Stations */
+            stations: components["schemas"]["Choice"][];
+            /** Characters */
+            characters: components["schemas"]["Choice"][];
+            /** Ore Classes */
+            ore_classes: components["schemas"]["OreClass"][];
+            /** Names */
+            names: {
+                [key: string]: string;
+            };
+            mix: components["schemas"]["OreMix"] | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** MineralLine */
+        MineralLine: {
+            /** Type Id */
+            type_id: number;
+            /** Needed */
+            needed: number;
+            /** Produced */
+            produced: number;
+            /** Surplus */
+            surplus: number;
+            /** Unit Price */
+            unit_price: number | null;
+            /** Buy Cost */
+            buy_cost: number | null;
+        };
+        /**
+         * OreClass
+         * @enum {string}
+         */
+        OreClass: "asteroid" | "moon" | "ice";
+        /** OreLine */
+        OreLine: {
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            /** Batches */
+            batches: number;
+            /** Quantity */
+            quantity: number;
+            /** Unit Price */
+            unit_price: number;
+            /** Total */
+            total: number;
+            /** Efficiency */
+            efficiency: number;
+            reason: components["schemas"]["Reason"];
+        };
+        /** OreMix */
+        OreMix: {
+            /** Ores */
+            ores: components["schemas"]["OreLine"][];
+            /** Minerals */
+            minerals: components["schemas"]["MineralLine"][];
+            /** Ore Cost */
+            ore_cost: number;
+            /** Mineral Cost */
+            mineral_cost: number | null;
+            station_reason: components["schemas"]["Reason"];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+            /**
+             * Feasible
+             * @default true
+             */
+            feasible: boolean;
+        };
         /** SearchIn */
         SearchIn: {
             /**
@@ -2431,6 +2548,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanOut"];
+                };
+            };
+        };
+    };
+    apps_planning_ore_api_compressed_ore: {
+        parameters: {
+            query?: {
+                station_id?: number | null;
+                character_id?: number | null;
+                ore_classes?: string;
+            };
+            header?: never;
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompressedOreOut"];
                 };
             };
         };

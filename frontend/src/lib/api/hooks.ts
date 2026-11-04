@@ -232,6 +232,22 @@ export function usePlanMutations() {
   }
 }
 
+// --- compressed ore ------------------------------------------------------------------------
+
+export type OreQuery = { station_id?: number; character_id?: number; ore_classes: string }
+
+/** The cheapest compressed ore for the plan's minerals. Under the plans key, so it refreshes
+ * with the plan. */
+export function useCompressedOre(planId: number, q: OreQuery, enabled: boolean) {
+  return useQuery({
+    queryKey: [...keys.plans, planId, 'compressed-ore', q],
+    queryFn: async () => unwrap(await api.GET('/api/plans/{plan_id}/compressed-ore', { params: { path: { plan_id: planId }, query: q } })),
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  })
+}
+
 // --- sharing -----------------------------------------------------------------------------
 
 /** A plan shared by link: no login. Cached on the server for a minute. */
