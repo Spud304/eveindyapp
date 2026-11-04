@@ -242,13 +242,29 @@ export type OreQuery = { station_id?: number; character_id?: number; ore_classes
 
 /** The cheapest compressed ore for the plan's minerals. Under the plans key, so it refreshes
  * with the plan. */
+const oreKey = (planId: number, q: OreQuery) => [...keys.plans, planId, 'compressed-ore', q] as const
+
+/** The mix stays as calculated (what you copy is what you see) until the plan or a choice
+ * changes, or you refresh prices: no refetch on focus or after a while. */
 export function useCompressedOre(planId: number, q: OreQuery, enabled: boolean) {
   return useQuery({
-    queryKey: [...keys.plans, planId, 'compressed-ore', q],
+    queryKey: oreKey(planId, q),
     queryFn: async () => unwrap(await api.GET('/api/plans/{plan_id}/compressed-ore', { params: { path: { plan_id: planId }, query: q } })),
     enabled,
     placeholderData: keepPreviousData,
-    staleTime: 30_000,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+}
+
+/** Ask Jita again (not the orders fetched in the last 5 minutes) and replace the mix. */
+export function useRefreshOre(planId: number, q: OreQuery) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () =>
+      unwrap(await api.GET('/api/plans/{plan_id}/compressed-ore', { params: { path: { plan_id: planId }, query: { ...q, refresh: true } } })),
+    onSuccess: (data) => qc.setQueryData(oreKey(planId, q), data),
   })
 }
 

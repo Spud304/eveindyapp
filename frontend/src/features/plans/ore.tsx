@@ -1,9 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useCopy } from '@/hooks/useCopy'
-import { useCompressedOre, type OreQuery } from '@/lib/api/hooks'
+import { useCompressedOre, useRefreshOre, type OreQuery } from '@/lib/api/hooks'
 import type { PlanResultOut } from '@/lib/api/client'
-import { isk, m3, pct, qty } from '@/lib/format'
+import { isk, m3, pct, qty, since } from '@/lib/format'
 import { Badge, Button, Checkbox, Empty, ErrorText, Field, Mono, Num, Panel, Select, Table } from '@/components/ui'
+
+const STALE_MS = 5 * 60_000 // Jita orders are refreshed by ESI every 5 minutes
+
+/** "priced 03:42 · 2 min ago", re-rendered every 30 s; amber once ESI has newer orders. */
+function PricedAt({ at }: { at: string }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const t = window.setInterval(() => tick((n) => n + 1), 30_000)
+    return () => window.clearInterval(t)
+  }, [])
+  const old = Date.now() - new Date(at).getTime() > STALE_MS
+  return (
+    <span className={old ? 'text-label text-warn' : 'text-label text-muted'} data-testid="plan.ore.priced-at" title={new Date(at).toLocaleString()}>
+      priced {new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {since(at)}
+      {old ? ' · prices may have moved' : ''}
+    </span>
+  )
+}
 
 const CLASSES = [
   { key: 'asteroid', label: 'asteroid ore' },
@@ -16,6 +34,7 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState<OreQuery>({ ore_classes: 'asteroid' })
   const ore = useCompressedOre(planId, q, open)
+  const refresh = useRefreshOre(planId, q)
   const { copied, copy } = useCopy<'ore' | 'all'>()
   const d = ore.data
   const mix = d?.mix
@@ -36,16 +55,24 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
       title="Minerals as compressed ore"
       testId="plan.ore"
       actions={
-        <Button small variant={open ? 'ghost' : 'primary'} onClick={() => setOpen(!open)} testId="plan.ore.toggle">
-          {open ? 'Hide' : 'Work it out'}
-        </Button>
+        <span className="flex items-center gap-2">
+          {open && ore.data?.priced_at ? <PricedAt at={ore.data.priced_at} /> : null}
+          {open && ore.data?.prices === 'jita' ? (
+            <Button small onClick={() => refresh.mutate()} disabled={refresh.isPending || ore.isFetching} testId="plan.ore.refresh" title="ask Jita again for current sell orders and work the mix out again">
+              {refresh.isPending ? 'Refreshing' : 'Refresh prices'}
+            </Button>
+          ) : null}
+          <Button small variant={open ? 'ghost' : 'primary'} onClick={() => setOpen(!open)} testId="plan.ore.toggle">
+            {open ? 'Hide' : 'Work it out'}
+          </Button>
+        </span>
       }
     >
       {!open ? (
         <p className="text-ui text-muted">The cheapest compressed ore that reprocesses into the minerals above, with your reprocessing skills and a station's rigs.</p>
       ) : (
         <div className="flex flex-col gap-3">
-          <ErrorText error={ore.error} />
+          <ErrorText error={ore.error ?? refresh.error} />
           {d ? (
             <div className="flex flex-wrap items-end gap-3">
               <Field label="Reprocess at">

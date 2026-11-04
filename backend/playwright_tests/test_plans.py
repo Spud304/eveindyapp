@@ -257,6 +257,18 @@ def test_minerals_as_compressed_ore(login):
     expect(by_test_id(page, "plan.ore.volume")).to_contain_text("m³")
     expect(by_test_id(page, "plan.ore.mineral-volume")).to_contain_text("m³")
     expect(by_test_id(page, "plan.ore.all-volume")).to_contain_text("m³")
+    # Changing the amount built works the mix out again.
+    before = cell(1)
+    qty = by_test_id(page, f"plan.line.{RIFTER}.qty")
+    qty.fill("2")
+    qty.press("Enter")
+    expect(trit.locator("td").nth(1)).not_to_have_text(f"{before:,}")
+    assert cell(1) > before
+    # Refresh prices asks Jita again and keeps the mix shown until it answers.
+    if by_test_id(page, "plan.ore.refresh").count():
+        by_test_id(page, "plan.ore.refresh").click()
+        expect(by_test_id(page, "plan.ore.refresh")).to_have_text("Refresh prices")
+        expect(by_test_id(page, "plan.ore.priced-at")).to_contain_text("priced")
     # Jita 4-4 sell orders by default (the CCP average if ESI cannot be reached); switchable.
     expect(by_test_id(page, "plan.ore.price-note")).to_contain_text("Prices:")
     by_test_id(page, "plan.ore.prices").select_option("average")
