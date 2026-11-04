@@ -56,6 +56,15 @@ def sde_records():
     return r
 
 
+@pytest.fixture(autouse=True)
+def no_market(monkeypatch):
+    """Never call ESI's market from tests: no order books, so prices stay at the average.
+    Tests that price from orders set their own books."""
+    from apps.esidata import market
+
+    monkeypatch.setattr(market, "jita_sell_books", lambda ids: ({}, set()))
+
+
 @pytest.fixture
 def sde(tmp_path, sde_dir):
     path = tmp_path / f"eve-online-static-data-{BUILD}-jsonl.zip"

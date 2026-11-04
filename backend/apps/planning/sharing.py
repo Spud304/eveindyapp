@@ -28,6 +28,7 @@ from apps.sde.models import EveType
 
 from . import reservation
 from .models import Plan, Visibility
+from .prices import jita_priced
 
 AFFILIATION_MAX_AGE = timedelta(hours=24)
 SHARED_CACHE_SECONDS = 60
@@ -122,6 +123,7 @@ def _build(p: Plan, anonymize: bool) -> dict:
     owner = p.user
     data = reservation.load(owner)
     run = reservation.run_plans(owner, [p], data)[p.pk]
+    priced, _ = jita_priced(run.result)
     lines = list(p.lines.all())
     line_names = dict(
         EveType.objects.filter(pk__in=[ln.type_id for ln in lines]).values_list("id", "name")
@@ -136,7 +138,8 @@ def _build(p: Plan, anonymize: bool) -> dict:
             for ln in lines
         ],
         "error": run.error,
-        "result": dataclasses.asdict(run.result) if run.result else None,
+        # Priced from Jita 4-4 sell orders, as the owner sees it by default.
+        "result": dataclasses.asdict(priced) if priced else None,
         "progress": progress_data(owner, p, data, run, candidates=False),
         # Only the stations and characters the plan uses, not the owner's whole setup.
         "stations": {s.station_id: s.name for s in _used_stations(run.result, data)},

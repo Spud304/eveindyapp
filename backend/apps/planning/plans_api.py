@@ -21,6 +21,7 @@ from engine.types import Activity, BuildCategory, PlanResult
 
 from . import reservation, sharing, tracker
 from .models import JobLink, LinkSource, Plan, PlanLine, Visibility
+from .prices import jita_priced
 
 router = Router(tags=["plans"])
 
@@ -356,6 +357,8 @@ class ReservationOut(Schema):
 
 
 class PlanResultOut(Schema):
+    prices: Literal["jita", "average"] = "average"
+    priced_at_average: int = 0  # shopping items whose Jita orders could not be fetched
     plan_id: int
     error: str
     result: PlanResult | None
@@ -364,15 +367,19 @@ class PlanResultOut(Schema):
 
 
 @router.get("/plans/{plan_id}/result", response=PlanResultOut)
-def plan_result(request: HttpRequest, plan_id: int):
-    """The engine's result for this plan, with the assets other plans reserve."""
+def plan_result(request: HttpRequest, plan_id: int, prices: Literal["jita", "average"] = "jita"):
+    """The engine's result for this plan, with the assets other plans reserve. The shopping
+    list and costs are priced from Jita 4-4 sell orders unless `prices=average`."""
     p = _plan(request, plan_id)
     run = reservation.run_plans(_user(request), [p])[p.pk]
     rules = run.rules
+    result, failed = jita_priced(run.result) if prices == "jita" else (run.result, 0)
     return {
         "plan_id": p.pk,
         "error": run.error,
-        "result": run.result,
+        "result": result,
+        "prices": prices,
+        "priced_at_average": failed,
         "effective_rules": {
             "item_blacklist": sorted(rules.item_blacklist) if rules else [],
             "buy_categories": sorted(rules.buy_categories) if rules else [],

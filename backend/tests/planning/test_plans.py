@@ -381,3 +381,20 @@ def test_purchase_options_and_saving_one(api, user, azbel):
     assert "bought" in next(b for b in result["blueprints"] if b["type_id"] == 691)["sources"]
     assert result["costs"]["blueprints"] == 2_000_000
     assert api("get", f"/api/plans/{pid}/blueprints/587/options").json()["options"] == []
+
+
+def test_result_priced_from_jita_orders(api, user, azbel, monkeypatch):
+    from apps.esidata import market
+
+    monkeypatch.setattr(
+        market, "jita_sell_books", lambda ids: ({34: ((2.0, 10**9),)}, set(ids) - {34})
+    )
+    p = make_plan(user, "jita")
+    body = api("get", f"/api/plans/{p.pk}/result").json()
+    assert body["prices"] == "jita" and body["priced_at_average"] == 0
+    [trit] = [s for s in body["result"]["shopping_list"] if s["type_id"] == 34]
+    assert (trit["price_source"], trit["unit_price"]) == ("jita", 2.0)
+    assert body["result"]["costs"]["materials"] == PER_RIFTER * 2.0
+    avg = api("get", f"/api/plans/{p.pk}/result?prices=average").json()
+    [trit] = [s for s in avg["result"]["shopping_list"] if s["type_id"] == 34]
+    assert avg["prices"] == "average" and trit["price_source"] == "average"
