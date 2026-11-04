@@ -3,16 +3,19 @@
 Rifter (587) is built from 32,000 Tritanium (34) per run; at an Azbel (material x0.99) that
 is 31,680 per Rifter."""
 
+from datetime import timedelta
+
 import pytest
+from django.utils import timezone
 
 from apps.accounts import services
 from apps.accounts.sso import SsoIdentity
-from apps.esidata.models import BlueprintItem
-from apps.planning import reservation
+from apps.esidata.models import BlueprintItem, IndustryJob
+from apps.planning import inputs, reservation
 from apps.planning.models import Plan, PlanLine, Station
 from engine.types import BuildCategory, BuildRules
 
-from .conftest import AZBEL_ID, AZBEL_TYPE, D_SYSTEM, MAIN, OTHER_CHAR, asset
+from .conftest import AZBEL_ID, AZBEL_TYPE, D_SYSTEM, MAIN, OTHER_CHAR, asset, job
 
 pytestmark = pytest.mark.django_db
 
@@ -336,3 +339,23 @@ def test_picked_bpcs_belong_to_their_plan(api, user, azbel):
     assert (rows[1]["plan_id"], rows[1]["plan_name"]) == (picker, "picker")
     assert rows[2]["plan_id"] is None
     assert rows[1]["product_type_id"] == 587
+
+
+def test_blueprints_in_open_jobs(api, user, azbel):
+    rifter_bp(1, copy=False)
+    rifter_bp(2, 9)
+    copying = job(10, AZBEL_ID, activity=5, owner_kind="character", owner=MAIN)
+    IndustryJob.objects.filter(pk=copying.pk).update(blueprint_id=1)  # ended 2026-11-03 01:00
+    building = job(11, AZBEL_ID, activity=1, owner_kind="character", owner=MAIN)
+    IndustryJob.objects.filter(pk=building.pk).update(
+        blueprint_id=2, end_date=timezone.now() + timedelta(hours=2)
+    )
+    owned = {b.item_id: b for b in inputs.owned_blueprints(user)}
+    assert owned[1].job_activity_id == 5 and owned[1].job_ends_in < 0
+    assert owned[2].job_activity_id == 1 and 7000 < owned[2].job_ends_in <= 7200
+    rows = {r["item_id"]: r for r in api("get", "/api/library/blueprints").json()}
+    assert (rows[1]["job_activity"], rows[1]["job_status"]) == ("copying", "ready")
+    assert (rows[2]["job_activity"], rows[2]["job_status"]) == ("manufacturing", "active")
+    IndustryJob.objects.filter(pk=copying.pk).update(status="delivered")
+    rows = {r["item_id"]: r for r in api("get", "/api/library/blueprints").json()}
+    assert rows[1]["job_status"] is None

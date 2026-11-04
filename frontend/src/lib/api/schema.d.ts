@@ -1394,6 +1394,12 @@ export interface components {
             plan_id: number | null;
             /** Plan Name */
             plan_name: string | null;
+            /** Job Activity */
+            job_activity: string | null;
+            /** Job Status */
+            job_status: string | null;
+            /** Job End */
+            job_end: string | null;
         };
         /** CharacterSlots */
         CharacterSlots: {

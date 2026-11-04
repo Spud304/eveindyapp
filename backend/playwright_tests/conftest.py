@@ -159,6 +159,7 @@ def make_job(
     runs: int = 1,
     minutes_ago: int = 0,
     activity: int = 1,
+    blueprint_item: int = 1,
 ) -> int:
     """An industry job for a test character, as if synced from ESI (manage.py playwright_job).
     Started now by default, so it counts as new for a plan activated before the call."""
@@ -182,6 +183,8 @@ def make_job(
         str(minutes_ago),
         "--activity",
         str(activity),
+        "--blueprint-item",
+        str(blueprint_item),
     ]
     if product:
         args += ["--product", str(product)]

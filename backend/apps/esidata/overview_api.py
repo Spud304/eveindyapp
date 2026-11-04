@@ -19,18 +19,11 @@ from engine.types import Character as EngineCharacter
 
 from . import names
 from .access import owner_q, readable_corp_feeds
+from .jobs import ACTIVITY_NAMES, OPEN_STATUSES, blueprint_jobs, effective_status
 from .models import BlueprintItem, CharacterSkill, CorpDivision, Feed, FeedStatus, IndustryJob
 
 router = Router(tags=["overview"])
 
-ACTIVITY_NAMES = {
-    1: "manufacturing",
-    3: "research_time",
-    4: "research_material",
-    5: "copying",
-    8: "invention",
-    9: "reaction",
-}  # [client]
 SLOT_KIND = {
     1: "manufacturing",
     9: "reaction",
@@ -39,7 +32,6 @@ SLOT_KIND = {
     5: "science",
     8: "science",
 }
-OPEN_STATUSES = ("active", "paused", "ready")
 
 
 def _user(request: HttpRequest) -> User:
@@ -89,6 +81,10 @@ class BlueprintRow(Schema):
     product_type_id: int | None  # what the blueprint manufactures
     plan_id: int | None  # plan whose line picked this BPC
     plan_name: str | None
+    # Open industry job the blueprint is installed in: it is not in its hangar until delivered.
+    job_activity: str | None
+    job_status: str | None  # "active", "paused" or "ready" (finished, not delivered)
+    job_end: datetime | None
 
 
 @router.get("/library/blueprints", response=list[BlueprintRow])
@@ -109,10 +105,13 @@ def library(request: HttpRequest):
         ).values_list("activity__blueprint_id", "type_id")
     )
     picked = picked_blueprints(user)
+    jobs = blueprint_jobs(user)
+    now = timezone.now()
     plan_names = dict(Plan.objects.filter(user=user).values_list("id", "name"))
     out = []
     for b in rows:
         plan_id = picked.get(b.item_id)
+        job = jobs.get(b.item_id)
         kind = "bpc" if b.quantity == -2 else ("stack" if b.quantity > 0 else "bpo")
         out.append(
             {
@@ -135,6 +134,11 @@ def library(request: HttpRequest):
                 "product_type_id": products.get(b.type_id),
                 "plan_id": plan_id,
                 "plan_name": plan_names.get(plan_id) if plan_id else None,
+                "job_activity": ACTIVITY_NAMES.get(job.activity_id, str(job.activity_id))
+                if job
+                else None,
+                "job_status": effective_status(job, now) if job else None,
+                "job_end": job.end_date if job else None,
             }
         )
     out.sort(key=lambda r: (r["name"], r["kind"], -r["me"]))
@@ -191,14 +195,6 @@ class DashboardOut(Schema):
     problems: list[Problem]
 
 
-def _effective_status(job: IndustryJob, now: datetime) -> str:
-    """The client calls an installed job past its end date "ready" (industryCommon.JobStatus);
-    ESI's status can lag until the next sync."""
-    if job.status == "active" and job.end_date <= now:
-        return "ready"
-    return job.status
-
-
 def describe_jobs(user: User, jobs: list[IndustryJob], now: datetime) -> list[dict]:
     """JobRow dicts with names and the effective status, for the dashboard and plan progress."""
     type_names = dict(
@@ -217,7 +213,7 @@ def describe_jobs(user: User, jobs: list[IndustryJob], now: datetime) -> list[di
         {
             "job_id": j.job_id,
             "activity": ACTIVITY_NAMES.get(j.activity_id, str(j.activity_id)),
-            "status": _effective_status(j, now),
+            "status": effective_status(j, now),
             "blueprint_type_id": j.blueprint_type_id,
             "blueprint_name": type_names.get(j.blueprint_type_id, str(j.blueprint_type_id)),
             "product_type_id": j.product_type_id,
@@ -267,7 +263,7 @@ def dashboard(request: HttpRequest):
             ("reaction", Activity.REACTION),
         ):
             of_kind = [j for j in mine if SLOT_KIND.get(j.activity_id) == kind]
-            statuses = [_effective_status(j, now) for j in of_kind]
+            statuses = [effective_status(j, now) for j in of_kind]
             slots.append(
                 {
                     "kind": kind,

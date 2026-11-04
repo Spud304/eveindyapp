@@ -1,6 +1,6 @@
 from playwright.sync_api import expect
 
-from .conftest import RIFTER, TRITANIUM, by_test_id, make_bpc, pick, uniq
+from .conftest import RIFTER, TRITANIUM, by_test_id, make_bpc, make_job, pick, uniq
 
 
 def shopping_qty(page, type_id: int) -> int:
@@ -179,3 +179,21 @@ def test_pick_bpcs_for_a_line(login):
     expect(by_test_id(page, f"plan.bpc.{spare}")).to_be_visible()
     expect(by_test_id(page, f"plan.bpc.{a}")).to_have_count(0)
     expect(by_test_id(page, f"plan.bpc.{b}")).to_have_count(0)
+
+
+def test_blueprint_in_a_job_shows_in_the_library_and_is_not_offered(login):
+    s = login()
+    s.add_station()
+    busy, free = make_bpc(s.character_id, RIFTER_BP, 9), make_bpc(s.character_id, RIFTER_BP, 9)
+    make_job(s.character_id, RIFTER_BP, RIFTER, runs=9, blueprint_item=busy)
+    page = s.page
+    page.goto("/library")
+    expect(by_test_id(page, f"library.row.{busy}.job")).to_contain_text("in manufacturing job")
+    expect(by_test_id(page, f"library.row.{free}.job")).to_have_count(0)
+
+    plan = s.add_plan(uniq("busy"), [])
+    page.goto(f"/plans/{plan['id']}")
+    by_test_id(page, "plan.pick-bpcs").click()
+    by_test_id(page, "plan.bpc-search").fill("Rifter")
+    expect(by_test_id(page, f"plan.bpc.{free}")).to_be_visible()
+    expect(by_test_id(page, f"plan.bpc.{busy}")).to_have_count(0)

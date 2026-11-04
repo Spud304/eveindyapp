@@ -222,7 +222,8 @@ function BpcPicker({ planId, onAdd }: { planId: number; onAdd: (line: LineIO) =>
   const [q, setQ] = useState('')
   const [ticked, setTicked] = useState<number[]>([])
   const term = useDebouncedValue(q).trim().toLowerCase()
-  const free = (lib.data ?? []).filter((b) => b.kind === 'bpc' && b.product_type_id != null && b.plan_id == null)
+  // BPCs in a job are left out: the plan cannot use them until the job is delivered.
+  const free = (lib.data ?? []).filter((b) => b.kind === 'bpc' && b.product_type_id != null && b.plan_id == null && !b.job_status)
   const pickedType = free.find((b) => b.item_id === ticked[0])?.type_id
   const rows = free.filter((b) => (pickedType ? b.type_id === pickedType : !term || b.name.toLowerCase().includes(term)))
   const chosen = ticked.map((id) => free.find((b) => b.item_id === id)).filter((b): b is BlueprintRow => !!b)

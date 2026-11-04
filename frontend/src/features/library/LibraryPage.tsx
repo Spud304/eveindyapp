@@ -5,13 +5,31 @@ import { useSlashFocus } from '@/hooks/useSlashFocus'
 import { sortRows, useSort } from '@/hooks/useSort'
 import { useLibrary } from '@/lib/api/hooks'
 import type { BlueprintRow } from '@/lib/api/client'
-import { qty } from '@/lib/format'
+import { duration, qty } from '@/lib/format'
 import { Badge, Button, Empty, ErrorText, Input, Mono, Num, PageHeader, Panel, Select, Table } from '@/components/ui'
 
 type Kind = 'all' | 'bpo' | 'bpc'
 type SortKey = 'name' | 'me' | 'te' | 'runs' | 'location'
 
 const KIND_TONE = { bpo: 'ok', bpc: 'info', stack: 'muted' } as const
+
+/** A blueprint installed in a job is not in its hangar until the job is delivered. */
+function JobNote({ b }: { b: BlueprintRow }) {
+  if (!b.job_status || !b.job_activity) return null
+  const activity = b.job_activity.replace('_', ' ')
+  const end = b.job_end ? new Date(b.job_end) : null
+  const text =
+    b.job_status === 'ready'
+      ? `in ${activity} job · finished, deliver it`
+      : b.job_status === 'paused'
+        ? `in ${activity} job · paused`
+        : `in ${activity} job · ${end ? duration((end.getTime() - Date.now()) / 1000) : '?'} left`
+  return (
+    <Badge tone={b.job_status === 'ready' ? 'warn' : 'info'} testId={`library.row.${b.item_id}.job`} title={end ? `ends ${end.toLocaleString()}` : undefined}>
+      {text}
+    </Badge>
+  )
+}
 
 export function LibraryPage() {
   usePageTitle('Library')
@@ -124,8 +142,13 @@ export function LibraryPage() {
                   <td className="text-muted">
                     {b.owner_name} <Mono className="text-label">{b.owner_kind === 'corporation' ? 'corp' : ''}</Mono>
                   </td>
-                  <td className="max-w-80 truncate" title={b.location_name}>
-                    {b.location_name}
+                  <td className="max-w-96">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate" title={b.location_name}>
+                        {b.location_name}
+                      </span>
+                      <JobNote b={b} />
+                    </div>
                   </td>
                   <td className="text-muted">{b.hangar}</td>
                 </tr>

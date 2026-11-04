@@ -20,6 +20,7 @@ class Command(BaseCommand):
         parser.add_argument("--runs", type=int, default=1)
         parser.add_argument("--status", default="active")
         parser.add_argument("--started-minutes-ago", type=int, default=1)
+        parser.add_argument("--blueprint-item", type=int, default=1, help="installed item id")
 
     def handle(self, *args, **o) -> None:
         if not FIRST <= o["character"] <= LAST:
@@ -36,7 +37,7 @@ class Command(BaseCommand):
                 "facility_id": 1,
                 "location_id": 1,
                 "activity_id": o["activity"],
-                "blueprint_id": 1,
+                "blueprint_id": o["blueprint_item"],
                 "blueprint_type_id": o["blueprint"],
                 "blueprint_location_id": 1,
                 "output_location_id": 1,

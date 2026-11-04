@@ -14,9 +14,11 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 
 from django.db.models import Q
+from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.esidata.access import owner_q
+from apps.esidata.jobs import blueprint_jobs
 from apps.esidata.models import (
     Asset,
     BlueprintItem,
@@ -65,7 +67,10 @@ def characters(user: User) -> tuple[Character, ...]:
 
 def owned_blueprints(user: User) -> tuple[OwnedBlueprint, ...]:
     out = []
+    jobs = blueprint_jobs(user)
+    now = timezone.now()
     for b in BlueprintItem.objects.filter(_owners(user, Feed.BLUEPRINTS)):
+        job = jobs.get(b.item_id)
         # quantity: -1 original, -2 copy, N > 0 a stack of N unresearched originals (one is
         # enough for planning; extra originals are step 6).
         out.append(
@@ -78,6 +83,8 @@ def owned_blueprints(user: User) -> tuple[OwnedBlueprint, ...]:
                 te=b.time_efficiency,
                 owner_id=b.owner_id,
                 location_id=b.root_location_id,
+                job_activity_id=job.activity_id if job else None,
+                job_ends_in=(job.end_date - now).total_seconds() if job else 0.0,
             )
         )
     return tuple(out)
