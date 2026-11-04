@@ -26,3 +26,29 @@ def test_deletes_only_the_reserved_test_range():
     assert left == {2118813889, 900_000_000, 900_000_100}
     assert set(User.objects.values_list("pk", flat=True)) == {real.pk, edge_low.pk, edge_high.pk}
     assert Plan.objects.count() == 3
+
+
+def test_playwright_job_refuses_real_characters():
+    from django.core.management import CommandError
+
+    with pytest.raises(CommandError):
+        call_command(
+            "playwright_job",
+            "--character",
+            "2118813889",
+            "--job-id",
+            "900000005",
+            "--blueprint",
+            "691",
+        )
+
+
+def test_cleanup_removes_test_jobs_only():
+    from apps.esidata.models import IndustryJob
+
+    account(900_000_002)
+    call_command(
+        "playwright_job", "--character", "900000002", "--job-id", "900000002", "--blueprint", "691"
+    )
+    call_command("playwright_cleanup")
+    assert not IndustryJob.objects.filter(pk=900_000_002).exists()

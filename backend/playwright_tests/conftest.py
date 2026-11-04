@@ -147,3 +147,43 @@ def pick(page: Page, test_id: str, query: str, option: str) -> None:
     box.fill(query)
     results = by_test_id(page, f"{test_id}.results")
     results.get_by_text(option, exact=True).click()
+
+
+_next_job = FIRST_ID - 1
+
+
+def make_job(
+    character_id: int,
+    blueprint: int,
+    product: int | None,
+    runs: int = 1,
+    minutes_ago: int = 0,
+    activity: int = 1,
+) -> int:
+    """An industry job for a test character, as if synced from ESI (manage.py playwright_job).
+    Started now by default, so it counts as new for a plan activated before the call."""
+    global _next_job
+    _next_job += 1
+    args = [
+        "uv",
+        "run",
+        "python",
+        "manage.py",
+        "playwright_job",
+        "--character",
+        str(character_id),
+        "--job-id",
+        str(_next_job),
+        "--blueprint",
+        str(blueprint),
+        "--runs",
+        str(runs),
+        "--started-minutes-ago",
+        str(minutes_ago),
+        "--activity",
+        str(activity),
+    ]
+    if product:
+        args += ["--product", str(product)]
+    subprocess.run(args, cwd=BACKEND_DIR, check=True, capture_output=True)
+    return _next_job
