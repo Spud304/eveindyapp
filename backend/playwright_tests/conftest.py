@@ -115,18 +115,20 @@ def clean_and_check(playwright: Playwright):
 
 @pytest.fixture
 def login(browser: Browser):
-    """`login()` opens a fresh context logged in as a new test character; closed at teardown."""
+    """`login()` opens a fresh context logged in as a new test character; closed at teardown.
+    `login(corp=...)` puts the character in that (made-up) corporation."""
     opened: list[Session] = []
 
-    def _open() -> Session:
+    def _open(corp: int | None = None) -> Session:
         global _next_id
         _next_id += 1
         cid = _next_id
         name = f"PW Pilot {cid - FIRST_ID}"
         context = browser.new_context(base_url=BASE_URL, viewport={"width": 1600, "height": 1000})
-        resp = context.request.get(
-            "/auth/dev-login", params={"character_id": cid, "name": name}, max_redirects=0
-        )
+        params = {"character_id": cid, "name": name}
+        if corp:
+            params["corporation_id"] = corp
+        resp = context.request.get("/auth/dev-login", params=params, max_redirects=0)
         assert resp.status == 302, f"dev-login failed: {resp.status} {resp.text()[:200]}"
         session = Session(context.new_page(), context, context.request, cid, name)
         opened.append(session)

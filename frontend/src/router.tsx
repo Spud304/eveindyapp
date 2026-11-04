@@ -4,6 +4,7 @@ import { DashboardPage } from './features/dashboard/DashboardPage'
 import { LibraryPage } from './features/library/LibraryPage'
 import { PlansPage } from './features/plans/PlansPage'
 import { PlanPage } from './features/plans/PlanPage'
+import { PlanViewPage, SharedLinkPage } from './features/plans/SharedPlanPage'
 import { SetupPage } from './features/setup/SetupPage'
 
 const rootRoute = createRootRoute({
@@ -19,6 +20,8 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: '/plans', component: PlansPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/library', component: LibraryPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/plans/$planId', component: PlanPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/plans/$planId/view', component: PlanViewPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/shared/$token', component: SharedLinkPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/setup', component: SetupPage }),
 ]
 

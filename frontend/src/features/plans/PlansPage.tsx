@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { usePlanMutations, usePlans } from '@/lib/api/hooks'
+import { usePlanMutations, usePlans, useSharedWithMe } from '@/lib/api/hooks'
 import { since } from '@/lib/format'
 import { Badge, Button, Empty, ErrorText, Input, Mono, PageHeader, Panel, Table } from '@/components/ui'
 
@@ -12,6 +12,7 @@ export function PlansPage() {
   const navigate = useNavigate()
   const [name, setName] = useState('')
   const rows = plans.data ?? []
+  const shared = useSharedWithMe()
   const add = () =>
     create.mutate(
       { name: name.trim(), lines: [], reserve_assets: false, priority: 100 },
@@ -88,6 +89,32 @@ export function PlansPage() {
           </Table>
         )}
       </Panel>
+      {shared.data?.length ? (
+        <Panel title={`Shared with me · ${shared.data.length}`} flush testId="plans.shared" className="mt-4">
+          <Table hover>
+            <thead>
+              <tr>
+                <th>Plan</th>
+                <th>Owner</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shared.data.map((p) => (
+                <tr key={p.id} data-testid={`plans.shared.${p.id}`}>
+                  <td>
+                    <Link to="/plans/$planId/view" params={{ planId: String(p.id) }} className="text-accent hover:underline">
+                      {p.name}
+                    </Link>
+                  </td>
+                  <td className="text-muted">{p.owner_name}</td>
+                  <td className="text-muted">{since(p.updated_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Panel>
+      ) : null}
     </>
   )
 }

@@ -3,7 +3,9 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { useLocalCopy } from '@/hooks/useLocalCopy'
-import { useLibrary, useMe, usePlan, usePlanMutations, usePlanResult, useStations, useTypeSearch } from '@/lib/api/hooks'
+import { useCorporations, useLibrary, useMe, usePlan, usePlanMutations, usePlanResult, useStations, useTypeSearch } from '@/lib/api/hooks'
+import { useCopy } from '@/hooks/useCopy'
+import { Link } from '@tanstack/react-router'
 import type { BlueprintRow, LineIO, PlanOut, PlanResultOut, TypeOut } from '@/lib/api/client'
 import { BUILD_CATEGORY_LABELS } from '@/lib/format'
 import {
@@ -76,6 +78,7 @@ export function PlanPage() {
         </div>
         <div className="flex min-w-0 flex-col gap-4">
           <LinesPanel plan={p} />
+          <SharingPanel plan={p} />
           <SettingsPanel plan={p} />
           {r?.result?.warnings.length ? <WarningsPanel data={r} /> : null}
         </div>
@@ -386,6 +389,72 @@ function SettingsPanel({ plan: p }: { plan: PlanOut }) {
             </label>
           ))}
         </div>
+      </div>
+    </Panel>
+  )
+}
+
+/** Who else can see the plan: nobody, the corporation (log in), or anyone with the link. */
+function SharingPanel({ plan: p }: { plan: PlanOut }) {
+  const { edit, newShareLink } = usePlanMutations()
+  const corps = useCorporations(p.visibility === 'corp')
+  const { copied, copy } = useCopy()
+  const url = p.share_token ? `${window.location.origin}/shared/${p.share_token}` : ''
+  return (
+    <Panel title="Sharing" testId="plan.sharing">
+      <div className="flex flex-col gap-2">
+        <Select
+          value={p.visibility}
+          testId="plan.visibility"
+          onChange={(e) => edit.mutate({ id: p.id, body: { visibility: e.target.value as 'private' | 'corp' | 'link' } })}
+        >
+          <option value="private">Only me</option>
+          <option value="corp">My corporation (they log in)</option>
+          <option value="link">Anyone with the link (names hidden)</option>
+        </Select>
+        {p.visibility === 'corp' ? (
+          <Field label="Corporation">
+            <Select
+              value={p.share_corporation_id ?? ''}
+              testId="plan.share-corp"
+              onChange={(e) => edit.mutate({ id: p.id, body: { share_corporation_id: e.target.value ? Number(e.target.value) : null } })}
+            >
+              <option value="">my main's corporation</option>
+              {(corps.data ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
+        {p.visibility === 'link' && url ? (
+          <div className="flex items-center gap-2">
+            <Input value={url} readOnly className="mono min-w-0 flex-1" testId="plan.share-url" onFocus={(e) => e.target.select()} />
+            <Button small onClick={() => void copy(url, true, 'link')} testId="plan.share-copy">
+              {copied ? 'Copied' : 'Copy'}
+            </Button>
+            <Button
+              small
+              variant="ghost"
+              testId="plan.share-renew"
+              title="make a new link; the old one stops working"
+              onClick={() => {
+                if (window.confirm('Make a new link? The current one will stop working.')) newShareLink.mutate(p.id)
+              }}
+            >
+              New link
+            </Button>
+          </div>
+        ) : null}
+        {p.visibility !== 'private' ? (
+          <p className="text-label text-muted">
+            Viewers see the lines, shopping list, schedule and progress, read-only. They never see your settings, other plans or Library.{' '}
+            <Link to="/plans/$planId/view" params={{ planId: String(p.id) }} className="text-accent hover:underline" data-testid="plan.share-preview">
+              Preview
+            </Link>
+          </p>
+        ) : null}
       </div>
     </Panel>
   )

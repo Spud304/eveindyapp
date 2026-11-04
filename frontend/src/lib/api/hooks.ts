@@ -224,7 +224,42 @@ export function usePlanMutations() {
       onSuccess: done,
       meta: { toast: 'Plan deleted' },
     }),
+    newShareLink: useMutation({
+      mutationFn: async (id: number) => unwrap(await api.POST('/api/plans/{plan_id}/share-link', path(id))),
+      onSuccess: done,
+      meta: { toast: 'New link made; the old one no longer works' },
+    }),
   }
+}
+
+// --- sharing -----------------------------------------------------------------------------
+
+/** A plan shared by link: no login. Cached on the server for a minute. */
+export function useSharedLink(token: string) {
+  return useQuery({
+    queryKey: ['shared', token],
+    queryFn: async () => unwrap(await api.GET('/api/shared/{token}', { params: { path: { token } } })),
+    retry: false,
+    refetchInterval: 60_000,
+  })
+}
+
+/** The read-only view of a plan: corp members, or the owner as a preview. */
+export function usePlanView(id: number) {
+  return useQuery({
+    queryKey: [...keys.plans, id, 'view'],
+    queryFn: async () => unwrap(await api.GET('/api/plans/{plan_id}/view', { params: { path: { plan_id: id } } })),
+    retry: false,
+    refetchInterval: 60_000,
+  })
+}
+
+export function useSharedWithMe() {
+  return useQuery({ queryKey: [...keys.plans, 'shared-with-me'], queryFn: async () => unwrap(await api.GET('/api/plans/shared-with-me')) })
+}
+
+export function useCorporations(enabled: boolean) {
+  return useQuery({ queryKey: [...keys.plans, 'corporations'], queryFn: async () => unwrap(await api.GET('/api/plans/corporations')), enabled, staleTime: 300_000 })
 }
 
 // --- lookups -----------------------------------------------------------------------------

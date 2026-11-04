@@ -26,6 +26,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const main = me.data?.characters.find((c) => c.is_main)
   const needsLink = authed && !me.data?.characters.some((c) => c.esi)
   const active = (to: string) => (to === '/' ? pathname === '/' : pathname.startsWith(to))
+  // A plan shared by link opens without logging in.
+  const open = pathname.startsWith('/shared/')
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-10 items-center gap-4 border-b border-line bg-panel px-3">
@@ -63,7 +65,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="min-h-0 flex-1 overflow-auto p-4">
-        {me.isLoading ? null : authed ? (
+        {me.isLoading ? null : authed || open ? (
           children
         ) : (
           <Empty

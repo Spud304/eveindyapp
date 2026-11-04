@@ -163,6 +163,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plans/shared-with-me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shared With Me
+         * @description Other accounts' plans shared with one of your corporations.
+         */
+        get: operations["apps_planning_plans_api_shared_with_me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plans/corporations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plan Corporations
+         * @description Corporations your characters are in: who corp visibility can share with.
+         */
+        get: operations["apps_planning_plans_api_plan_corporations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plans": {
         parameters: {
             query?: never;
@@ -335,6 +375,67 @@ export interface paths {
          * @description Stop counting a job toward this plan. It is not matched again automatically.
          */
         delete: operations["apps_planning_plans_api_unlink_job"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/shared/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shared By Link
+         * @description A plan shared by link: no login needed.
+         */
+        get: operations["apps_planning_plans_api_shared_by_link"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plans/{plan_id}/view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * View Plan
+         * @description The read-only view: for corp members of a corp-shared plan, and for the owner as a
+         *     preview. Anyone else gets 404, so a plan's existence does not leak.
+         */
+        get: operations["apps_planning_plans_api_view_plan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plans/{plan_id}/share-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * New Share Link
+         * @description A new link for the plan; the old one stops working.
+         */
+        post: operations["apps_planning_plans_api_new_share_link"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -973,6 +1074,27 @@ export interface components {
              */
             choices: components["schemas"]["ChoiceIn"][];
         };
+        /** SharedSummary */
+        SharedSummary: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Owner Name */
+            owner_name: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CorporationOption */
+        CorporationOption: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
         /** PlanSummary */
         PlanSummary: {
             /** Id */
@@ -1056,6 +1178,10 @@ export interface components {
             extra_location_ids: number[];
             /** Hangar Flags */
             hangar_flags: string[];
+            /** Share Token */
+            share_token: string | null;
+            /** Share Corporation Id */
+            share_corporation_id: number | null;
         };
         /** LineIO */
         LineIO: {
@@ -1162,6 +1288,8 @@ export interface components {
             extra_location_ids?: number[] | null;
             /** Hangar Flags */
             hangar_flags?: string[] | null;
+            /** Share Corporation Id */
+            share_corporation_id?: number | null;
         };
         /**
          * Visibility
@@ -1429,6 +1557,44 @@ export interface components {
             delivered_runs: number;
             /** Over Plan */
             over_plan: number;
+        };
+        /** SharedLine */
+        SharedLine: {
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            /** Quantity */
+            quantity: number;
+        };
+        /**
+         * SharedPlanOut
+         * @description A plan as a viewer sees it. Link viewers get aliases for stations and characters
+         *     (`anonymized`), and `plan_id` / `owner_name` are left out.
+         */
+        SharedPlanOut: {
+            /** Plan Id */
+            plan_id: number | null;
+            /** Name */
+            name: string;
+            /** Owner Name */
+            owner_name: string | null;
+            /** Anonymized */
+            anonymized: boolean;
+            /** Lines */
+            lines: components["schemas"]["SharedLine"][];
+            /** Error */
+            error: string;
+            result: components["schemas"]["PlanResult"] | null;
+            progress: components["schemas"]["ProgressOut"];
+            /** Stations */
+            stations: {
+                [key: string]: string;
+            };
+            /** Characters */
+            characters: {
+                [key: string]: string;
+            };
         };
         /** SearchIn */
         SearchIn: {
@@ -1868,6 +2034,46 @@ export interface operations {
             };
         };
     };
+    apps_planning_plans_api_shared_with_me: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedSummary"][];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_plan_corporations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorporationOption"][];
+                };
+            };
+        };
+    };
     apps_planning_plans_api_list_plans: {
         parameters: {
             query?: never;
@@ -2159,6 +2365,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProgressOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_shared_by_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedPlanOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_view_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedPlanOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_new_share_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanOut"];
                 };
             };
         };

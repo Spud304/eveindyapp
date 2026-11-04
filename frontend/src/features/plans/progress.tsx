@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { useJobLinkMutations, usePlanProgress } from '@/lib/api/hooks'
-import type { JobRow, ProgressRow } from '@/lib/api/client'
+import type { JobRow, ProgressOut, ProgressRow } from '@/lib/api/client'
 import { duration, qty, since } from '@/lib/format'
 import { Badge, Button, Empty, ErrorText, Mono, Num, Panel, Table } from '@/components/ui'
 
@@ -76,9 +76,17 @@ export function ProgressTab({ planId }: { planId: number }) {
   if (progress.error) return <ErrorText error={progress.error} />
   if (!d) return null
   const busy = link.isPending || unlink.isPending
+  return <ProgressView d={d} actions={{ busy, link: (id) => link.mutate(id), unlink: (id) => unlink.mutate(id) }} />
+}
+
+type LinkActions = { busy: boolean; link: (jobId: number) => void; unlink: (jobId: number) => void }
+
+/** Progress rows and linked jobs. Without `actions` it is read-only (a shared plan). */
+export function ProgressView({ d, actions }: { d: ProgressOut; actions?: LinkActions }) {
+  const busy = actions?.busy ?? false
   return (
     <div className="flex flex-col gap-4">
-      {!d.active ? (
+      {!actions ? null : !d.active ? (
         <p className="text-ui text-warn" data-testid="plan.progress.inactive">
           This plan is not active, so new jobs are not matched to it. Make it active, or link jobs below by hand.
         </p>
@@ -145,21 +153,23 @@ export function ProgressTab({ planId }: { planId: number }) {
           <JobTable
             jobs={d.jobs}
             testId="plan.progress.job"
-            action={(j) => (
-              <Button small variant="ghost" disabled={busy} onClick={() => unlink.mutate(j.job_id)} title="stop counting this job toward the plan; it is not matched again" testId={`plan.progress.unlink.${j.job_id}`}>
+            action={(j) =>
+              actions ? (
+              <Button small variant="ghost" disabled={busy} onClick={() => actions.unlink(j.job_id)} title="stop counting this job toward the plan; it is not matched again" testId={`plan.progress.unlink.${j.job_id}`}>
                 Unlink
               </Button>
-            )}
+              ) : null
+            }
           />
         )}
       </Panel>
-      {d.candidates.length ? (
+      {actions && d.candidates.length ? (
         <Panel title={`Other recent jobs for these blueprints · ${d.candidates.length}`} flush testId="plan.progress.candidates">
           <JobTable
             jobs={d.candidates}
             testId="plan.progress.candidate"
             action={(j) => (
-              <Button small disabled={busy} onClick={() => link.mutate(j.job_id)} title="count this job toward the plan" testId={`plan.progress.link.${j.job_id}`}>
+              <Button small disabled={busy} onClick={() => actions.link(j.job_id)} title="count this job toward the plan" testId={`plan.progress.link.${j.job_id}`}>
                 Link
               </Button>
             )}
