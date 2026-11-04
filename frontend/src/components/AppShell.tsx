@@ -7,7 +7,9 @@ import { Badge, Empty, LinkButton } from '@/components/ui'
 import { applyTheme, readTheme, type Theme } from '@/lib/theme'
 
 const NAV = [
-  { to: '/', label: 'Plans', id: 'plans' },
+  { to: '/', label: 'Dashboard', id: 'dashboard' },
+  { to: '/plans', label: 'Plans', id: 'plans' },
+  { to: '/library', label: 'Library', id: 'library' },
   { to: '/setup', label: 'Setup', id: 'setup' },
 ] as const
 
@@ -23,7 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const authed = me.data?.authenticated
   const main = me.data?.characters.find((c) => c.is_main)
   const needsLink = authed && !me.data?.characters.some((c) => c.esi)
-  const active = (to: string) => (to === '/' ? pathname === '/' || pathname.startsWith('/plans') : pathname.startsWith(to))
+  const active = (to: string) => (to === '/' ? pathname === '/' : pathname.startsWith(to))
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-10 items-center gap-4 border-b border-line bg-panel px-3">

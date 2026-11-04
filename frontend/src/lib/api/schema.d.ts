@@ -369,6 +369,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/blueprints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Library
+         * @description Every blueprint the account's characters and readable corps hold.
+         */
+        get: operations["apps_esidata_overview_api_library"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Dashboard */
+        get: operations["apps_esidata_overview_api_dashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1127,6 +1164,130 @@ export interface components {
             /** Feeds */
             feeds: components["schemas"]["FeedOut"][];
         };
+        /** BlueprintRow */
+        BlueprintRow: {
+            /** Item Id */
+            item_id: number;
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bpo" | "bpc" | "stack";
+            /** Quantity */
+            quantity: number;
+            /** Runs */
+            runs: number;
+            /** Me */
+            me: number;
+            /** Te */
+            te: number;
+            /** Owner Kind */
+            owner_kind: string;
+            /** Owner Id */
+            owner_id: number;
+            /** Owner Name */
+            owner_name: string;
+            /** Location Id */
+            location_id: number;
+            /** Location Name */
+            location_name: string;
+            /** Hangar */
+            hangar: string;
+        };
+        /** CharacterSlots */
+        CharacterSlots: {
+            /** Character Id */
+            character_id: number;
+            /** Name */
+            name: string;
+            /** Skills Known */
+            skills_known: boolean;
+            /** Slots */
+            slots: components["schemas"]["SlotUse"][];
+        };
+        /** DashboardOut */
+        DashboardOut: {
+            /** Jobs */
+            jobs: components["schemas"]["JobRow"][];
+            /** Characters */
+            characters: components["schemas"]["CharacterSlots"][];
+            /** Problems */
+            problems: components["schemas"]["Problem"][];
+        };
+        /** JobRow */
+        JobRow: {
+            /** Job Id */
+            job_id: number;
+            /** Activity */
+            activity: string;
+            /** Status */
+            status: string;
+            /** Blueprint Type Id */
+            blueprint_type_id: number;
+            /** Blueprint Name */
+            blueprint_name: string;
+            /** Product Type Id */
+            product_type_id: number | null;
+            /** Product Name */
+            product_name: string | null;
+            /** Runs */
+            runs: number;
+            /** Installer Id */
+            installer_id: number;
+            /** Installer Name */
+            installer_name: string;
+            /** Mine */
+            mine: boolean;
+            /** Owner Kind */
+            owner_kind: string;
+            /** Facility Id */
+            facility_id: number;
+            /** Facility Name */
+            facility_name: string;
+            /**
+             * Start Date
+             * Format: date-time
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date-time
+             */
+            end_date: string;
+        };
+        /** Problem */
+        Problem: {
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "bad" | "warn";
+            /** Text */
+            text: string;
+            /**
+             * Where
+             * @enum {string}
+             */
+            where: "setup" | "station";
+        };
+        /** SlotUse */
+        SlotUse: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "manufacturing" | "science" | "reaction";
+            /** Max */
+            max: number;
+            /** Running */
+            running: number;
+            /** Ready */
+            ready: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -1707,6 +1868,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusOut"];
+                };
+            };
+        };
+    };
+    apps_esidata_overview_api_library: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlueprintRow"][];
+                };
+            };
+        };
+    };
+    apps_esidata_overview_api_dashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"];
                 };
             };
         };

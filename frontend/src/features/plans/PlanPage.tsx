@@ -139,7 +139,7 @@ function PlanHeader({ plan: p, result, computing }: { plan: PlanOut; result: Pla
             testId="plan.delete"
             onClick={() => {
               if (window.confirm(`Delete plan ${p.name}? Its lines and settings go with it.`))
-                remove.mutate(p.id, { onSuccess: () => void navigate({ to: '/' }) })
+                remove.mutate(p.id, { onSuccess: () => void navigate({ to: '/plans' }) })
             }}
           >
             Delete

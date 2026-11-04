@@ -21,6 +21,8 @@ export const keys = {
   typeSearch: (q: string, kind: string) => ['types', 'search', kind, q] as const,
   systemSearch: (q: string) => ['systems', 'search', q] as const,
   typeNames: (ids: number[]) => ['types', 'names', ids] as const,
+  library: ['library'] as const,
+  dashboard: ['dashboard'] as const,
 }
 
 // --- account -----------------------------------------------------------------------------
@@ -215,4 +217,15 @@ export function useTypeNames(ids: number[]) {
     enabled: sorted.length > 0,
     staleTime: 10 * 60_000,
   })
+}
+
+// --- overview ----------------------------------------------------------------------------
+
+export function useLibrary() {
+  return useQuery({ queryKey: keys.library, queryFn: async () => unwrap(await api.GET('/api/library/blueprints')), staleTime: 60_000 })
+}
+
+/** Refreshes every minute so "ready" and "finishing soon" follow the clock. */
+export function useDashboard() {
+  return useQuery({ queryKey: keys.dashboard, queryFn: async () => unwrap(await api.GET('/api/dashboard')), refetchInterval: 60_000 })
 }
