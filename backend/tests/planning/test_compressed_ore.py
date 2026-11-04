@@ -47,7 +47,9 @@ def setup(sde, user, monkeypatch):
     # and Tritanium at 5 ISK.
     books = {ORE: ((2.0, 10_000), (9.0, 1_000_000)), 34: ((5.0, 10_000_000),)}
     monkeypatch.setattr(
-        market, "jita_sell_books", lambda ids: ({t: books[t] for t in ids if t in books}, set())
+        market,
+        "jita_sell_books",
+        lambda ids, refresh=False: ({t: books[t] for t in ids if t in books}, set()),
     )
     c = Client()
     c.force_login(user)
@@ -98,7 +100,18 @@ def test_priced_from_jita_orders(setup):
 
 def test_failed_fetch_falls_back_to_average(setup, monkeypatch):
     c, p, _ = setup
-    monkeypatch.setattr(market, "jita_sell_books", lambda ids: ({}, set(ids)))
+    monkeypatch.setattr(market, "jita_sell_books", lambda ids, refresh=False: ({}, set(ids)))
     body = c.get(f"/api/plans/{p.pk}/compressed-ore").json()
     assert body["priced_at_average"] == 2
     assert body["mix"]["ore_cost"] == pytest.approx(13800 * 3.0)
+
+
+def test_refresh_is_passed_to_the_market(setup, monkeypatch):
+    c, p, _ = setup
+    seen = []
+    monkeypatch.setattr(
+        market, "jita_sell_books", lambda ids, refresh=False: seen.append(refresh) or ({}, set())
+    )
+    c.get(f"/api/plans/{p.pk}/compressed-ore")
+    c.get(f"/api/plans/{p.pk}/compressed-ore?refresh=true")
+    assert seen == [False, True]

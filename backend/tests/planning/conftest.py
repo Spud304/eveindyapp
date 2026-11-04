@@ -62,7 +62,7 @@ def no_market(monkeypatch):
     Tests that price from orders set their own books."""
     from apps.esidata import market
 
-    monkeypatch.setattr(market, "jita_sell_books", lambda ids: ({}, set()))
+    monkeypatch.setattr(market, "jita_sell_books", lambda ids, refresh=False: ({}, set()))
 
 
 @pytest.fixture

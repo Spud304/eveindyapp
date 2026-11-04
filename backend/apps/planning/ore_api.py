@@ -1,6 +1,7 @@
 """Compressed ore calculator (step 8): the cheapest compressed ore for a plan's mineral shortfall."""
 
 import dataclasses
+from datetime import datetime
 from typing import Literal, cast
 
 from django.http import HttpRequest
@@ -40,6 +41,7 @@ class CompressedOreOut(Schema):
     note: str = ""
     prices: Literal["jita", "average"]
     priced_at_average: int = 0  # items whose Jita orders could not be fetched
+    priced_at: datetime | None = None  # when the oldest Jita orders used were fetched
 
 
 @router.get("/plans/{plan_id}/compressed-ore", response=CompressedOreOut)
@@ -50,10 +52,12 @@ def compressed_ore(
     character_id: int | None = None,
     ore_classes: str = "asteroid",
     prices: Literal["jita", "average"] = "jita",
+    refresh: bool = False,
 ):
     """Minerals on the plan's shopping list, bought as compressed ore and reprocessed at one of
     your stations by one of your characters, priced from Jita 4-4 sell orders (or CCP's average
-    price). Defaults: the station with the best yield on
+    price; `refresh` asks ESI again instead of using orders fetched in the last 5 minutes).
+    Defaults: the station with the best yield on
     asteroid ore, and the character whose mix costs least."""
     user = cast(User, request.user)
     p = get_object_or_404(Plan, pk=plan_id, user=user)
@@ -106,7 +110,9 @@ def compressed_ore(
     books: dict[int, tuple] = {}
     failed: set[int] = set()
     if prices == "jita" and need:
-        books, failed = market.jita_sell_books([o.type_id for o in ores] + list(need))
+        books, failed = market.jita_sell_books(
+            [o.type_id for o in ores] + list(need), refresh=refresh
+        )
         # A failed fetch keeps the average price (book None); no orders means none on sale.
         ores = [dataclasses.replace(o, book=books.get(o.type_id)) for o in ores]
     bonuses = gamedata.reprocessing_skill_bonuses()
@@ -149,4 +155,5 @@ def compressed_ore(
         "note": "" if need else "The shopping list has no minerals.",
         "prices": prices,
         "priced_at_average": len(failed),
+        "priced_at": market.fetched_at(list(books)) if books else None,
     }

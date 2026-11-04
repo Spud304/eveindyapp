@@ -387,7 +387,9 @@ def test_result_priced_from_jita_orders(api, user, azbel, monkeypatch):
     from apps.esidata import market
 
     monkeypatch.setattr(
-        market, "jita_sell_books", lambda ids: ({34: ((2.0, 10**9),)}, set(ids) - {34})
+        market,
+        "jita_sell_books",
+        lambda ids, refresh=False: ({34: ((2.0, 10**9),)}, set(ids) - {34}),
     )
     p = make_plan(user, "jita")
     body = api("get", f"/api/plans/{p.pk}/result").json()

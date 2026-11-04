@@ -8,8 +8,10 @@ for CACHE_SECONDS, so only the first look in five minutes waits on ESI.
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 from django.core.cache import cache
+from django.utils import timezone
 
 from apps.esi.client import EsiError, get_client
 
@@ -25,6 +27,10 @@ Book = tuple[tuple[float, int], ...]  # (price, units) at Jita 4-4, cheapest fir
 
 def _key(type_id: int) -> str:
     return f"market:jita:sell:{type_id}"
+
+
+def _at_key(type_id: int) -> str:
+    return f"market:jita:at:{type_id}"
 
 
 def _fetch(type_id: int) -> Book:
@@ -46,12 +52,13 @@ def _fetch(type_id: int) -> Book:
     return tuple(book)
 
 
-def jita_sell_books(type_ids) -> tuple[dict[int, Book], set[int]]:
+def jita_sell_books(type_ids, refresh: bool = False) -> tuple[dict[int, Book], set[int]]:
     """({type id: Jita 4-4 sell orders, cheapest first}, type ids whose orders could not be
-    fetched). An item with no orders at Jita has an empty book."""
+    fetched). An item with no orders at Jita has an empty book. `refresh` skips this cache and
+    asks ESI again (ESI's own cache still holds its data for up to 300 s)."""
     ids = sorted(set(type_ids))
     keys = {t: _key(t) for t in ids}
-    found = cache.get_many(list(keys.values()))
+    found = {} if refresh else cache.get_many(list(keys.values()))
     books = {t: tuple(tuple(x) for x in found[k]) for t, k in keys.items() if k in found}
     missing = [t for t in ids if t not in books]
     failed: set[int] = set()
@@ -62,8 +69,16 @@ def jita_sell_books(type_ids) -> tuple[dict[int, Book], set[int]]:
                     failed.add(t)
                 else:
                     books[t] = result
+        now = timezone.now()
         cache.set_many({keys[t]: books[t] for t in missing if t in books}, CACHE_SECONDS)
+        cache.set_many({_at_key(t): now for t in missing if t in books}, CACHE_SECONDS)
     return books, failed
+
+
+def fetched_at(type_ids) -> datetime | None:
+    """When the oldest of these items' cached orders were fetched; None if none are cached."""
+    times = cache.get_many([_at_key(t) for t in set(type_ids)]).values()
+    return min(times, default=None)
 
 
 def _safe_fetch(type_id: int) -> Book | None:

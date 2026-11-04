@@ -44,3 +44,12 @@ def test_jita_orders_cheapest_first_across_pages(esi):
     books, _ = market.jita_sell_books([34, 35])
     assert books[34] == ((4.5, 30), (5.0, 10))
     assert len(esi) == calls  # served from the cache
+    assert market.fetched_at([34, 35]) is not None
+    assert market.fetched_at([999]) is None
+
+
+def test_refresh_asks_esi_again(esi):
+    market.jita_sell_books([35])
+    calls = len(esi)
+    market.jita_sell_books([35], refresh=True)
+    assert len(esi) == calls + 1
