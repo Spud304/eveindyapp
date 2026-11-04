@@ -36,14 +36,7 @@ def _at_key(type_id: int) -> str:
 def _fetch(type_id: int) -> Book:
     client = get_client()
     params = {"order_type": "sell", "type_id": type_id}
-    first, pages = client.request(
-        "GET", f"/markets/{THE_FORGE}/orders", params=params, with_pages=True
-    )
-    orders = list(first)
-    for page in range(2, pages + 1):
-        orders.extend(
-            client.request("GET", f"/markets/{THE_FORGE}/orders", params={**params, "page": page})
-        )
+    orders = client.paged(f"/markets/{THE_FORGE}/orders", params=params)
     book = sorted(
         (float(o["price"]), int(o["volume_remain"]))
         for o in orders
