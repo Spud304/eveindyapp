@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+/* All colour and font-size tokens. The only place they are defined (docs/ui-design.md).
+   :root holds the dark values; [data-theme="light"] overrides them; light is the default,
+   set on <html> before first paint by lib/theme.ts. */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --text-label: 11px; /* labels, table headers, badges */
+  --text-ui: 12px; /* working surfaces, controls */
+  --text-body: 13px; /* body text */
+  --text-body--line-height: 1.4;
+  --text-title: 14px; /* page title; nothing larger than 16px */
+
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-info: var(--info);
+  /* Domain fills: what a planned item is or does */
+  --color-build: var(--build);
+  --color-buy: var(--buy);
+  --color-stock: var(--stock);
+}
+
+:root {
+  color-scheme: dark;
+  --bg: #0f1216;
+  --panel: #171b21;
+  --panel-2: #1f242c;
+  --line: #2a3139;
+  --fg: #e7eaee;
+  --muted: #8f9aa8;
+  --accent: #6ea8fe;
+  --accent-fg: #0b1220;
+  --ok: #4fc38a;
+  --warn: #e8b647;
+  --bad: #ef6b6b;
+  --info: #62c4d9;
+  --build: #6ea8fe;
+  --buy: #e8b647;
+  --stock: #4fc38a;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  /* Google Sheets palette */
+  --bg: #f8f9fa;
+  --panel: #ffffff;
+  --panel-2: #f1f3f4;
+  --line: #c0c4c8;
+  --fg: #202124;
+  --muted: #5f6368;
+  --accent: #1a73e8;
+  --accent-fg: #ffffff;
+  --ok: #188038;
+  --warn: #e37400;
+  --bad: #d93025;
+  --info: #007b83;
+  --build: #1a73e8;
+  --buy: #e37400;
+  --stock: #188038;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Keyboard focus reads on both themes; inputs draw their own border instead. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
