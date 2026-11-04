@@ -36,18 +36,23 @@ You need [uv](https://github.com/astral-sh/uv), Node 24, Docker and an
 [EVE developer application](https://developers.eveonline.com/) whose callback is
 `http://localhost:5050/callback`.
 
+First time:
+
 ```bash
-docker compose -f deploy/docker-compose.dev.yml up -d     # Postgres, Redis, sync worker, scheduler
-cp deploy/.env.example deploy/.env                         # fill in the EVE_* values
-cd backend && uv sync && uv run python manage.py migrate
-uv run python manage.py import_sde --check-latest          # download and import CCP's static data
-uv run python manage.py runserver 127.0.0.1:8000
-cd frontend && npm ci && npm run dev                       # http://localhost:5050
+# backend/.env with EVE_CLIENT_ID, EVE_CLIENT_SECRET and EVE_CALLBACK_URL (not deploy/.env,
+# which is for the production server and would be read by the dev backend too)
+make services                                  # Postgres, Redis, sync worker, scheduler (Docker)
+cd backend && uv sync && cd ../frontend && npm ci && cd ..
+make migrate
+make sde                                       # download and import CCP's static data
 ```
 
-Tests: `uv run pytest -q` in `backend/` (needs the dev Postgres), `npx tsc -b`, `npx eslint .` and
-`npx vite build` in `frontend/`, and browser tests with both dev servers running:
-`uv run pytest playwright_tests --browser chromium -q` in `backend/`.
+Then `make run` starts Django (127.0.0.1:8000) and Vite (http://localhost:5050) in one terminal;
+Ctrl+C stops both. `make help` lists the rest: `make check` runs the lint and tests asked for
+before a commit (needs the services), `make playwright` the browser tests (with `make run` going),
+`make gen-api` regenerates the frontend's API types, `make logs` follows the worker and
+scheduler, `make services-recreate` fixes containers whose mounts went stale after a Docker
+Desktop restart.
 
 ## Production
 

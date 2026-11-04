@@ -8,6 +8,7 @@ EVE Online industry planning, built around plans. Read `docs/redesign.md` before
 - The old Flask app (`src/`) was removed on 2026-11-04; git history has it.
 
 Dev setup:
+- The root `Makefile` wraps the commands below (`make help`): `make services`, `make run` (Django + Vite in one terminal, Ctrl+C stops both), `make stop`, `make check` (lint + backend tests + frontend checks), `make playwright`, `make gen-api`, `make logs`. After a Docker Desktop restart a container can fail with `stat /app/deploy/entrypoint.sh: no such file` (stale bind mount): `make services-recreate`.
 - Services: `docker compose -f deploy/docker-compose.dev.yml up -d` runs Postgres (5434), Redis (6381), the Celery worker (on-demand syncs; restarts itself when backend Python changes) and the scheduler (the `deploy/crontab` syncs). Worker and scheduler run the backend image with `backend/` mounted and the dev settings; after changing backend dependencies add `--build`.
 - Django: `uv run python manage.py runserver 127.0.0.1:8000` from `backend/`.
 - Frontend: `npm run dev` from `frontend/`. Vite serves the app on http://localhost:5050 and proxies `/api`, `/auth` and `/callback` to Django. 5050 is the port the EVE application's registered callback uses, so open the app there.
