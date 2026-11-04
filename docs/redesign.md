@@ -160,7 +160,7 @@ Pure package (no Django imports) inside the Django project; imported as `engine`
   - Fees for every activity, split as in the client: base (EIV × runs; × 2% × runs per copy × copies for copying with the T1 product's EIV; × 2% × attempts for invention with the T2 product's EIV), then job cost (base × cost index × hull/rig cost modifiers × blueprint attr 1954, + 0.25% of base if alpha), facility tax, SCC 4% and the 5% safe-sec tax (security ≥ 0.95). Each part rounded half up to whole ISK, as Python 2 does.
 - Not modelled yet (stated in reasons/warnings where they apply):
   - Facility `sccTaxModifier` and faction cost modifier: server-side values with no SDE source.
-  - EIV is ME-0 materials × CCP adjusted price ([community]); the client receives EIV from the server, so it can't be checked in client code.
+  - EIV is ME-0 materials × CCP adjusted price; science activities use the manufacturing materials. [client: `industryCommon.GetBlueprintPrice`; the server checks the client's cost against its own]
   - Implants (they feed the same character time attributes as skills).
   - Copying-activity materials in the SDE (T2 BPO copy datacores; not used for T1 invention copies).
   - Structure restrictions (e.g. which hulls a Raitaru can build); stations declare activities only.
@@ -223,7 +223,7 @@ Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or l
   - facility tax = base × tax;
   - SCC = base × 4% × the facility's `sccTaxModifier` (×0.5 for ME/TE research);
   - industry security tax = base × 5% in "safe sec" systems (security ≥ 0.95).
-  EIV per blueprint comes from the server, so it isn't visible in client code. [client]
+  EIV per blueprint is computed in the client too: Σ ME-0 material quantity × adjusted price (`industryCommon.GetBlueprintPrice`, science activities on the manufacturing materials). [client]
 - Security classes on the raw value: ≤ 0 null, < 0.45 low, < 0.95 high, ≥ 0.95 safe. [client]
 - Job length check: a job is refused when its total time minus one run exceeds 30 days (`job.py`, `RUN_LENGTH`). For copying, one run is one whole copy (time × licensed runs), so the number of copies per job depends on runs per copy. Licensed runs may not exceed the blueprint's max production limit. [client]
 - Invention: chance = base × (1 + Σ level × 1/30 per required skill, 1/40 for skills in SDE type list 799 "LowerInventionSkillProbabilityTypes" = the seven Encryption Methods skills) × decryptor multiplier, clamped to [0, 1]. Output BPC ME 2 + decryptor, TE 4 + decryptor, runs = base + decryptor. Each attempt consumes one run of the T1 copy. [client][SDE]
@@ -246,7 +246,7 @@ Rejected: staying on Flask. Needs an OpenAPI add-on and a reimplementation of SS
 
 ### Background work
 
-**Decided (2026-11-03): cron for periodic work + Celery for on-demand work.** Supercronic `scheduler` container (as in the AT Tool) runs management commands for token refresh, scheduled character/corp sync and SDE checks. A Celery worker on the existing Redis runs on-demand jobs ("refresh now", first fetch after linking a character). No Celery beat; cron owns the schedule. Celery over RQ because this repo's fetch tasks (`src/tasks.py`) are already Celery tasks.
+**Decided (2026-11-03): cron for periodic work + Celery for on-demand work.** Supercronic `scheduler` container (as in the AT Tool) runs management commands for scheduled character/corp sync and SDE checks (tokens refresh on demand when a sync needs one; there is no refresh job). A Celery worker on the existing Redis runs on-demand jobs ("refresh now", first fetch after linking a character). No Celery beat; cron owns the schedule. Celery over RQ because this repo's fetch tasks (`src/tasks.py`) are already Celery tasks.
 
 Options considered:
 The AT Tool has no task queue: a `scheduler` container runs supercronic with `deploy/crontab` (hourly `refresh_affiliations`, SDE `--scan-incoming` every 5 min, `--check-latest` daily, backups). [code]
@@ -330,7 +330,7 @@ Step 2 is done apart from per-character settings (alpha clone, allowed activitie
   - "Library" was not defined in this doc. Taken to mean every blueprint the account's characters and readable corps hold (BPO / BPC / stack of unresearched originals, ME / TE, runs, owner, structure, corp division name), with search, kind and location filters and sortable columns. `GET /api/library/blueprints`.
   - Dashboard: open jobs (characters' and readable corps', ready first, then by end time, delivered in the last day last), slots per character, finishing within 24 h, the active plan, and problems (ESI access, failing feeds, one line per station with missing tax / rigs / activities). `GET /api/dashboard`.
   - Job state: an installed job past its end date shows as "ready", as the client does (`industryCommon.JobStatus`); ESI's status lags until the next sync. [client]
-  - Slots: running jobs (active or paused) against slots from skills; ready-but-undelivered jobs are shown apart because whether they still hold a slot comes from the server (`GetJobCounts`) and is not visible in client code. Idle reaction slots are not flagged.
+  - Slots: running jobs (active or paused) against slots from skills; ready-but-undelivered jobs are shown apart. The owner's rule (2026-11-04): a ready job frees its slot, and corp jobs take the installer's slot; plans use the same rule (see Panel review follow-up). Idle reaction slots are not flagged.
   - Names: corpmates and NPC stations via ESI `/universe/names` (cached a day; structure ids are not accepted there, so structures are named from the account's stations).
 - Inputs that save on change (checkboxes, selects) keep a local copy (`useLocalCopy`) so they change within the click and follow the server afterwards; station and build-rule saves are also optimistic with rollback. Found by the browser tests: with the server value alone, a click snapped back until the refetch.
 - Playwright (`backend/playwright_tests`, AT Tool pattern): 14 specs against the running dev servers. They cover signed-out state, navigation and titles, theme persistence, the no-ESI flag, adding a station by hand with system and hull search, rigs / tax / activities, build rules, creating a plan and editing lines, the reasons shown in every tab, the no-station warning, switching the active plan, rule overrides, settings toggles, and delete confirmation. Reserved character ids 900000001-900000099; `playwright_cleanup` wipes them (unit-tested to stay inside the range). Stable over three consecutive runs (~12 s each).
@@ -428,6 +428,26 @@ Review in `docs/reviews/2026-11-03-panel-review/` (report, brief, seven reviewer
   - Slots: `industrySvc._UpdateSlots` asks the server `GetJobCounts(session.charid)` per character and refreshes on any job whose `installerID` is the character, whoever owns it. So corp jobs very likely count against the installer's slots; the count itself is server-side. Whether a ready, undelivered job holds a slot is not in client code. [client]
   - Whether an item keeps its `item_id` when moved between a personal and a corp hangar is server-side; not in client code.
 
+## Panel review follow-up (2026-11-04)
+What changed from the review (`docs/reviews/2026-11-03-panel-review/`; item ids N/X/L from its report).
+- **Engine**
+  - Producers: published blueprints first, then manufacturing before reaction, then the lowest type id (N1; see Planning engine).
+  - Invention jobs run only on the characters whose chance the attempts use (X3, decision D2).
+  - Jobs on copies are split at the 30-day limit too, on the same item one after another (L6). T3 from relics is planned as a missing blueprint with a warning (L7).
+  - `PlannedJob.blueprint_item_id`: the owned blueprint a job is installed with (X6).
+  - **Busy slots (X2, decided 2026-11-04 by the owner):** a character's slots start occupied by its running jobs (active, or paused until the stored end), corp jobs included for the character who installed them, ME/TE research in science slots. A job past its end and not delivered frees its slot. Live: maelstroms 0.82 → 1.06 days with the account's 5 running manufacturing jobs.
+  - Rig bonuses come from each rig's dogma effects: which rig attribute feeds which structure attribute, and whether its security effect scales it (L5). Thukker rigs use attr 2653 (security 0.1 / 1.9 / 0.1), Upwell outpost rigs are not security-scaled. Needs `dogmaEffects` in the SDE import (added; an older import falls back to 2593/2594/2595 and 2713/2714).
+  - The compressed ore mix pays the station's reprocessing tax: round(adjusted price × recovered × tax, 2) per material, as the client charges it (L8). `Station.reprocessing_tax`, set in Setup.
+- **Pricing (X4/L1):** with Jita prices, the requested plan runs a second time with Jita unit prices (`engine.pricing.market_prices`; datacores and decryptors are looked up too), then `reprice` prices the shopping list through the order books. The automatic decryptor and ISK in reasons now use the prices the list shows. Buy options use the same priced input. Cost: about +0.45 s on dreadbatch 1. The engine's "no price" warning is replaced by an up-to-date one.
+- **Reservation (X6):** reserving plans also take BPC runs, in priority order; later plans see what is left on each copy. A BPO two reserving plans schedule is flagged, not divided. When only reserving plans are asked for, the ones after the last of them are not run.
+- **Data health (N5):** one function (`esidata.freshness`) reports per owner and feed whether the last sync failed or is older than about three sync intervals (jobs 30 min, the rest 3 h). The plan header shows "data N ago" and the problems; the dashboard uses the same rules. A finished "Refresh now" refetches plans, library and dashboard.
+- **Sync (N3, N4, L12):** snapshot writes (assets, blueprints, skills, divisions) take a per-owner advisory lock, and assets and blueprints are unique per owner and item id. An SSO error during refresh is a failed feed (`TokenRefreshFailed`), not an aborted run; only `invalid_grant` / `invalid_token` mark a token rejected. Paged fetches must come from one snapshot (`Last-Modified`): one retry, then the feed fails. Token validation allows 60 s of clock skew (a Docker Desktop VM clock behind CCP's made fresh tokens "not yet valid").
+- **Security (N8, N9, D3, D4):** dev Postgres and Redis on 127.0.0.1; dev-login only for ids 900000001–900000099 (`DEV_LOGIN_CHARACTER_IDS`); corp access needs a working token; Caddy no longer proxies `/admin`; uvicorn trusts forwarded headers from private networks only. `manage.py rekey_tokens` re-encrypts tokens after setting `TOKEN_ENCRYPTION_KEY`, and `deploy/backup-dev.sh` dumps the dev database with `backend/.env`; neither has been run yet.
+- **Frontend:** Items tab (decision, why, made / left over, per-plan buy or build), ME / TE / decryptor overrides on the Blueprints tab, the plan tab in the URL, line and choice edits that do not undo each other, copy buttons disabled while the plan recomputes, the ore panel priced by the header's switch, owner names and failing feeds on Setup.
+- **Code:** the unused `/api/plan/preview` is gone; `inputs` assembles a plan's input (`load`, `plan_input`) and `progress` builds progress, so `tracker` no longer imports `reservation`.
+- **Tests:** result invariants on every planner test (`tests/engine/invariants.py`); golden tests on real SDE records through the real importer (`tests/golden/`, `extract.py` refreshes the fixture from CCP's zip); CI checks the frontend's API types against the schema (`make api-check`).
+- **Dev tooling:** root `Makefile` (`make help`). After a Docker Desktop restart, containers can keep stale bind mounts (`stat /app/deploy/entrypoint.sh: no such file`, or Celery's "module config was not found"): `make services-recreate`.
+
 ## Open questions
 - Exact list of tier/category build switches.
-- In game, needing no particular blueprints: does a ready, undelivered job hold a slot (the industry window's "jobs x / y" tooltip with one ready job), do corp jobs count against the installer's slots (same tooltip), and does an item keep its `item_id` when moved whole from a personal to a corp hangar.
+- In game: does an item keep its `item_id` when moved whole from a personal to a corp hangar (decides whether the same item can be counted in both snapshots, review DATA-2).

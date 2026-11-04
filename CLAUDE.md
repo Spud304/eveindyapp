@@ -8,7 +8,7 @@ EVE Online industry planning, built around plans. Read `docs/redesign.md` before
 - The old Flask app (`src/`) was removed on 2026-11-04; git history has it.
 
 Dev setup:
-- The root `Makefile` wraps the commands below (`make help`): `make services`, `make run` (Django + Vite in one terminal, Ctrl+C stops both), `make stop`, `make check` (lint + backend tests + frontend checks), `make playwright`, `make gen-api`, `make logs`. After a Docker Desktop restart a container can fail with `stat /app/deploy/entrypoint.sh: no such file` (stale bind mount): `make services-recreate`.
+- The root `Makefile` wraps the commands below (`make help`): `make services`, `make run` (Django + Vite in one terminal, Ctrl+C stops both; refuses to start if 8000 or 5050 is in use), `make stop` (ends any dev server of this checkout), `make check` (lint + API types + backend tests + frontend checks), `make playwright`, `make gen-api`, `make logs`. After a Docker Desktop restart, containers can keep stale bind mounts (`stat /app/deploy/entrypoint.sh: no such file`, Celery's "module config was not found"): `make services-recreate`.
 - Services: `docker compose -f deploy/docker-compose.dev.yml up -d` runs Postgres (5434), Redis (6381), the Celery worker (on-demand syncs; restarts itself when backend Python changes) and the scheduler (the `deploy/crontab` syncs). Worker and scheduler run the backend image with `backend/` mounted and the dev settings; after changing backend dependencies add `--build`.
 - Django: `uv run python manage.py runserver 127.0.0.1:8000` from `backend/`.
 - Frontend: `npm run dev` from `frontend/`. Vite serves the app on http://localhost:5050 and proxies `/api`, `/auth` and `/callback` to Django. 5050 is the port the EVE application's registered callback uses, so open the app there.
@@ -17,8 +17,12 @@ Dev setup:
 - Never use `/auth/dev-login` with a real character id: it upserts the character with a dev owner hash, which counts as a transfer and deletes its ESI token.
 - Production stack: `deploy/docker-compose.yml` (README "Production"). Do not create `deploy/.env` on a dev machine: the dev backend reads it too.
 
-## Status (2026-11-03)
-Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. Plan results, shared views and the ore calculator price from Jita 4-4 sell orders (`apps/esidata/market.py`, `engine/pricing.py`); tests stub the market (`no_market` fixture in `tests/planning/conftest.py`). The Flask app is removed and the production stack (Caddy + frontend, web, worker, scheduler, Postgres, Redis) was checked locally; see "Deployment" in `docs/redesign.md`. The user runs it on localhost only for now (decided 2026-11-04); a server deploy is not planned.
+## Status (2026-11-04)
+Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. A seven-reviewer panel review (2026-11-03) and its follow-up are done: `docs/reviews/2026-11-03-panel-review/` and "Panel review follow-up" in `docs/redesign.md`. Plan results, shared views and the ore calculator price from Jita 4-4 sell orders (`apps/esidata/market.py`, `engine/pricing.py`); tests stub the market (`no_market` fixture in `tests/planning/conftest.py`). The Flask app is removed and the production stack (Caddy + frontend, web, worker, scheduler, Postgres, Redis) was checked locally; see "Deployment" in `docs/redesign.md`. The user runs it on localhost only for now (decided 2026-11-04); other users would run their own copy, not share one site (decided 2026-11-04).
+
+Open from the review:
+- Not yet run on real data: `manage.py rekey_tokens` (stored tokens still use the key derived from the default `SECRET_KEY`) and `make backup` (decision D4: do both).
+- Waiting on the owner: whether an item keeps its `item_id` moving to a corp hangar (DATA-2), contact details for the ESI User-Agent, and how a self-hosted copy limits signup.
 
 Open from steps 6–7:
 - Copies attributed to a plan lose that attribution once delivered; a picked BPC that disappears is skipped without a warning.
