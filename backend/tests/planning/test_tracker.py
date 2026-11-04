@@ -216,6 +216,9 @@ def test_link_and_unlink_by_hand(api, setup, user):
     assert body["candidates"] == []
     body = api.delete(f"/api/plans/{setup.pk}/jobs/2").json()
     assert body["jobs"] == [] and [j["job_id"] for j in body["candidates"]] == [2]
+    # With nothing linked, the row still names its product (it comes from the SDE recipe).
+    (row,) = [r for r in body["rows"] if r["activity"] == "manufacturing"]
+    assert row["product_name"] == "Rifter"
     assert JobLink.objects.get(job_id=2).plan is None  # remembered as unlinked
 
 

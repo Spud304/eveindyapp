@@ -352,13 +352,14 @@ def plan_progress(request: HttpRequest, plan_id: int):
             key = (j.blueprint_type_id, j.activity.value)
             remaining[key] = remaining.get(key, 0) + j.runs * max(j.copies, 1)
         over = {i.type_id: i.over_plan for i in run.result.items if i.over_plan}
+    products = _products(data.game, keys)
     names = dict(
         EveType.objects.filter(
             pk__in={bp for bp, _ in keys}
+            | set(products.values())
             | {j.product_type_id for j in linked_jobs if j.product_type_id}
         ).values_list("id", "name")
     )
-    products = _products(data.game, keys)
     counts: dict[tuple[int, str], dict[str, int]] = {}
     for job in linked_jobs:
         activity = tracker.JOB_ACTIVITY.get(job.activity_id)
