@@ -74,13 +74,20 @@ def schedule(
             free.setdefault((ch.character_id, kind), [0.0] * f.slots(ch, activity))
 
     locks = dict(locks or {})
+    # Durations without skills order the ready jobs; computed once per job.
+    longest = {j.job_id: j.duration(None) for j in jobs}
+    waiting = {j.job_id: set(j.depends_on) for j in jobs}
+    dependents: dict[str, list[str]] = {}
+    for j in jobs:
+        for d in waiting[j.job_id]:
+            dependents.setdefault(d, []).append(j.job_id)
+    ready_ids = {i for i, deps in waiting.items() if not deps}
     pending = {j.job_id for j in jobs}
-    done: set[str] = set()
     while pending:
-        ready = [by_id[i] for i in pending if all(d in done for d in by_id[i].depends_on)]
-        if not ready:
+        if not ready_ids:
             raise ValueError("job dependency cycle")
-        job = max(ready, key=lambda j: (j.duration(None), j.job_id))
+        job = by_id[max(ready_ids, key=lambda i: (longest[i], i))]
+        ready_ids.discard(job.job_id)
         ready_at = max((by_id[d].end for d in job.depends_on), default=0.0)
         if job.lock is not None:
             ready_at = max(ready_at, locks.get(job.lock, 0.0))
@@ -88,7 +95,10 @@ def schedule(
         if job.lock is not None:
             locks[job.lock] = job.end
         pending.discard(job.job_id)
-        done.add(job.job_id)
+        for nxt in dependents.get(job.job_id, ()):
+            waiting[nxt].discard(job.job_id)
+            if not waiting[nxt]:
+                ready_ids.add(nxt)
     return max((j.end for j in jobs), default=0.0)
 
 
