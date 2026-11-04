@@ -33,7 +33,7 @@ Reference sources (prefer these over memory for game mechanics):
 - ESI: the live OpenAPI spec at `https://esi.evetech.net/meta/openapi.json` for routes, scopes and fields.
 - The AT Tool repo (`/mnt/g/SpudsATTool`) for stack patterns.
 
-Dev data: the account with id 1 is the user's real account (main Starch Man, ESI linked as Director of The Fry Cooks). Plans "indy 1" and "dreadbatch 1" and 8 discovered stations are real dev data. Test with the Playwright reserved ids, not with this account.
+Dev data: the account with id 1 is the user's real account (main Starch Man, plus Potato Ricer and Industrial Fryer; ESI linked as Director of The Fry Cooks). Plans "dreadbatch 1" and "maelstroms" and 8 discovered stations are real dev data. Test with the Playwright reserved ids, not with this account.
 
 ## Commits
 - Commit directly to `master` (solo project); no feature branches unless asked.
