@@ -389,6 +389,13 @@ Step 4 is done apart from per-plan sharing views (step 7).
 - Fixed with it: plan edits (settings, choices, lines) are now sent one at a time in order (TanStack Query mutation scope); two quick edits could reach the threaded server together and leave the older value saved. The settings browser test waited on a toast an earlier save had already shown; it now waits for each PATCH response. It failed about one run in six before.
 - Not done: implants (not synced; the engine takes a percentage), by-products counted as value.
 
+## Deployment (2026-11-04)
+- The Flask app is removed; the new stack is the only one. CI (`.github/workflows/test.yml`) runs backend lint and tests against a Postgres service and the frontend type check, lint and build; browser tests stay local (they need both dev servers and the SDE).
+- `deploy/docker-compose.yml` gained the frontend: `deploy/Dockerfile.frontend` builds it and serves it from Caddy, which proxies `/api`, `/auth`, `/callback`, `/admin`, `/static` to `web` and gets the certificate (`deploy/Caddyfile`, from the AT Tool). `ACME_EMAIL` is required; compose stops with a message without it.
+- Only `web` builds the backend image; `worker` and `scheduler` use it. All three building it at once failed with containerd "parent snapshot does not exist".
+- Checked locally with throwaway settings (project `eveindy-prodtest`, ports 8081 / 8444, removed afterwards), starting with no backend image: migrations, health, the app and SPA deep links, the SSO redirect with the https callback, dev-login 404, admin and static files, http → https, the worker and scheduler starting, and `sync_esi --public` from the container (16k prices, 33k cost indices). Not checked: a real SSO login (needs a registered domain callback) and the SDE import (a large download).
+- Never create `deploy/.env` on a dev machine: the dev backend reads it too (`config/settings/base.py`), and its production `EVE_CALLBACK_URL` would break dev login.
+
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
 1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.

@@ -15,10 +15,10 @@ Dev setup:
 - After changing API schemas: `npm run gen:api` from `frontend/` (Django must be running).
 - Vite's watcher can miss a second quick edit to the same file (seen 2026-11-03: a served module lacked a new import). If the browser shows code you already changed, restart `npm run dev`.
 - Never use `/auth/dev-login` with a real character id: it upserts the character with a dev owner hash, which counts as a transfer and deletes its ESI token.
-- Production stack: `deploy/docker-compose.yml`.
+- Production stack: `deploy/docker-compose.yml` (README "Production"). Do not create `deploy/.env` on a dev machine: the dev backend reads it too.
 
 ## Status (2026-11-03)
-Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. Plan results, shared views and the ore calculator price from Jita 4-4 sell orders (`apps/esidata/market.py`, `engine/pricing.py`); tests stub the market (`no_market` fixture in `tests/planning/conftest.py`). **Next:** check the Shopping list's copy format against a real Janice / multibuy paste; the build order is otherwise done.
+Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. Plan results, shared views and the ore calculator price from Jita 4-4 sell orders (`apps/esidata/market.py`, `engine/pricing.py`); tests stub the market (`no_market` fixture in `tests/planning/conftest.py`). The Flask app is removed and the production stack (Caddy + frontend, web, worker, scheduler, Postgres, Redis) was checked locally; see "Deployment" in `docs/redesign.md`. **Next:** deploy to a server (needs the user's domain and an EVE application with its callback).
 
 Open from steps 6–7:
 - Copies attributed to a plan lose that attribution once delivered; a picked BPC that disappears is skipped without a warning.

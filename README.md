@@ -52,8 +52,19 @@ Tests: `uv run pytest -q` in `backend/` (needs the dev Postgres), `npx tsc -b`, 
 
 ## Production
 
-`deploy/docker-compose.yml` runs the web app, a Celery worker, the cron scheduler and Postgres. Copy
-`deploy/.env.example` to `deploy/.env`, fill it in, and `docker compose -f deploy/docker-compose.yml up -d`.
+`deploy/docker-compose.yml` runs Caddy (the built frontend, TLS from Let's Encrypt, and a proxy for
+`/api`, `/auth`, `/callback`, `/admin` and `/static`), the Django app, a Celery worker, the cron
+scheduler (`deploy/crontab`), Postgres and Redis.
+
+1. Point a domain at the server and register an EVE application with the callback
+   `https://<domain>/callback`.
+2. `cp deploy/.env.example deploy/.env` and fill it in (`ACME_EMAIL` is required).
+3. `docker compose -f deploy/docker-compose.yml up -d --build`
+4. Import the static data once (afterwards the scheduler checks for new builds daily):
+   `docker compose -f deploy/docker-compose.yml exec web python manage.py import_sde --check-latest`
+
+With another reverse proxy already on 80/443, set `SITE_ADDRESS=:80` and let that proxy forward to
+Caddy.
 
 ## ESI scopes
 
