@@ -60,8 +60,9 @@ Shared sub-components across lines are merged (one Ishtar/Hulk common component 
 ### BPO vs BPC trade-off
 Decided (2026-11-03):
 
-- The real constraint is **slots**, not dates. Copying is cheap (small job fee, uses lab slots); it exists to run more manufacturing jobs in parallel.
-- **Default: copy to fill idle manufacturing slots.** If one BPO would leave mfg slots idle, plan enough copies to use them. This is close to free speed, so it's automatic.
+- The real constraint is **slots**, not dates. Copying costs a small job fee and lab slots; it exists to run more manufacturing jobs in parallel.
+- **Correction (2026-11-03): copying is not free speed.** Copying takes 0.8x the manufacturing time per run for 4128 of the SDE's blueprints [SDE], and a BPO is in one job at a time, so a BPO that copies is not building. A BPO that could start building at once gains about 10% at best. Copying pays off when the BPO would otherwise wait for its inputs (it copies while the components build) or when there are spare BPOs.
+- **Default (decided 2026-11-03): copy only when the plan finishes sooner.** The engine tries splitting each owned BPO into the BPO plus copies it makes first, compares the scheduler's finish time, and keeps a split only if the plan finishes at least an hour sooner. Automatic, shown with the time saved, extra materials and copy fee. Rejected: copying whenever manufacturing slots are idle, which can make a plan slower and always costs fees and per-job rounding.
 - **Buying BPCs and extra BPOs cost real ISK**, so they're never automatic. Per blueprint, show the trade-off: "buy 3 BPCs (~15M) → finishes ~2 days sooner" / "extra BPO (~80M) → saves ~1 day per batch, reusable". You opt in.
 - No plan-level "cheapest vs fastest" preference for now; the per-blueprint choice is enough. Revisit if it gets tedious on big plans.
 
@@ -143,7 +144,7 @@ Pure package (no Django imports) inside the Django project; imported as `engine`
 - Decisions made in the engine:
   - Assets reduce input demand only, never a plan line's own quantity (a line means "build this").
   - A plan line is always built, even if a rule would buy its category.
-  - Blueprint source per blueprint: owned BPO (one job, all runs) → owned BPCs (best ME first, one job each) → invention for T2 → "missing" at ME 0 / TE 0 with a warning. Splitting BPO runs across idle slots is step 6.
+  - Blueprint source per blueprint: owned BPO (one job, all runs, or split with copies; see Step 6 progress) → owned BPCs (best ME first, one job each) → invention for T2 → "missing" at ME 0 / TE 0 with a warning.
   - Station: among stations offering the activity, lowest material multiplier, then time, then fee rate. Copy and invention jobs pick a station too, so hull and lab-rig time bonuses apply to them.
   - Decryptor `auto`: lowest invention inputs + direct T2 job materials at market price (not invention cost alone, which ignores what the ME bonus saves). With no prices it says so and takes the fewest attempts.
   - Invention chance uses the best eligible inventor's skills; attempts = ceil(BPCs / chance).
@@ -221,6 +222,7 @@ Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or l
   - industry security tax = base × 5% in "safe sec" systems (security ≥ 0.95).
   EIV per blueprint comes from the server, so it isn't visible in client code. [client]
 - Security classes on the raw value: ≤ 0 null, < 0.45 low, < 0.95 high, ≥ 0.95 safe. [client]
+- Job length check: a job is refused when its total time minus one run exceeds 30 days (`job.py`, `RUN_LENGTH`). For copying, one run is one whole copy (time × licensed runs), so the number of copies per job depends on runs per copy. Licensed runs may not exceed the blueprint's max production limit. [client]
 - Invention: chance = base × (1 + Σ level × 1/30 per required skill, 1/40 for skills in SDE type list 799 "LowerInventionSkillProbabilityTypes" = the seven Encryption Methods skills) × decryptor multiplier, clamped to [0, 1]. Output BPC ME 2 + decryptor, TE 4 + decryptor, runs = base + decryptor. Each attempt consumes one run of the T1 copy. [client][SDE]
 
 ### Reprocessing / compression (compressed ore calculator)
@@ -340,6 +342,14 @@ Step 4 is done apart from per-plan sharing views (step 7).
 - Tests: 14 unit tests (matching rules, progress inputs, engine effect, API) and 5 browser specs: auto link, unlink then link, jobs from before activation, inactive plan, over plan. Test jobs come from `manage.py playwright_job`, which only accepts reserved test ids.
 - Found by the browser tests: the plan result cached from other tabs went stale after matching on the Progress tab. It is now refreshed whenever the linked jobs change.
 - Not done: copy jobs reducing planned copies; progress caching (each call recomputes).
+
+## Step 6 progress (2026-11-03)
+- Scheduler: jobs carry the blueprint item they are installed with, and jobs on the same item never overlap. Before this, the 30-day chunks of one BPO (e.g. 285 Crystalline Carbonide runs as 240 + 45), a missing blueprint's chunks, and T1 copying for invention alongside T1 manufacturing were all scheduled in parallel, so finish times were too short.
+- Invention copy jobs: copies per job are now capped using the time of a whole copy (runs per copy), per the client's length check. The old cap used one licensed run.
+- Auto-copy (`engine/planner.py`, `_search_parallel`): candidates are owned BPOs with a copying activity and at least 2 runs, when the characters have 2+ manufacturing slots in total. For k parallel jobs, copies get ceil(runs / k) runs (at most the max production limit) and the BPO keeps the rest; the copy job runs first on the BPO and every job of the blueprint waits for it. Greedy search, longest blueprint first: try k = 2, 3, … up to runs and total slots, stop after two tries that do not beat the best, keep the best if it saves at least `MIN_SPLIT_GAIN` (1 hour); up to 3 passes. Options are compared by re-scheduling the base plan's jobs only; the chosen splits are then planned again in full so materials are exact, and that result is used only if it really finishes sooner. Each split blueprint's reason gives the time saved (the plan without that one split), the extra materials from per-job rounding, and the copy job fee. New source `copy` and reason code `source_copy`.
+- Live (dreadbatch 1, one character with 11 manufacturing slots): the Phoenix BPO is split 3 ways while its capital components build; the plan finishes in 29.5 days instead of 35.7, for a 2.66M copy fee and 2 more units of materials (131k ISK). indy 1: no split helps (73.5 days either way). Engine time with the search: dreadbatch 1 ~170 ms (was ~30), indy 1 ~70 ms.
+- Known limits: greedy search can miss gains that need two blueprints split together; copies always get equal runs; with several owned BPOs only the best is used; owned BPCs are ignored when a BPO is owned, so copies the plan already made (delivered BPCs) are not reused and the plan asks for new copies. That last one is the next fix, together with linked copy jobs reducing planned copies.
+- Not done yet: opt-in "buy N BPCs" / "extra BPO" with cost vs time per blueprint. BPCs have no market price (contracts), so the user enters price, runs and ME/TE (default ME 10 / TE 20); an extra BPO is priced at CCP's average price at ME 0 / TE 0.
 
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.

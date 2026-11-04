@@ -18,14 +18,12 @@ Dev setup:
 - Production stack: `deploy/docker-compose.yml`.
 
 ## Status (2026-11-03)
-Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Next: step 6, BPO/BPC trade-off** (spec: "BPO vs BPC trade-off" in `docs/redesign.md`).
+Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Step 6 (BPO/BPC trade-off) is in progress**: blueprint locks in the scheduler and automatic copying when it makes the plan finish sooner are done; see "Step 6 progress" in `docs/redesign.md`.
 
-Where step 6 starts:
-- `backend/engine/planner.py` `plan_blueprint`: an owned BPO is one job for all runs, split only at the client's 30-day limit (`formulas.max_runs`). Owned BPCs are one job each. Copy jobs are only planned for invention (`plan_invention`). Step 6 adds copies to fill idle manufacturing slots automatically, plus opt-in "buy N BPCs" / "extra BPO" with cost vs time per blueprint.
-- `backend/engine/schedule.py` is the list scheduler; use its finish time to compare options instead of a separate time formula.
-- Per-blueprint user choices live in `engine.types.BlueprintChoice` (stored in `Plan.choices`, edited via `PATCH /api/plans/{id}`). Extend it for the opt-ins.
-- The old Flask `src/industry.py` `_compute_build_strategy` shows the earlier attempt. It is a reference only; it predates the client-verified formulas.
-- Also open: copy jobs linked by the tracker do not yet reduce planned copies (`apps/planning/tracker.py`).
+Where step 6 continues:
+- Reuse owned BPCs next to an owned BPO (today `plan_blueprint` ignores BPCs when a BPO is owned), and let copy jobs linked by the tracker reduce planned copies (`apps/planning/tracker.py`).
+- Opt-in "buy N BPCs" / "extra BPO" with cost vs time per blueprint. Per-blueprint user choices live in `engine.types.BlueprintChoice` (stored in `Plan.choices`, edited via `PATCH /api/plans/{id}`); extend it. Compare options with the scheduler's finish time, as `_search_parallel` in `backend/engine/planner.py` does.
+- The old Flask `src/industry.py` `_compute_build_strategy` is a reference only; it predates the client-verified formulas and ignores that a BPO is locked while copying.
 
 Reference sources (prefer these over memory for game mechanics):
 - Decompiled game client: `/mnt/g/eve projects/src` (`industry/` for job cost, time, materials, max runs; `eve/common/script/util/industryCommon.py` for how modifiers are built). Findings are recorded under "Client code" in `docs/redesign.md`.
