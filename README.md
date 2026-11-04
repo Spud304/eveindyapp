@@ -52,8 +52,9 @@ Tests: `uv run pytest -q` in `backend/` (needs the dev Postgres), `npx tsc -b`, 
 ## Production
 
 `deploy/docker-compose.yml` runs Caddy (the built frontend, TLS from Let's Encrypt, and a proxy for
-`/api`, `/auth`, `/callback`, `/admin` and `/static`), the Django app, a Celery worker, the cron
-scheduler (`deploy/crontab`), Postgres and Redis.
+`/api`, `/auth`, `/callback` and `/static`), the Django app, a Celery worker, the cron
+scheduler (`deploy/crontab`), Postgres and Redis. Django admin is not proxied; reach it on the
+host at `http://127.0.0.1:8000/admin/` (through an SSH tunnel on a server).
 
 1. Point a domain at the server and register an EVE application with the callback
    `https://<domain>/callback`.

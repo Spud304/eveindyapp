@@ -22,7 +22,9 @@ case "${1:-web}" in
     wait_for_db
     python manage.py migrate --noinput
     python manage.py collectstatic --noinput
-    exec uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips="*"
+    # Trust X-Forwarded-* only from the Docker networks (Caddy), as Caddy trusts private ranges.
+    exec uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers \
+      --forwarded-allow-ips="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     ;;
   worker)
     wait_for_db

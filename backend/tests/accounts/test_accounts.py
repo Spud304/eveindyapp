@@ -199,6 +199,55 @@ def test_rejected_refresh_marks_token(linked, monkeypatch):
         tokens.access_token(MAIN_ID)
 
 
+def test_dev_login_limited_to_the_configured_ids(client, settings, db):
+    settings.DEV_LOGIN_CHARACTER_IDS = (900_000_001, 900_000_099)
+    assert client.get("/auth/dev-login", {"character_id": MAIN_ID}).status_code == 403
+    assert client.get("/auth/dev-login", {"character_id": 900_000_100}).status_code == 403
+    assert client.get("/auth/dev-login", {"character_id": 900_000_001}).status_code == 302
+
+
+def test_dev_login_ignores_an_empty_owner(login_as, make_character):
+    from apps.accounts.models import EveCharacter
+
+    make_character(owner="real-owner")
+    login_as(MAIN_ID, owner="")
+    # Treated as the dev owner: a transfer, so the real account is not entered.
+    assert EveCharacter.objects.get(pk=MAIN_ID).owner_hash == "dev-owner"
+
+
+def test_rekey_tokens_moves_tokens_to_the_new_key(linked, settings):
+    from cryptography.fernet import Fernet
+    from django.core.management import CommandError, call_command
+
+    old_secret = settings.SECRET_KEY  # tokens were stored under the derived key
+    settings.TOKEN_ENCRYPTION_KEY = Fernet.generate_key().decode()
+    with pytest.raises(crypto.TokenDecryptError):
+        tokens.access_token(MAIN_ID)  # the new key cannot read them yet
+
+    call_command("rekey_tokens", old_secret_key=old_secret, dry_run=True)
+    with pytest.raises(crypto.TokenDecryptError):
+        tokens.access_token(MAIN_ID)  # a dry run writes nothing
+
+    with pytest.raises(CommandError, match="does not decrypt"):
+        call_command("rekey_tokens", old_secret_key="wrong")
+
+    call_command("rekey_tokens", old_secret_key=old_secret)
+    assert tokens.access_token(MAIN_ID) == "old"
+    assert crypto.decrypt(EsiToken.objects.get(pk=MAIN_ID).refresh_token) == "r1"
+
+
+def test_failed_refresh_keeps_the_token(linked, monkeypatch):
+    EsiToken.objects.filter(pk=MAIN_ID).update(access_expires_at=timezone.now())
+
+    def down(r):
+        raise sso.SsoError("token refresh failed: HTTP 502")
+
+    monkeypatch.setattr(sso, "refresh_tokens", down)
+    with pytest.raises(tokens.TokenRefreshFailed, match="HTTP 502"):
+        tokens.access_token(MAIN_ID)
+    assert EsiToken.objects.get(pk=MAIN_ID).refresh_failed_at is None
+
+
 def test_missing_scope_is_unavailable(linked):
     with pytest.raises(tokens.TokenUnavailable, match="lacks scopes"):
         tokens.access_token(MAIN_ID, "esi-assets.read_corporation_assets.v1")

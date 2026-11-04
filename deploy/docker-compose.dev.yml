@@ -34,8 +34,9 @@ x-backend: &backend
 services:
   db:
     image: postgres:16-alpine
+    # Loopback only: the password is in this file and the DB holds real ESI tokens.
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     environment:
       POSTGRES_DB: eveindy
       POSTGRES_USER: eveindy
@@ -50,8 +51,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Loopback only: no password, and the cache holds pickled data the app loads.
     ports:
-      - "6381:6379"
+      - "127.0.0.1:6381:6379"
 
   worker:
     <<: *backend

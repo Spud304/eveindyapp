@@ -12,7 +12,9 @@
 	encode zstd gzip
 
 	# The same paths the Vite dev server proxies (frontend/vite.config.ts). /callback is EVE SSO's.
-	@backend path /api/* /auth/* /callback /admin/* /static/*
+	# Not /admin: the app never needs it, and its password login should not face the internet.
+	# Use it through web's host port, 127.0.0.1:8000 (an SSH tunnel on a server).
+	@backend path /api/* /auth/* /callback /static/*
 	handle @backend {
 		reverse_proxy web:8000
 	}

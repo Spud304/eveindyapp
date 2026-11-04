@@ -14,7 +14,13 @@ from django.conf import settings
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.db import transaction
-from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseForbidden,
+)
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -143,10 +149,17 @@ def dev_login_view(request: HttpRequest) -> HttpResponse:
         character_id = int(request.GET["character_id"])
     except (KeyError, ValueError):
         return HttpResponseBadRequest("character_id required")
+    # A real character id would count as a transfer (dev owner hash) and drop its ESI token.
+    allowed = settings.DEV_LOGIN_CHARACTER_IDS
+    if allowed is not None and not allowed[0] <= character_id <= allowed[1]:
+        return HttpResponseForbidden(
+            f"dev-login only takes character ids {allowed[0]}-{allowed[1]}"
+        )
     identity = sso.SsoIdentity(
         character_id=character_id,
         name=request.GET.get("name", f"Dev Character {character_id}"),
-        owner_hash=request.GET.get("owner", "dev-owner"),
+        # An empty owner would log in to an existing account without the transfer check.
+        owner_hash=request.GET.get("owner") or "dev-owner",
         scopes=("publicData",),
     )
     try:

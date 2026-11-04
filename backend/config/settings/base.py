@@ -167,6 +167,9 @@ SDE_DOWNLOAD_URL = env.str(
 
 # /auth/dev-login shortcut for local work and tests; dev and test settings turn it on.
 DEV_LOGIN_ENABLED: bool = False
+# Character ids dev-login accepts (inclusive), or None for any. Dev allows only the reserved
+# browser-test range, because the dev database holds real characters.
+DEV_LOGIN_CHARACTER_IDS: tuple[int, int] | None = (900_000_001, 900_000_099)
 
 LOGGING = {
     "version": 1,

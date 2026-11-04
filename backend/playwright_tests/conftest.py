@@ -123,6 +123,8 @@ def login(browser: Browser):
         global _next_id
         _next_id += 1
         cid = _next_id
+        # playwright_cleanup only wipes this range; dev-login refuses ids outside it.
+        assert cid <= 900_000_099, "reserved test character ids used up in this run"
         name = f"PW Pilot {cid - FIRST_ID}"
         context = browser.new_context(base_url=BASE_URL, viewport={"width": 1600, "height": 1000})
         params = {"character_id": cid, "name": name}
