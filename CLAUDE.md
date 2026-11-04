@@ -18,7 +18,7 @@ Dev setup:
 - Production stack: `deploy/docker-compose.yml`.
 
 ## Status (2026-11-03)
-Build order steps 0–7 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Next: step 8, Janice export, then the compressed ore calculator.**
+Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Next:** real buy prices (Janice API needs a key from the user; ESI regional orders need none), and checking the Shopping list's copy format against a real Janice / multibuy paste.
 
 Open from steps 6–7:
 - Copies attributed to a plan lose that attribution once delivered; a picked BPC that disappears is skipped without a warning.

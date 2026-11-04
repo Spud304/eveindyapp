@@ -230,6 +230,7 @@ Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or l
 - Compression is 1:1 since patch 20.03; compressed ore reprocesses in batches of `portionSize` (100). Outputs in `typeMaterials`, raw↔compressed mapping in `compressibleTypes`. [community][SDE]
 - Yield = (50 + rig) × (1 + sec) × (1 + structure) × (1 + 0.03·Reprocessing) × (1 + 0.02·Reprocessing Efficiency) × (1 + 0.02·ore skill) × (1 + implant). Rig T1 1 / T2 3; sec high 0, low 0.06, null/WH 0.12; Athanor 0.02, Tatara 0.055; implants 1/2/4%. Wiki page flagged possibly outdated. [community]
 - Reprocessing rig groups 1941–1945 present. [SDE]
+- **Checked 2026-11-03.** Client (`reprocessing/util.py`, `reprocessing/ui/util.py`): efficiency = min(1, station efficiency × character yield); character yield = Π (1 + level × attr 379 / 100) over the ore's processing skill, Reprocessing (3 %) and Reprocessing Efficiency (2 %), × implants; each material out = floor(quantity × batches × efficiency). [client] The ore's skill is SDE attr 790 on the ore and is now a grouped skill (Veldspar → Simple Ore Processing, 2 %/level), not one skill per ore, so the "ore skill" above is out of date. [SDE] Station efficiency is computed on the server; the SDE has rigs' `refiningYieldMultiplier` (attr 717: 0.51 T1, 0.53 T2), their security modifiers (2355–2357: 1.0 / 1.06 / 1.12) and refineries' `strRefiningYieldBonus` (attr 2722: Athanor 2, Tatara 5.5); engineering complexes have none. [SDE] The calculator combines them as the community formula does: rig multiplier × security modifier (0.50 with no rig) × (1 + hull bonus). [community, unverified against the server] M-set rigs bonus one ore class by group; L / XL "Reprocessing Monitor" rigs are assumed to cover all. [unverified]
 
 ### Janice
 - API v2 (`https://janice.e-351.com/api/rest/v2/`), `X-ApiKey` header; key is requested via a ticket on their Discord. `POST /appraisal` (text/plain, `market`, `pricing`, `pricingVariant`) and `POST /pricer`. Rate limits undocumented. [official, Janice's swagger]
@@ -372,6 +373,16 @@ Step 4 is done apart from per-plan sharing views (step 7).
 - Live check (maelstroms plan, link payload built in memory, not shared): no station, structure, character or owner name and no character id in the payload; the plan's 2 stations show as Station 1 and 2.
 - Tests: 7 API tests (link aliases and revocation, corp access, other corps, the 24 h re-check, corp validation, the cache) and 2 browser tests (link view in a logged-out browser, corp member finds and opens the plan; another corp gets nothing). Browser test characters can be put in a made-up corp: `login(corp=...)`.
 
+## Step 8 progress (2026-11-03)
+- Janice export: the Shopping list's "Copy list" (name, tab, quantity per line) exists since step 4. Whether Janice and EVE multibuy accept it is still to be checked with a real paste.
+- Compressed ore calculator, done:
+  - `engine/reprocess.py` (pure): yields as above, and the cheapest mix of whole batches that covers every needed mineral. A linear solve (scipy HiGHS `linprog`) rounded up per ore for mixes over 1,000 batches (at most one batch per ore over the cheapest), an integer solve (`milp`) for smaller ones; floor losses are made up by raising the short mineral's target and solving again. Rejected: exact integer solving everywhere (2 s per solve on dreadbatch 1, for a difference below one batch per ore). scipy is now a backend dependency.
+  - `apps/sde/gamedata.py`: compressed ores from `compressibleTypes` + `typeMaterials` + attr 790 (186: 114 asteroid, 60 moon, 12 ice), skill bonuses (attr 379), refinery rigs and hull bonuses. The Setup rig search now finds reprocessing rigs (groups 1941–1945).
+  - `GET /api/plans/{id}/compressed-ore?station_id&character_id&ore_classes`: the minerals on the plan's shopping list; default station the best asteroid-ore yield, default character the cheapest mix. Ore and minerals are both priced at CCP average price.
+  - UI: "Minerals as compressed ore" under the Shopping list (owner only): station, character, ore classes; ore and mineral tables; ore cost vs buying minerals; "Copy ore" and "Copy list with ore" (the shopping list with the covered minerals replaced by ore).
+  - Live: no reprocessing rig is recorded on the account's Tatara, so its yield is 52.8 % station × 1.39 skills = 73.4 %; at that yield ore costs ~7 % more than minerals on both plans. Warm request time is about that of the plan result (dreadbatch 1 ~1 s).
+- Not done: implants (not synced; the engine takes a percentage), by-products counted as value, real buy prices (Janice API key or ESI orders).
+
 ## Build order
 0. **Engine types** — input/output dataclasses, including a reason on each decision. Done.
 1. **Engine** — extract from `industry.py:get_calculator`, multi-line plans, build rules (item blacklist + tier switches), fix bugs 1–3 and 8–12, tests. Done; see Planning engine. Pure Python, independent of the backend stack decision. Track C (compressed ore + Janice export) runs alongside in a worktree.
@@ -381,7 +392,7 @@ Step 4 is done apart from per-plan sharing views (step 7).
 5. **Tracker** — active-plan job matching, progress tab, reservation release. Done; see Step 5 progress.
 6. **BPO/BPC trade-off** — auto-copy to fill slots, opt-in buy BPC / extra BPO with cost vs time shown.
 7. **Sharing** — corp/link visibility. Done; see Step 7 progress.
-8. **Janice export**, then **compressed ore calculator**.
+8. **Janice export**, then **compressed ore calculator**. Calculator done; see Step 8 progress.
 
 ## Decisions (from review, 2026-11-03)
 - No plan deadlines.
