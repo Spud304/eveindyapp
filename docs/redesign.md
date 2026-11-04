@@ -13,7 +13,7 @@ The app becomes **plan-centric**. Today it is tool-centric (Calculator / Inventi
 
 ## Users and use case
 
-- Knows what they want to build; does not need a "what's profitable" scanner (may come later).
+- Knows what they want to build; does not need a "what's profitable" scanner. Not planned (decided 2026-11-04).
 - Runs multiple linked characters, mostly out of **corp hangars and corp industry jobs**.
 - Builds in batches of several items ("indy 1": 10 Ishtar + 50 Hulk; "dreadbatch 1": 1 Phoenix, 2 Naglfar, 1 Revelation Navy Issue).
 - Takes shopping lists to **Janice**; buys compressed ore.
@@ -113,14 +113,15 @@ Data needed, with the ESI role it requires:
 - **Dashboard** — all characters' + corp jobs, idle slots, finishing soon, token/role problems, active plans' progress.
 
 ## What goes away
-- Standalone **Production** (continuous profit) page — doesn't match the use case. Revisit later as a plan-level "profit" view if wanted.
+- Standalone **Production** (continuous profit) page — doesn't match the use case. No plan-level profit view either (decided 2026-11-04: not wanted).
+- The Flask app itself: removed on 2026-11-04 (`src/`, its migrations, tests, Dockerfile and compose file); git history has it.
 - Standalone **Invention** page — folded into plans for T2 lines.
 - The **Industry** hub page, the three-form calculator, URL-encoded state.
 
 ## Architecture
 
-- **Planning engine**: pure Python module, no Flask/DB access. Input: plan lines, characters (skills, slots, roles), stations/rigs, blueprints, assets (after reservation), prices, build rules, BPO/BPC choices. Output: the full plan result (materials, jobs, schedule, costs). Heavily unit-tested. Every view reads from this one result, so tabs can't disagree.
-- **Backend**: Flask as a JSON API. Celery for ESI fetches (character + corp assets, blueprints, jobs, skills) and token refresh.
+- **Planning engine**: pure Python module, no Django/DB access. Input: plan lines, characters (skills, slots, roles), stations/rigs, blueprints, assets (after reservation), prices, build rules, BPO/BPC choices. Output: the full plan result (materials, jobs, schedule, costs). Heavily unit-tested. Every view reads from this one result, so tabs can't disagree.
+- **Backend**: Django + django-ninja as a JSON API (see Backend stack). Celery for on-demand ESI fetches; cron for scheduled syncs and SDE checks.
 - **Frontend**: React (Vite + TypeScript), fresh build — not a port of the Jinja templates. Edit the plan in place; recompute only when inputs change. Visual style and frontend structure: `docs/ui-design.md` (copies the AT Tool style).
 - **Explanations in engine output**: the UI shows the reason for every derived value, so engine results carry a reason with each decision (ME source, station chosen and why, bought vs built and which rule, BPC vs BPO choice).
 - **Database**: move to **Postgres** (multi-user, shared plans, concurrent Celery writers). SDE stays SQLite, read-only.
@@ -238,7 +239,7 @@ Tags: **[SDE]** checked against the local SDE file; **[official]** CCP page or l
 
 ## Backend stack
 
-**Decided (2026-11-03): move to the AT Tool stack.** Django 5.2 + django-ninja (OpenAPI) + Postgres 16 + Redis; frontend API types generated with `openapi-typescript` / `openapi-fetch`; Python `pytest-playwright` browser tests; Docker deploy with Caddy (`deploy/` in the AT Tool). Port the AT Tool's `accounts/sso`, `esi` and `sde` apps; carry over this repo's engine and ESI fetch logic. The Flask app stays runnable until the new stack replaces it.
+**Decided (2026-11-03): move to the AT Tool stack.** Django 5.2 + django-ninja (OpenAPI) + Postgres 16 + Redis; frontend API types generated with `openapi-typescript` / `openapi-fetch`; Python `pytest-playwright` browser tests; Docker deploy with Caddy (`deploy/` in the AT Tool). Port the AT Tool's `accounts/sso`, `esi` and `sde` apps; carry over this repo's engine and ESI fetch logic. The Flask app stayed runnable until the new stack replaced it (removed 2026-11-04).
 
 Rejected: staying on Flask. Needs an OpenAPI add-on and a reimplementation of SSO / ESI / SDE code the AT Tool already has.
 

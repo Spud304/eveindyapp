@@ -1,33 +1,55 @@
-name: Run Tests
+name: Tests
 
 on:
   push:
-    branches:
-      - master
+    branches: [master]
   pull_request:
-    branches:
-      - master
+    branches: [master]
 
 jobs:
-  test:
+  backend:
     runs-on: ubuntu-latest
-
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: eveindy
+          POSTGRES_USER: eveindy
+          POSTGRES_PASSWORD: eveindy
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U eveindy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uvx ruff check
+      - run: uvx ruff format --check
+      # Browser tests (playwright_tests/) need both dev servers and the SDE; run them locally.
+      - run: uv run pytest -q
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v4
-      with:
-        enable-cache: true
-
-    - name: Install dependencies
-      run: uv sync --all-groups
-
-    - name: Run tests
-      run: uv run pytest tests/unit/ -v
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npx eslint .
+      - run: npx vite build
