@@ -381,6 +381,7 @@ Step 4 is done apart from per-plan sharing views (step 7).
   - `GET /api/plans/{id}/compressed-ore?station_id&character_id&ore_classes`: the minerals on the plan's shopping list; default station the best asteroid-ore yield, default character the cheapest mix. Ore and minerals are both priced at CCP average price.
   - UI: "Minerals as compressed ore" under the Shopping list (owner only): station, character, ore classes; ore and mineral tables; ore cost vs buying minerals; "Copy ore" and "Copy list with ore" (the shopping list with the covered minerals replaced by ore).
   - Live: no reprocessing rig is recorded on the account's Tatara, so its yield is 52.8 % station × 1.39 skills = 73.4 %; at that yield ore costs ~7 % more than minerals on both plans. Warm request time is about that of the plan result (dreadbatch 1 ~1 s).
+- Volumes (2026-11-03): `ItemType.volume` is the SDE packaged volume (what a market purchase hauls: a Rifter is 2,500 m3 packaged, 27,289 assembled). Shopping list rows, extra BPOs, ore lines and needed minerals carry m3; the Shopping list shows a total, the ore panel shows ore vs minerals and the whole list with ore. Live: dreadbatch 1's list is 224k m3, 77k m3 with its minerals as ore; maelstroms 2.32M m3, 185k m3 with ore.
 - Not done: implants (not synced; the engine takes a percentage), by-products counted as value, real buy prices (Janice API key or ESI orders).
 
 ## Build order
