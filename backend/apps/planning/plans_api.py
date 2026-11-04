@@ -13,9 +13,9 @@ from ninja.errors import HttpError
 
 from apps.accounts.models import User
 from apps.esidata.access import owner_q
-from apps.esidata.models import Feed, IndustryJob
+from apps.esidata.models import BlueprintItem, Feed, IndustryJob
 from apps.esidata.overview_api import JobRow, describe_jobs
-from apps.sde.models import EveType
+from apps.sde.models import BlueprintProduct, EveType
 from engine.types import Activity, BuildCategory, PlanResult
 
 from . import reservation, tracker
@@ -27,6 +27,8 @@ router = Router(tags=["plans"])
 class LineIO(Schema):
     type_id: int
     quantity: int = Field(..., ge=1, le=10_000_000)
+    # Owned BPCs to run for this line; the server then sets `quantity` from their runs.
+    blueprint_item_ids: list[int] = []
 
 
 class LineOut(LineIO):
@@ -118,6 +120,7 @@ def _out(p: Plan) -> dict:
                 "id": ln.pk,
                 "type_id": ln.type_id,
                 "quantity": ln.quantity,
+                "blueprint_item_ids": ln.blueprint_item_ids,
                 "name": names.get(ln.type_id, ""),
             }
             for ln in lines
@@ -139,15 +142,61 @@ def _check_types(type_ids: list[int]) -> None:
         raise HttpError(422, f"unknown type ids: {missing}")
 
 
+def _picked_quantity(p: Plan, ln: LineIO, taken: set[int]) -> int:
+    """Validate the BPCs picked for a line and return the units they make: copies the account
+    holds, of one blueprint that manufactures the line's item, not picked twice in this plan
+    and not picked in another plan."""
+    ids = ln.blueprint_item_ids
+    if len(set(ids)) != len(ids) or taken & set(ids):
+        raise HttpError(422, "a BPC is picked twice in this plan")
+    taken.update(ids)
+    items = {
+        b.item_id: b
+        for b in BlueprintItem.objects.filter(owner_q(p.user, Feed.BLUEPRINTS), item_id__in=ids)
+    }
+    missing = [i for i in ids if i not in items]
+    if missing:
+        raise HttpError(422, f"blueprints not found in your library: {missing}")
+    if any(b.quantity != -2 for b in items.values()):
+        raise HttpError(422, "only copies (BPCs) can be picked for a line")
+    bp_types = {b.type_id for b in items.values()}
+    if len(bp_types) != 1:
+        raise HttpError(422, "BPCs picked for one line must be of one blueprint")
+    product = BlueprintProduct.objects.filter(
+        activity__blueprint_id=bp_types.pop(), activity__activity="manufacturing"
+    ).first()
+    if product is None or product.type_id != ln.type_id:
+        raise HttpError(422, "the picked BPCs do not manufacture this line's item")
+    elsewhere = [
+        other
+        for other in PlanLine.objects.filter(plan__user=p.user)
+        .exclude(plan=p)
+        .exclude(blueprint_item_ids=[])
+        .select_related("plan")
+        if set(other.blueprint_item_ids) & set(ids)
+    ]
+    if elsewhere:
+        raise HttpError(409, f"a picked BPC is already in plan {elsewhere[0].plan.name}")
+    return sum(items[i].runs for i in ids) * product.quantity
+
+
 def _set_lines(p: Plan, lines: list[LineIO]) -> None:
     _check_types([ln.type_id for ln in lines])
+    taken: set[int] = set()
+    rows = []
+    for i, ln in enumerate(lines):
+        qty = _picked_quantity(p, ln, taken) if ln.blueprint_item_ids else ln.quantity
+        rows.append(
+            PlanLine(
+                plan=p,
+                type_id=ln.type_id,
+                quantity=qty,
+                position=i,
+                blueprint_item_ids=ln.blueprint_item_ids,
+            )
+        )
     p.lines.all().delete()
-    PlanLine.objects.bulk_create(
-        [
-            PlanLine(plan=p, type_id=ln.type_id, quantity=ln.quantity, position=i)
-            for i, ln in enumerate(lines)
-        ]
-    )
+    PlanLine.objects.bulk_create(rows)
 
 
 @router.get("/plans", response=list[PlanSummary])

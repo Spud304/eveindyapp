@@ -27,18 +27,18 @@ from engine.types import (
     BuildRules,
     GameData,
     PlanInput,
-    PlanLine,
     PlanResult,
     Price,
 )
 from engine.types import Character as EngineCharacter
 from engine.types import OwnedBlueprint as EngineBlueprint
+from engine.types import PlanLine as EnginePlanLine
 from engine.types import SolarSystem as EngineSystem
 from engine.types import Station as EngineStation
 
 from . import inputs, tracker
 from .inputs import AssetBucket
-from .models import Plan
+from .models import Plan, PlanLine
 from .stations import engine_station
 
 
@@ -55,6 +55,8 @@ class AccountData:
     prices: dict[int, Price]
     default_rules: BuildRules
     buckets: dict[AssetBucket, int]
+    # BPC item id -> the plan whose line picked it; other plans do not see it.
+    picked: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -89,7 +91,20 @@ def load(user: User) -> AccountData:
         prices=inputs.prices(),
         default_rules=inputs.build_rules(user),
         buckets=inputs.asset_buckets(user),
+        picked=picked_blueprints(user),
     )
+
+
+def picked_blueprints(user: User) -> dict[int, int]:
+    out: dict[int, int] = {}
+    for plan_id, ids in (
+        PlanLine.objects.filter(plan__user=user)
+        .exclude(blueprint_item_ids=[])
+        .values_list("plan_id", "blueprint_item_ids")
+    ):
+        for item_id in ids:
+            out.setdefault(item_id, plan_id)
+    return out
 
 
 def effective_rules(default: BuildRules, p: Plan) -> BuildRules:
@@ -149,12 +164,15 @@ def plan_input(p: Plan, data: AccountData, pool: dict[AssetBucket, int]) -> Plan
     stations = plan_stations(p, data)
     started, started_attempts = tracker.progress_inputs(p, data.game)
     return PlanInput(
-        lines=tuple(PlanLine(str(ln.pk), ln.type_id, ln.quantity) for ln in p.lines.all()),
+        lines=tuple(
+            EnginePlanLine(str(ln.pk), ln.type_id, ln.quantity, tuple(ln.blueprint_item_ids))
+            for ln in p.lines.all()
+        ),
         game=data.game,
         stations=tuple(data.stations[s] for s in stations),
         systems=data.systems,
         characters=data.characters,
-        blueprints=data.blueprints,
+        blueprints=tuple(b for b in data.blueprints if data.picked.get(b.item_id, p.pk) == p.pk),
         assets=dict(assets),
         prices=data.prices,
         rules=effective_rules(data.default_rules, p),

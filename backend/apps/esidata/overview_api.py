@@ -10,7 +10,9 @@ from django.utils import timezone
 from ninja import Router, Schema
 
 from apps.accounts.models import EsiToken, User
-from apps.sde.models import EveType
+from apps.planning.models import Plan
+from apps.planning.reservation import picked_blueprints
+from apps.sde.models import BlueprintProduct, EveType
 from engine import formulas
 from engine.types import Activity
 from engine.types import Character as EngineCharacter
@@ -84,6 +86,9 @@ class BlueprintRow(Schema):
     location_id: int
     location_name: str
     hangar: str  # division name, or the hangar flag
+    product_type_id: int | None  # what the blueprint manufactures
+    plan_id: int | None  # plan whose line picked this BPC
+    plan_name: str | None
 
 
 @router.get("/library/blueprints", response=list[BlueprintRow])
@@ -97,8 +102,17 @@ def library(request: HttpRequest):
     owners = names.resolve({b.owner_id for b in rows})
     locations = _location_names(user, {b.root_location_id for b in rows})
     divisions = _divisions(user)
+    products = dict(
+        BlueprintProduct.objects.filter(
+            activity__activity="manufacturing",
+            activity__blueprint_id__in={b.type_id for b in rows},
+        ).values_list("activity__blueprint_id", "type_id")
+    )
+    picked = picked_blueprints(user)
+    plan_names = dict(Plan.objects.filter(user=user).values_list("id", "name"))
     out = []
     for b in rows:
+        plan_id = picked.get(b.item_id)
         kind = "bpc" if b.quantity == -2 else ("stack" if b.quantity > 0 else "bpo")
         out.append(
             {
@@ -118,6 +132,9 @@ def library(request: HttpRequest):
                     b.root_location_id, f"Structure {b.root_location_id}"
                 ),
                 "hangar": divisions.get((b.owner_id, b.hangar_flag), b.hangar_flag),
+                "product_type_id": products.get(b.type_id),
+                "plan_id": plan_id,
+                "plan_name": plan_names.get(plan_id) if plan_id else None,
             }
         )
     out.sort(key=lambda r: (r["name"], r["kind"], -r["me"]))

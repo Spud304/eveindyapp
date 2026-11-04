@@ -191,7 +191,10 @@ export function usePlanMutations() {
     setLines: useMutation({
       mutationFn: async ({ id, lines }: { id: number; lines: LineIO[] }) =>
         unwrap(await api.PUT('/api/plans/{plan_id}/lines', { ...path(id), body: lines })),
-      onSuccess: done,
+      onSuccess: () => {
+        void done()
+        void qc.invalidateQueries({ queryKey: keys.library }) // picked BPCs show their plan
+      },
       meta: { toast: 'Lines saved' },
     }),
     activate: useMutation({

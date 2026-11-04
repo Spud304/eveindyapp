@@ -978,6 +978,11 @@ export interface components {
             type_id: number;
             /** Quantity */
             quantity: number;
+            /**
+             * Blueprint Item Ids
+             * @default []
+             */
+            blueprint_item_ids: number[];
             /** Id */
             id: number;
             /** Name */
@@ -1035,6 +1040,11 @@ export interface components {
             type_id: number;
             /** Quantity */
             quantity: number;
+            /**
+             * Blueprint Item Ids
+             * @default []
+             */
+            blueprint_item_ids: number[];
         };
         /** PlanCreate */
         PlanCreate: {
@@ -1378,6 +1388,12 @@ export interface components {
             location_name: string;
             /** Hangar */
             hangar: string;
+            /** Product Type Id */
+            product_type_id: number | null;
+            /** Plan Id */
+            plan_id: number | null;
+            /** Plan Name */
+            plan_name: string | null;
         };
         /** CharacterSlots */
         CharacterSlots: {

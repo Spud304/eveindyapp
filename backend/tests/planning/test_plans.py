@@ -7,11 +7,12 @@ import pytest
 
 from apps.accounts import services
 from apps.accounts.sso import SsoIdentity
+from apps.esidata.models import BlueprintItem
 from apps.planning import reservation
 from apps.planning.models import Plan, PlanLine, Station
 from engine.types import BuildCategory, BuildRules
 
-from .conftest import AZBEL_ID, AZBEL_TYPE, D_SYSTEM, OTHER_CHAR, asset
+from .conftest import AZBEL_ID, AZBEL_TYPE, D_SYSTEM, MAIN, OTHER_CHAR, asset
 
 pytestmark = pytest.mark.django_db
 
@@ -263,3 +264,75 @@ def test_result_endpoint(api, user, azbel):
     ]
     trit_row = next(s for s in body["result"]["shopping_list"] if s["type_id"] == 34)
     assert trit_row["quantity"] == PER_RIFTER - (40_000 - PER_RIFTER)
+
+
+# --- picked BPC lines ----------------------------------------------------------------------
+
+
+def rifter_bp(item_id, runs=9, copy=True, me=10):
+    return BlueprintItem.objects.create(
+        owner_kind="character",
+        owner_id=MAIN,
+        item_id=item_id,
+        type_id=691,
+        location_id=AZBEL_ID,
+        location_flag="Hangar",
+        quantity=-2 if copy else -1,
+        runs=runs if copy else -1,
+        material_efficiency=me,
+        time_efficiency=20,
+        root_location_id=AZBEL_ID,
+        hangar_flag="Hangar",
+    )
+
+
+def bpc_line(*ids, type_id=587):
+    return {"type_id": type_id, "quantity": 1, "blueprint_item_ids": list(ids)}
+
+
+def test_picked_bpc_line_quantity_comes_from_runs(api, azbel):
+    rifter_bp(1, 9)
+    rifter_bp(2, 4)
+    resp = api("post", "/api/plans", {"name": "a", "lines": [bpc_line(1, 2)]})
+    assert resp.status_code == 201, resp.content
+    [line] = resp.json()["lines"]
+    assert (line["quantity"], line["blueprint_item_ids"]) == (13, [1, 2])
+
+
+def test_picked_bpc_line_validation(api, azbel):
+    rifter_bp(1)
+    rifter_bp(2, copy=False)
+    pid = api("post", "/api/plans", {"name": "a"}).json()["id"]
+
+    def put(*lines):
+        return api("put", f"/api/plans/{pid}/lines", list(lines))
+
+    assert put(bpc_line(1, 1)).status_code == 422  # twice in one line
+    assert put(bpc_line(1), bpc_line(1)).status_code == 422  # twice in the plan
+    assert put(bpc_line(2)).status_code == 422  # an original
+    assert put(bpc_line(77)).status_code == 422  # not in the library
+    assert put(bpc_line(1, type_id=34)).status_code == 422  # does not make Tritanium
+    assert put(bpc_line(1)).status_code == 200
+    other = api("post", "/api/plans", {"name": "b"}).json()["id"]
+    resp = api("put", f"/api/plans/{other}/lines", [bpc_line(1)])
+    assert resp.status_code == 409
+    assert "plan a" in resp.json()["detail"]
+
+
+def test_picked_bpcs_belong_to_their_plan(api, user, azbel):
+    rifter_bp(1, 9)
+    rifter_bp(2, 9)
+    picker = api("post", "/api/plans", {"name": "picker", "lines": [bpc_line(1)]}).json()["id"]
+    other = make_plan(user, "other", rifters=18)
+    runs = reservation.run_plans(user)
+
+    def bpc_runs(pid):
+        jobs = runs[pid].result.jobs
+        return sorted(j.runs for j in jobs if j.blueprint_type_id == 691 and j.source == "bpc")
+
+    assert bpc_runs(picker) == [9]
+    assert bpc_runs(other.pk) == [9]  # only BPC 2; BPC 1 belongs to "picker"
+    rows = {r["item_id"]: r for r in api("get", "/api/library/blueprints").json()}
+    assert (rows[1]["plan_id"], rows[1]["plan_name"]) == (picker, "picker")
+    assert rows[2]["plan_id"] is None
+    assert rows[1]["product_type_id"] == 587

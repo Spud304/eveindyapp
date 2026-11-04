@@ -3,8 +3,8 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { useLocalCopy } from '@/hooks/useLocalCopy'
-import { useMe, usePlan, usePlanMutations, usePlanResult, useStations, useTypeSearch } from '@/lib/api/hooks'
-import type { PlanOut, PlanResultOut, TypeOut } from '@/lib/api/client'
+import { useLibrary, useMe, usePlan, usePlanMutations, usePlanResult, useStations, useTypeSearch } from '@/lib/api/hooks'
+import type { BlueprintRow, LineIO, PlanOut, PlanResultOut, TypeOut } from '@/lib/api/client'
 import { BUILD_CATEGORY_LABELS } from '@/lib/format'
 import {
   Badge,
@@ -153,20 +153,43 @@ function PlanHeader({ plan: p, result, computing }: { plan: PlanOut; result: Pla
 function LinesPanel({ plan: p }: { plan: PlanOut }) {
   const { setLines } = usePlanMutations()
   const [q, setQ] = useState('')
+  const [picking, setPicking] = useState(false)
   const search = useTypeSearch(useDebouncedValue(q), 'buildable')
-  const lines = p.lines.map((l) => ({ type_id: l.type_id, quantity: l.quantity }))
-  const save = (next: typeof lines) => setLines.mutate({ id: p.id, lines: next })
+  const lines: LineIO[] = p.lines.map((l) => ({ type_id: l.type_id, quantity: l.quantity, blueprint_item_ids: l.blueprint_item_ids }))
+  const save = (next: LineIO[], onSuccess?: () => void) => setLines.mutate({ id: p.id, lines: next }, { onSuccess })
   return (
-    <Panel title="Build" testId="plan.lines">
+    <Panel
+      title="Build"
+      testId="plan.lines"
+      actions={
+        <Button small variant="ghost" onClick={() => setPicking(!picking)} testId="plan.pick-bpcs" title="run specific BPCs you own">
+          {picking ? 'Close' : 'Pick BPCs'}
+        </Button>
+      }
+    >
       <ul className="mb-2 flex flex-col gap-1">
         {p.lines.map((l, i) => (
           <li key={l.id} className="flex items-center gap-2" data-testid={`plan.line.${l.type_id}`}>
-            <QtyInput
-              value={l.quantity}
-              onSave={(qty) => save(lines.map((x, j) => (j === i ? { ...x, quantity: qty } : x)))}
-              testId={`plan.line.${l.type_id}.qty`}
-            />
-            <span className="min-w-0 flex-1 truncate">{l.name}</span>
+            {l.blueprint_item_ids?.length ? (
+              <span className="w-16 text-right" title="set by the runs of the picked BPCs">
+                <Mono>{l.quantity}</Mono>
+              </span>
+            ) : (
+              <QtyInput
+                value={l.quantity}
+                onSave={(qty) => save(lines.map((x, j) => (j === i ? { ...x, quantity: qty } : x)))}
+                testId={`plan.line.${l.type_id}.qty`}
+              />
+            )}
+            <span className="min-w-0 flex-1 truncate">
+              {l.name}
+              {l.blueprint_item_ids?.length ? (
+                <span className="text-label text-muted" data-testid={`plan.line.${l.type_id}.bpcs`}>
+                  {' '}
+                  · {l.blueprint_item_ids.length} picked BPC{l.blueprint_item_ids.length === 1 ? '' : 's'}
+                </span>
+              ) : null}
+            </span>
             <Button small variant="ghost" onClick={() => save(lines.filter((_, j) => j !== i))} title="remove this line">
               ×
             </Button>
@@ -180,14 +203,70 @@ function LinesPanel({ plan: p }: { plan: PlanOut }) {
         loading={search.isFetching}
         render={(t) => t.name}
         onPick={(t) => {
-          const at = lines.findIndex((l) => l.type_id === t.id)
-          save(at >= 0 ? lines.map((l, j) => (j === at ? { ...l, quantity: l.quantity + 1 } : l)) : [...lines, { type_id: t.id, quantity: 1 }])
+          // Adding an item already in the plan raises its line; lines of picked BPCs are left alone.
+          const at = lines.findIndex((l) => l.type_id === t.id && !l.blueprint_item_ids?.length)
+          save(at >= 0 ? lines.map((l, j) => (j === at ? { ...l, quantity: l.quantity + 1 } : l)) : [...lines, { type_id: t.id, quantity: 1, blueprint_item_ids: [] }])
           setQ('')
         }}
         placeholder="add item to build"
         testId="plan.add-line"
       />
+      {picking ? <BpcPicker planId={p.id} onAdd={(line) => save([...lines, line], () => setPicking(false))} /> : null}
     </Panel>
+  )
+}
+
+/** Owned BPCs not picked by any plan yet; tick copies of one blueprint and add them as a line. */
+function BpcPicker({ planId, onAdd }: { planId: number; onAdd: (line: LineIO) => void }) {
+  const lib = useLibrary()
+  const [q, setQ] = useState('')
+  const [ticked, setTicked] = useState<number[]>([])
+  const term = useDebouncedValue(q).trim().toLowerCase()
+  const free = (lib.data ?? []).filter((b) => b.kind === 'bpc' && b.product_type_id != null && b.plan_id == null)
+  const pickedType = free.find((b) => b.item_id === ticked[0])?.type_id
+  const rows = free.filter((b) => (pickedType ? b.type_id === pickedType : !term || b.name.toLowerCase().includes(term)))
+  const chosen = ticked.map((id) => free.find((b) => b.item_id === id)).filter((b): b is BlueprintRow => !!b)
+  const runs = chosen.reduce((n, b) => n + b.runs, 0)
+  const toggle = (id: number) => setTicked(ticked.includes(id) ? ticked.filter((x) => x !== id) : [...ticked, id])
+  return (
+    <div className="mt-3 border-t border-line pt-2" data-testid="plan.bpc-picker">
+      {pickedType ? (
+        <div className="mb-1 text-label text-muted">copies of {chosen[0]?.name}; untick all to pick another blueprint</div>
+      ) : (
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="search BPCs" testId="plan.bpc-search" className="mb-1 w-full" />
+      )}
+      {lib.isLoading ? <div className="text-label text-muted">loading library</div> : null}
+      {!lib.isLoading && rows.length === 0 ? <div className="text-label text-muted">No unpicked BPCs match.</div> : null}
+      <ul className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+        {rows.slice(0, 100).map((b) => (
+          <li key={b.item_id} data-testid={`plan.bpc.${b.item_id}`}>
+            <Checkbox
+              checked={ticked.includes(b.item_id)}
+              onChange={() => toggle(b.item_id)}
+              testId={`plan.bpc.${b.item_id}.tick`}
+              label={
+                <span className="truncate" title={`${b.location_name} · ${b.hangar}`}>
+                  {b.name} · <Mono>{b.runs}</Mono> runs · ME <Mono>{b.me}</Mono> / TE <Mono>{b.te}</Mono>
+                </span>
+              }
+            />
+          </li>
+        ))}
+      </ul>
+      <Button
+        small
+        variant="primary"
+        className="mt-2"
+        disabled={!chosen.length}
+        testId="plan.bpc-add"
+        onClick={() => onAdd({ type_id: chosen[0].product_type_id!, quantity: Math.max(1, runs), blueprint_item_ids: chosen.map((b) => b.item_id) })}
+      >
+        {chosen.length ? `Add ${chosen.length} BPC${chosen.length === 1 ? '' : 's'} (${runs} runs)` : 'Tick BPCs to add'}
+      </Button>
+      <span className="ml-2 text-label text-muted" hidden={!planId}>
+        picked BPCs are kept out of your other plans
+      </span>
+    </div>
   )
 }
 

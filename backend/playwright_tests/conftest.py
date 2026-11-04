@@ -187,3 +187,33 @@ def make_job(
         args += ["--product", str(product)]
     subprocess.run(args, cwd=BACKEND_DIR, check=True, capture_output=True)
     return _next_job
+
+
+_next_item = FIRST_ID - 1
+
+
+def make_bpc(character_id: int, blueprint: int, runs: int, me: int = 10, te: int = 20) -> int:
+    """A BPC for a test character, as if synced from ESI (manage.py playwright_blueprint)."""
+    global _next_item
+    _next_item += 1
+    args = [
+        "uv",
+        "run",
+        "python",
+        "manage.py",
+        "playwright_blueprint",
+        "--character",
+        str(character_id),
+        "--item-id",
+        str(_next_item),
+        "--blueprint",
+        str(blueprint),
+        "--runs",
+        str(runs),
+        "--me",
+        str(me),
+        "--te",
+        str(te),
+    ]
+    subprocess.run(args, cwd=BACKEND_DIR, check=True, capture_output=True)
+    return _next_item

@@ -122,6 +122,9 @@ class PlanLine(models.Model):
     type_id = models.IntegerField()
     quantity = models.PositiveIntegerField()
     position = models.PositiveIntegerField(default=0)
+    # Owned BPCs picked for this line ("run these BPCs"); `quantity` is then set from their
+    # runs. A picked BPC belongs to this plan: other plans do not see it.
+    blueprint_item_ids = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "planning_plan_line"

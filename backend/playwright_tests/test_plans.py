@@ -1,6 +1,6 @@
 from playwright.sync_api import expect
 
-from .conftest import RIFTER, TRITANIUM, by_test_id, pick, uniq
+from .conftest import RIFTER, TRITANIUM, by_test_id, make_bpc, pick, uniq
 
 
 def shopping_qty(page, type_id: int) -> int:
@@ -141,3 +141,41 @@ def test_plan_settings_toggles_save(login):
     saved = s.json(f"/api/plans/{plan['id']}")
     assert saved["reserve_assets"] and first["id"] not in saved["station_ids"]
     assert len(saved["station_ids"]) == 1
+
+
+RIFTER_BP = 691
+
+
+def test_pick_bpcs_for_a_line(login):
+    s = login()
+    s.add_station()
+    a, b = make_bpc(s.character_id, RIFTER_BP, 9), make_bpc(s.character_id, RIFTER_BP, 9)
+    spare = make_bpc(s.character_id, RIFTER_BP, 4)
+    plan = s.add_plan(uniq("picked"), [])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+
+    by_test_id(page, "plan.pick-bpcs").click()
+    by_test_id(page, "plan.bpc-search").fill("Rifter")
+    by_test_id(page, f"plan.bpc.{a}.tick").check()
+    by_test_id(page, f"plan.bpc.{b}.tick").check()
+    expect(by_test_id(page, "plan.bpc-add")).to_have_text("Add 2 BPCs (18 runs)")
+    by_test_id(page, "plan.bpc-add").click()
+
+    line = by_test_id(page, f"plan.line.{RIFTER}")
+    expect(line).to_contain_text("18")
+    expect(by_test_id(page, f"plan.line.{RIFTER}.bpcs")).to_have_text("· 2 picked BPCs")
+    expect(by_test_id(page, f"plan.line.{RIFTER}.qty")).to_have_count(0)  # set by the BPCs
+
+    by_test_id(page, "plan.tabs.blueprints").click()
+    bp = by_test_id(page, f"plan.blueprint.{RIFTER_BP}")
+    expect(bp).to_contain_text("2 owned BPC(s) cover 18 runs (2 picked for this plan)")
+
+    # Another plan sees only the BPC nobody picked.
+    other = s.add_plan(uniq("other"), [])
+    page.goto(f"/plans/{other['id']}")
+    by_test_id(page, "plan.pick-bpcs").click()
+    by_test_id(page, "plan.bpc-search").fill("Rifter")
+    expect(by_test_id(page, f"plan.bpc.{spare}")).to_be_visible()
+    expect(by_test_id(page, f"plan.bpc.{a}")).to_have_count(0)
+    expect(by_test_id(page, f"plan.bpc.{b}")).to_have_count(0)
