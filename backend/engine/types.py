@@ -117,6 +117,7 @@ class ItemType:
     name: str
     group_id: int
     category_id: int
+    volume: float = 0.0  # m3 per unit as bought: packaged (a Rifter is 2,500, not 27,289)
 
 
 @dataclass(frozen=True, slots=True)
@@ -510,6 +511,7 @@ class ShoppingItem:
     unit_price: float | None
     total_price: float | None
     reason: Reason
+    volume: float = 0.0  # m3 for the whole quantity, packaged
 
 
 @dataclass(frozen=True, slots=True)

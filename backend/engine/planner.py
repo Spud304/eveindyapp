@@ -252,6 +252,10 @@ class _Planner:
         p = self.inp.prices.get(type_id)
         return p.unit_price if p else None
 
+    def volume(self, type_id: TypeId) -> float:
+        t = self.types.get(type_id)
+        return t.volume if t else 0.0
+
     def adjusted(self) -> dict[TypeId, float | None]:
         return {t: p.adjusted_price for t, p in self.inp.prices.items()}
 
@@ -1375,6 +1379,7 @@ class _Planner:
                     unit_price=unit,
                     total_price=unit * row.to_buy if unit is not None else None,
                     reason=row.reason,
+                    volume=self.volume(row.type_id) * row.to_buy,
                 )
             )
         # Extra BPOs are on the market; bought BPCs are not (contracts), so only BPOs go here.
@@ -1388,6 +1393,7 @@ class _Planner:
                         unit_price=unit,
                         total_price=unit * count if unit is not None else None,
                         reason=Reason(ReasonCode.BUY_BLUEPRINT, "Extra BPO (your choice)."),
+                        volume=self.volume(bp_id) * count,
                     )
                 )
         return tuple(sorted(out, key=lambda s: (s.name, s.type_id)))

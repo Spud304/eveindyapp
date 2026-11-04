@@ -112,6 +112,7 @@ def compressed_ore(
             bonuses,
             gamedata.GENERAL_REPROCESSING_SKILLS,
             {m: prices.get(m) for m in minerals},
+            mineral_volumes={m: data.game.types[m].volume for m in minerals},
         )
 
     if character_id is not None and character_id not in chars:

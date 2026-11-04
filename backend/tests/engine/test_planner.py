@@ -1037,3 +1037,15 @@ def test_all_attempts_running_plans_no_more_invention():
     assert bp(r, BP_T2_MOD).invention.attempts == 0
     assert jobs_for(r, BP_T1_MOD, Activity.INVENTION) == []
     assert jobs_for(r, BP_T1_MOD, Activity.COPYING) == []
+
+
+def test_shopping_list_has_packaged_volume():
+    g = game()
+    types = {**g.types, TRIT: replace(g.types[TRIT], volume=0.01)}
+    r = plan(
+        make_input(
+            [(HULL, 1)], game=replace(g, types=types), blueprints=(bpo(BP_HULL), bpo(BP_COMP_A))
+        )
+    )
+    [trit] = [s for s in r.shopping_list if s.type_id == TRIT]
+    assert trit.volume == pytest.approx(trit.quantity * 0.01)

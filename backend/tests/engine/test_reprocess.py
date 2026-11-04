@@ -21,7 +21,7 @@ SEC = {SecurityClass.HIGH: 1.0, SecurityClass.LOW: 1.06, SecurityClass.NULL: 1.1
 T2_ORE_RIG = RefineryRig(46634, "Asteroid T2", frozenset({OreClass.ASTEROID}), 0.53, SEC)
 
 
-def ore(type_id, mats, price, cls=OreClass.ASTEROID, portion=100, skill=SIMPLE):
+def ore(type_id, mats, price, cls=OreClass.ASTEROID, portion=100, skill=SIMPLE, volume=0.0):
     return Ore(
         type_id,
         f"Ore {type_id}",
@@ -30,6 +30,7 @@ def ore(type_id, mats, price, cls=OreClass.ASTEROID, portion=100, skill=SIMPLE):
         tuple(Material(t, q) for t, q in mats),
         skill,
         price,
+        volume,
     )
 
 
@@ -99,3 +100,22 @@ def test_unpriced_ores_are_left_out_and_infeasible_is_reported():
     )
     assert not mix.feasible
     assert any("no price" in w for w in mix.warnings)
+
+
+def test_volumes_of_ore_and_minerals():
+    o = ore(1, [(TRIT, 400)], 1.0, volume=0.001)
+    mix = cheapest_mix(
+        {TRIT: 1000},
+        [o],
+        Refinery("NPC", 0.0, SecurityClass.HIGH),
+        {},
+        BONUS,
+        GENERAL,
+        {TRIT: 4.0},
+        mineral_volumes={TRIT: 0.01},
+    )
+    # 50%: 200 Tritanium per batch -> 5 batches, 500 units of ore at 0.001 m3.
+    assert mix.ores[0].volume == pytest.approx(0.5)
+    assert mix.ore_volume == pytest.approx(0.5)
+    assert mix.mineral_volume == pytest.approx(10.0)
+    assert mix.minerals[0].volume == pytest.approx(10.0)

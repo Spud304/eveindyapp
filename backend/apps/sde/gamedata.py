@@ -102,9 +102,9 @@ def _raw(file: str, key: int) -> dict | None:
 def _game_data(build_key: int) -> GameData:
     group_category = dict(EveGroup.objects.values_list("id", "category_id"))
     types = {
-        tid: ItemType(tid, name, gid, group_category.get(gid, 0))
-        for tid, name, gid in EveType.objects.filter(removed=False).values_list(
-            "id", "name", "group_id"
+        tid: ItemType(tid, name, gid, group_category.get(gid, 0), packaged or volume or 0.0)
+        for tid, name, gid, volume, packaged in EveType.objects.filter(removed=False).values_list(
+            "id", "name", "group_id", "volume", "packaged_volume"
         )
     }
 
@@ -333,6 +333,7 @@ def _ores(build_key: int) -> tuple[Ore, ...]:
                 tuple(Material(int(m["materialTypeID"]), int(m["quantity"])) for m in mats),
                 int(skill) if skill else None,
                 None,
+                t.packaged_volume or t.volume or 0.0,
             )
         )
     return tuple(sorted(out, key=lambda o: o.name))

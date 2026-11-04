@@ -49,6 +49,7 @@ class Ore:
     materials: tuple[Material, ...]  # per batch, before efficiency
     skill_id: TypeId | None  # its processing skill (attr 790)
     price: float | None  # per unit
+    volume: float = 0.0  # m3 per unit
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +79,7 @@ class OreLine:
     total: float
     efficiency: float
     reason: Reason
+    volume: float = 0.0  # m3 for the whole quantity
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +90,7 @@ class MineralLine:
     surplus: int
     unit_price: float | None
     buy_cost: float | None  # buying `needed` directly
+    volume: float = 0.0  # m3 of `needed`
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +102,8 @@ class OreMix:
     station_reason: Reason
     warnings: tuple[str, ...] = ()
     feasible: bool = True
+    ore_volume: float = 0.0  # m3 of all the ore
+    mineral_volume: float = 0.0  # m3 of the needed minerals, bought as they are
 
 
 def station_efficiency(refinery: Refinery, ore_class: OreClass) -> tuple[float, str]:
@@ -145,11 +150,14 @@ def cheapest_mix(
     general_skills: tuple[TypeId, ...],
     mineral_prices: Mapping[TypeId, float | None],
     implant_percent: float = 0.0,
+    mineral_volumes: Mapping[TypeId, float] | None = None,
 ) -> OreMix:
     import numpy as np
     from scipy.optimize import Bounds, LinearConstraint, linprog, milp
 
     need = {m: q for m, q in need.items() if q > 0}
+    vols = mineral_volumes or {}
+    mineral_volume = sum(vols.get(m, 0.0) * q for m, q in need.items())
     warnings = []
     usable = [
         o
@@ -180,7 +188,13 @@ def cheapest_mix(
             n = need.get(m, 0)
             rows.append(
                 MineralLine(
-                    m, n, made.get(m, 0), max(0, made.get(m, 0) - n), p, p * n if p else None
+                    m,
+                    n,
+                    made.get(m, 0),
+                    max(0, made.get(m, 0) - n),
+                    p,
+                    p * n if p else None,
+                    vols.get(m, 0.0) * n,
                 )
             )
         return tuple(rows)
@@ -202,6 +216,7 @@ def cheapest_mix(
             station_reason,
             (*warnings, "No priced ore yields these minerals."),
             feasible=False,
+            mineral_volume=mineral_volume,
         )
 
     cost = np.array([o.price * o.portion_size for o in usable])
@@ -236,6 +251,7 @@ def cheapest_mix(
                 station_reason,
                 (*warnings, f"No ore mix found ({res.message})."),
                 feasible=False,
+                mineral_volume=mineral_volume,
             )
         batches = [math.ceil(x - 1e-6) for x in res.x]
         made: dict[TypeId, int] = {}
@@ -269,6 +285,7 @@ def cheapest_mix(
                     ReasonCode.BUY_RULE,
                     f"{b} batch(es) of {o.portion_size} at {e:.2%} efficiency.",
                 ),
+                o.volume * b * o.portion_size,
             )
         )
     lines.sort(key=lambda line: -line.total)
@@ -279,4 +296,6 @@ def cheapest_mix(
         mineral_cost,
         station_reason,
         tuple(warnings),
+        ore_volume=sum(line.volume for line in lines),
+        mineral_volume=mineral_volume,
     )
