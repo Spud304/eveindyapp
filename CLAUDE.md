@@ -18,11 +18,12 @@ Dev setup:
 - Production stack: `deploy/docker-compose.yml`.
 
 ## Status (2026-11-03)
-Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Step 6 (BPO/BPC trade-off) is in progress**: blueprint locks in the scheduler, automatic copying when it makes the plan finish sooner, owned BPCs used next to a BPO, BPC lines (pick owned BPCs for a line, kept out of other plans), blueprints in open jobs (not free until the job ends or is delivered), and copies being made by open copy jobs are done; see "Step 6 progress" in `docs/redesign.md`.
+Build order steps 0–5 are done; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. **Step 6 (BPO/BPC trade-off) is done** except for the items below; see "Step 6 progress" in `docs/redesign.md` (blueprint locks, auto-copy, BPC reuse and spreading, BPC lines, blueprints in jobs, copies being made, opt-in purchases). **Next: step 7, sharing** (corp / link visibility).
 
-Where step 6 continues:
-- Opt-in "buy N BPCs" / "extra BPO" with cost vs time per blueprint. Per-blueprint user choices live in `engine.types.BlueprintChoice` (stored in `Plan.choices`, edited via `PATCH /api/plans/{id}`); extend it. Compare options with the scheduler's finish time, as `_search_parallel` in `backend/engine/planner.py` does.
-- The old Flask `src/industry.py` `_compute_build_strategy` is a reference only; it predates the client-verified formulas and ignores that a BPO is locked while copying.
+Open from step 6:
+- Copies attributed to a plan lose that attribution once delivered.
+- A picked BPC that disappears is skipped without a warning.
+- The split search is greedy; `_search_parallel` in `backend/engine/planner.py` documents its rules.
 - Browser tests make test BPCs with `manage.py playwright_blueprint` (reserved ids only).
 
 Reference sources (prefer these over memory for game mechanics):
