@@ -86,6 +86,7 @@ def test_refresh_now_and_status_api(client, user, calls):
     body = client.get("/api/sync/status").json()
     assert body["queued"] is False
     assert [(f["owner_id"], f["feed"], f["rows"]) for f in body["feeds"]] == [(MAIN, "skills", 3)]
+    assert body["feeds"][0]["owner_name"] == user.characters.get(pk=MAIN).name
 
 
 def test_sync_api_requires_login(client):

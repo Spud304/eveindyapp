@@ -57,6 +57,8 @@ function CharactersPanel() {
   const me = useMe()
   const { setMain, unlink } = useCharacterMutations()
   const chars = me.data?.characters ?? []
+  const feeds = useSyncStatus().data?.feeds ?? []
+  const failing = (characterId: number) => feeds.filter((f) => f.owner_kind === 'character' && f.owner_id === characterId && !f.ok)
   return (
     <Panel
       title="Characters"
@@ -88,8 +90,15 @@ function CharactersPanel() {
                   {esi.missing_scopes.length} scopes missing
                 </Badge>
               ) : (
-                <Badge tone="ok">esi ok</Badge>
+                <Badge tone="ok" title="the token works and has every scope; the feeds below say how each sync went">
+                  token ok
+                </Badge>
               )}
+              {failing(c.character_id).length ? (
+                <Badge tone="warn" title={failing(c.character_id).map((f) => `${f.feed}: ${f.error}`).join('\n')} testId={`setup.character.${c.character_id}.failing`}>
+                  {failing(c.character_id).length} {failing(c.character_id).length === 1 ? 'feed' : 'feeds'} failing
+                </Badge>
+              ) : null}
               <span className="ml-auto flex gap-1">
                 {!esi || esi.rejected || esi.missing_scopes.length ? (
                   <LinkButton href="/auth/login?mode=link&next=/setup" variant="ghost" title="log in with this character again to grant the missing access">
@@ -157,8 +166,9 @@ function SyncPanel() {
           <tbody>
             {feeds.map((f) => (
               <tr key={`${f.owner_kind}.${f.owner_id}.${f.feed}`}>
-                <td>
-                  {f.owner_kind} <Mono className="text-muted">{f.owner_id}</Mono>
+                <td title={`${f.owner_kind} ${f.owner_id}`}>
+                  {f.owner_name}
+                  {f.owner_kind === 'corporation' ? <span className="text-label text-muted"> · corp{f.source_name ? ` via ${f.source_name}` : ''}</span> : null}
                 </td>
                 <td>{f.feed}</td>
                 <td>{f.ok ? <Badge tone="ok">ok</Badge> : <span className="text-bad">{f.error}</span>}</td>

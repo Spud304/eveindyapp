@@ -63,7 +63,9 @@ def access_token(character: EveCharacter | int, *scopes: str) -> str:
             rejected = exc
         except sso.SsoError as exc:
             log.warning("token refresh for %s failed: %s", token.character_id, exc)
-            raise TokenRefreshFailed(f"character {character_id}: {exc}") from exc
+            raise TokenRefreshFailed(
+                f"token refresh failed; the next sync tries again ({exc})"
+            ) from exc
     raise TokenUnavailable(f"character {character_id} token rejected; link it again") from rejected
 
 

@@ -9,7 +9,7 @@ from apps.accounts.models import User
 
 from . import tasks
 from .access import readable_corp_feeds
-from .models import FeedStatus, OwnerKind
+from .models import Corporation, FeedStatus, OwnerKind
 
 router = Router(tags=["sync"])
 
@@ -21,6 +21,7 @@ class QueuedOut(Schema):
 class FeedOut(Schema):
     owner_kind: str
     owner_id: int
+    owner_name: str  # the character's or corporation's name
     feed: str
     ok: bool
     error: str
@@ -28,6 +29,7 @@ class FeedOut(Schema):
     attempted_at: datetime
     fetched_at: datetime | None
     source_character_id: int | None
+    source_name: str | None  # corp feeds: the character whose token fetched it
 
 
 class StatusOut(Schema):
@@ -50,5 +52,29 @@ def sync_status(request: HttpRequest):
     )
     for corp_id in readable_corp_feeds(user):
         owners |= Q(owner_kind=OwnerKind.CORPORATION, owner_id=corp_id)
-    feeds = FeedStatus.objects.filter(owners).order_by("owner_kind", "owner_id", "feed")
-    return {"queued": tasks.is_queued(user.pk), "feeds": list(feeds)}
+    feeds = list(
+        FeedStatus.objects.filter(owners)
+        .select_related("source_character")
+        .order_by("owner_kind", "owner_id", "feed")
+    )
+    characters = dict(user.characters.values_list("character_id", "name"))
+    corps = dict(
+        Corporation.objects.filter(pk__in={f.owner_id for f in feeds}).values_list("id", "name")
+    )
+
+    def name(f: FeedStatus) -> str:
+        if f.owner_kind == OwnerKind.CHARACTER:
+            return characters.get(f.owner_id) or f"Character {f.owner_id}"
+        return corps.get(f.owner_id) or f"Corporation {f.owner_id}"
+
+    rows = [
+        {
+            **{k: getattr(f, k) for k in FeedOut.model_fields if hasattr(f, k)},
+            "owner_name": name(f),
+            "source_name": f.source_character.name if f.source_character else None,
+        }
+        for f in feeds
+    ]
+    # Characters by name, then corporations by name, each owner's feeds together.
+    rows.sort(key=lambda r: (r["owner_kind"] != OwnerKind.CHARACTER, r["owner_name"], r["feed"]))
+    return {"queued": tasks.is_queued(user.pk), "feeds": rows}

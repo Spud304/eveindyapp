@@ -38,13 +38,18 @@ def test_edit_rigs_tax_and_activities(login):
         "Standup M-Set Basic Medium Ship Manufacturing Material Efficiency I"
     )
 
+    # Wait for each save's own response: the toast an earlier save showed would pass at once.
+    def saved_by(action):
+        with page.expect_response(
+            lambda r: r.request.method == "PATCH" and "/api/stations/" in r.url
+        ) as resp:
+            action()
+        assert resp.value.ok
+
     tax = row.get_by_title("facility tax")
     tax.fill("2.5")
-    tax.blur()
-    expect(page.get_by_test_id("toast").last).to_have_text("Station saved")
-
-    row.get_by_label("copying").check()
-    expect(page.get_by_test_id("toast").last).to_have_text("Station saved")
+    saved_by(tax.blur)
+    saved_by(row.get_by_label("copying").check)
 
     saved = s.json("/api/stations")[0]
     assert saved["facility_tax"] == 2.5 and saved["tax_confirmed"]

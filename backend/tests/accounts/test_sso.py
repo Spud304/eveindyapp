@@ -32,7 +32,20 @@ def test_wrong_audience_rejected(make_token, rsa_keys):
 
 def test_expired_token_rejected(make_token, rsa_keys):
     with pytest.raises(sso.SsoError):
-        sso.validate_access_token(make_token(exp_offset=-30), key=rsa_keys[1])
+        sso.validate_access_token(
+            make_token(exp_offset=-(sso.CLOCK_SKEW_SECONDS + 30)), key=rsa_keys[1]
+        )
+
+
+def test_small_clock_skew_is_tolerated(make_token, rsa_keys):
+    import time
+
+    # Our clock 20 s behind SSO's: the token looks issued in the future.
+    ahead = make_token(iat=int(time.time()) + 20)
+    assert sso.validate_access_token(ahead, key=rsa_keys[1]).character_id == 90000001
+    with pytest.raises(sso.SsoError, match="not yet valid"):
+        far = make_token(iat=int(time.time()) + sso.CLOCK_SKEW_SECONDS + 60)
+        sso.validate_access_token(far, key=rsa_keys[1])
 
 
 def test_single_scope_string_normalised(make_token, rsa_keys):

@@ -1814,6 +1814,8 @@ export interface components {
             owner_kind: string;
             /** Owner Id */
             owner_id: number;
+            /** Owner Name */
+            owner_name: string;
             /** Feed */
             feed: string;
             /** Ok */
@@ -1831,6 +1833,8 @@ export interface components {
             fetched_at: string | null;
             /** Source Character Id */
             source_character_id: number | null;
+            /** Source Name */
+            source_name: string | null;
         };
         /** StatusOut */
         StatusOut: {

@@ -16,6 +16,7 @@ from jwt import PyJWKClient
 log = logging.getLogger(__name__)
 
 DISCOVERY_CACHE_KEY = "sso:discovery"
+CLOCK_SKEW_SECONDS = 60  # leeway for iat / exp when validating tokens
 _jwk_clients: dict[str, PyJWKClient] = {}
 
 
@@ -161,6 +162,9 @@ def validate_access_token(token: str, *, key=None) -> SsoIdentity:
             algorithms=["RS256"],
             audience=[settings.EVE_CLIENT_ID, "EVE Online"],
             options={"require": ["exp", "sub", "iss"]},
+            # A clock a little behind CCP's (Docker Desktop's VM after a restart or sleep) makes
+            # a just-issued token look "not yet valid (iat)".
+            leeway=CLOCK_SKEW_SECONDS,
         )
     except jwt.PyJWTError as exc:
         raise SsoError(f"invalid token: {exc}") from exc
