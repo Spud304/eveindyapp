@@ -8,6 +8,7 @@ COMPOSE_PROD = docker compose -f deploy/docker-compose.yml
 # Dev servers, as CLAUDE.md runs them. 5050 is the port the EVE application's callback uses.
 BACKEND  = cd backend && uv run python manage.py runserver 127.0.0.1:8000
 FRONTEND = cd frontend && npm run dev
+DEV_PORTS = 8000 5050
 
 help:              ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | sed -E 's/:.*## /\t/' | expand -t 20
@@ -29,12 +30,18 @@ dev-backend:       ## Django on 127.0.0.1:8000 (reloads on change)
 dev-frontend:      ## Vite on http://localhost:5050 (proxies /api, /auth, /callback to Django)
 	$(FRONTEND)
 
-# Background jobs of a non-interactive shell ignore Ctrl+C, so the trap stops both servers itself;
-# if either server exits, the other is stopped too.
+# Each server runs in its own process group (setsid), and the trap stops exactly those groups, so
+# servers started elsewhere are never touched. Background jobs of a non-interactive shell ignore
+# Ctrl+C, hence the trap; if either server exits, the other is stopped too.
 run: services      ## everything for local development in one terminal; Ctrl+C stops both servers
-	@trap 'trap - INT TERM EXIT; $(STOP_SERVERS)' INT TERM EXIT; \
-	  ( $(BACKEND) ) & \
-	  ( $(FRONTEND) ) & \
+	@for port in $(DEV_PORTS); do \
+	  if (exec 3<>/dev/tcp/127.0.0.1/$$port) 2>/dev/null; then \
+	    echo "port $$port is in use: a dev server is already running (make stop ends leftovers)"; exit 1; \
+	  fi; \
+	done; \
+	trap 'trap - INT TERM EXIT; kill -- -$$api -$$web 2>/dev/null; true' INT TERM EXIT; \
+	  setsid bash -c '$(BACKEND)' & api=$$!; \
+	  setsid bash -c '$(FRONTEND)' & web=$$!; \
 	  wait -n
 
 dev: run
