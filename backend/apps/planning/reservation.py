@@ -154,6 +154,14 @@ def _choices(p: Plan) -> dict[int, BlueprintChoice]:
             me_override=c.get("me"),
             te_override=c.get("te"),
             decryptor=dec if dec in ("auto", "none") else int(dec),
+            buy_bpcs=c.get("buy_bpcs", 0),
+            bpc_runs=c.get("bpc_runs"),
+            bpc_me=c.get("bpc_me", 10),
+            bpc_te=c.get("bpc_te", 20),
+            bpc_price=c.get("bpc_price"),
+            extra_bpos=c.get("extra_bpos", 0),
+            bpo_me=c.get("bpo_me", 0),
+            bpo_te=c.get("bpo_te", 0),
         )
     return out
 

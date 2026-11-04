@@ -359,3 +359,25 @@ def test_blueprints_in_open_jobs(api, user, azbel):
     IndustryJob.objects.filter(pk=copying.pk).update(status="delivered")
     rows = {r["item_id"]: r for r in api("get", "/api/library/blueprints").json()}
     assert rows[1]["job_status"] is None
+
+
+# --- opt-in purchases ----------------------------------------------------------------------
+
+
+def test_purchase_options_and_saving_one(api, user, azbel):
+    pid = api("post", "/api/plans", {"name": "a", "lines": [{"type_id": 587, "quantity": 4}]})
+    pid = pid.json()["id"]
+    resp = api("get", f"/api/plans/{pid}/blueprints/691/options")
+    assert resp.status_code == 200, resp.content
+    body = resp.json()
+    kinds = {o["kind"]: o for o in body["options"]}
+    assert set(kinds) == {"bpcs", "bpo"}
+    bpcs = kinds["bpcs"]
+    assert bpcs["count"] == 1 and bpcs["purchase_cost"] is None
+
+    choice = {"buy_bpcs": 1, "bpc_runs": bpcs["runs_per_bpc"], "bpc_price": 2_000_000}
+    assert api("patch", f"/api/plans/{pid}", {"choices": {"691": choice}}).status_code == 200
+    result = api("get", f"/api/plans/{pid}/result").json()["result"]
+    assert "bought" in next(b for b in result["blueprints"] if b["type_id"] == 691)["sources"]
+    assert result["costs"]["blueprints"] == 2_000_000
+    assert api("get", f"/api/plans/{pid}/blueprints/587/options").json()["options"] == []

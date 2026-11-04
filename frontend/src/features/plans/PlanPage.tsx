@@ -67,7 +67,7 @@ export function PlanPage() {
           {r?.result ? (
             <>
               {tab === 'shopping' ? <ShoppingTab data={r} /> : null}
-              {tab === 'blueprints' ? <BlueprintsTab data={r} lookups={lookups} /> : null}
+              {tab === 'blueprints' ? <BlueprintsTab data={r} lookups={lookups} plan={p} /> : null}
               {tab === 'schedule' ? <ScheduleTab data={r} lookups={lookups} /> : null}
               {tab === 'cost' ? <CostTab data={r} /> : null}
             </>

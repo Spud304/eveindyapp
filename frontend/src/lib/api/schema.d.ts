@@ -274,6 +274,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plans/{plan_id}/blueprints/{bp_id}/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Blueprint Options
+         * @description What buying BPCs or an extra BPO for one blueprint would save and cost: the plan run
+         *     again with each purchase. One plan run per candidate, so only on request.
+         */
+        get: operations["apps_planning_plans_api_blueprint_options"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plans/{plan_id}/progress": {
         parameters: {
             query?: never;
@@ -664,7 +685,7 @@ export interface components {
          * BlueprintSource
          * @enum {string}
          */
-        BlueprintSource: "bpo" | "bpc" | "copy" | "invention" | "missing";
+        BlueprintSource: "bpo" | "bpc" | "copy" | "bought" | "invention" | "missing";
         /** CostSummary */
         CostSummary: {
             /** Materials */
@@ -675,6 +696,8 @@ export interface components {
             job_fees: {
                 [key: string]: number;
             };
+            /** Blueprints */
+            blueprints: number;
             /** Total */
             total: number;
             /** Unpriced Type Ids */
@@ -884,7 +907,7 @@ export interface components {
          * ReasonCode
          * @enum {string}
          */
-        ReasonCode: "plan_line" | "build_component" | "buy_no_blueprint" | "buy_blacklist" | "buy_rule" | "buy_invention_input" | "line_not_buildable" | "me_override" | "me_owned_bpo" | "me_owned_bpc" | "me_invented" | "me_reaction" | "me_missing_blueprint" | "source_bpo" | "source_bpc" | "source_copy" | "source_invention" | "source_missing" | "station_best" | "station_none" | "decryptor_chosen" | "decryptor_auto" | "scheduled" | "unscheduled_no_character" | "fee_computed" | "fee_not_modelled" | "price_missing";
+        ReasonCode: "plan_line" | "build_component" | "buy_no_blueprint" | "buy_blacklist" | "buy_rule" | "buy_invention_input" | "buy_blueprint" | "line_not_buildable" | "me_override" | "me_owned_bpo" | "me_owned_bpc" | "me_bought" | "me_invented" | "me_reaction" | "me_missing_blueprint" | "source_bpo" | "source_bpc" | "source_copy" | "source_bought" | "source_invention" | "source_missing" | "station_best" | "station_none" | "decryptor_chosen" | "decryptor_auto" | "scheduled" | "unscheduled_no_character" | "fee_computed" | "fee_not_modelled" | "price_missing";
         /** ScheduledSlot */
         ScheduledSlot: {
             /** Character Id */
@@ -1077,6 +1100,40 @@ export interface components {
              * @default auto
              */
             decryptor: number | ("auto" | "none");
+            /**
+             * Buy Bpcs
+             * @default 0
+             */
+            buy_bpcs: number;
+            /** Bpc Runs */
+            bpc_runs?: number | null;
+            /**
+             * Bpc Me
+             * @default 10
+             */
+            bpc_me: number;
+            /**
+             * Bpc Te
+             * @default 20
+             */
+            bpc_te: number;
+            /** Bpc Price */
+            bpc_price?: number | null;
+            /**
+             * Extra Bpos
+             * @default 0
+             */
+            extra_bpos: number;
+            /**
+             * Bpo Me
+             * @default 0
+             */
+            bpo_me: number;
+            /**
+             * Bpo Te
+             * @default 0
+             */
+            bpo_te: number;
         };
         /** PlanSettings */
         PlanSettings: {
@@ -1161,6 +1218,96 @@ export interface components {
             categories: {
                 [key: string]: string;
             };
+        };
+        /**
+         * BlueprintChoice
+         * @description Per-blueprint user choices. Overrides apply to every job of the
+         *     blueprint. `decryptor` is only used for invented blueprints.
+         */
+        BlueprintChoice: {
+            /** Me Override */
+            me_override?: number | null;
+            /** Te Override */
+            te_override?: number | null;
+            /**
+             * Decryptor
+             * @default auto
+             */
+            decryptor: number | ("auto" | "none");
+            /**
+             * Buy Bpcs
+             * @default 0
+             */
+            buy_bpcs: number;
+            /** Bpc Runs */
+            bpc_runs?: number | null;
+            /**
+             * Bpc Me
+             * @default 10
+             */
+            bpc_me: number;
+            /**
+             * Bpc Te
+             * @default 20
+             */
+            bpc_te: number;
+            /** Bpc Price */
+            bpc_price?: number | null;
+            /**
+             * Extra Bpos
+             * @default 0
+             */
+            extra_bpos: number;
+            /**
+             * Bpo Me
+             * @default 0
+             */
+            bpo_me: number;
+            /**
+             * Bpo Te
+             * @default 0
+             */
+            bpo_te: number;
+        };
+        /** BlueprintOptions */
+        BlueprintOptions: {
+            /** Blueprint Type Id */
+            blueprint_type_id: number;
+            /** Total Seconds */
+            total_seconds: number;
+            /** Options */
+            options: components["schemas"]["PurchaseOption"][];
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** PurchaseOption */
+        PurchaseOption: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bpcs" | "bpo";
+            /** Count */
+            count: number;
+            /** Runs Per Bpc */
+            runs_per_bpc: number | null;
+            /** Me */
+            me: number;
+            /** Te */
+            te: number;
+            /** Total Seconds */
+            total_seconds: number;
+            /** Seconds Saved */
+            seconds_saved: number;
+            /** Cost Change */
+            cost_change: number;
+            /** Purchase Cost */
+            purchase_cost: number | null;
+            choice: components["schemas"]["BlueprintChoice"];
+            reason: components["schemas"]["Reason"];
         };
         /** JobRow */
         JobRow: {
@@ -1921,6 +2068,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanResultOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_blueprint_options: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: number;
+                bp_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlueprintOptions"];
                 };
             };
         };

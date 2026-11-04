@@ -16,6 +16,7 @@ from apps.esidata.access import owner_q
 from apps.esidata.models import BlueprintItem, Feed, IndustryJob
 from apps.esidata.overview_api import JobRow, describe_jobs
 from apps.sde.models import BlueprintProduct, EveType
+from engine import BlueprintOptions, purchase_options
 from engine.types import Activity, BuildCategory, PlanResult
 
 from . import reservation, tracker
@@ -40,6 +41,15 @@ class ChoiceIO(Schema):
     me: int | None = Field(None, ge=-10, le=10)
     te: int | None = Field(None, ge=0, le=20)
     decryptor: int | Literal["auto", "none"] = "auto"
+    # Opt-in purchases (engine.types.BlueprintChoice).
+    buy_bpcs: int = Field(0, ge=0, le=100)
+    bpc_runs: int | None = Field(None, ge=1, le=100_000)
+    bpc_me: int = Field(10, ge=0, le=10)
+    bpc_te: int = Field(20, ge=0, le=20)
+    bpc_price: float | None = Field(None, ge=0)
+    extra_bpos: int = Field(0, ge=0, le=20)
+    bpo_me: int = Field(0, ge=0, le=10)
+    bpo_te: int = Field(0, ge=0, le=20)
 
 
 class PlanSettings(Schema):
@@ -340,6 +350,17 @@ def plan_result(request: HttpRequest, plan_id: int):
             "held_elsewhere": {t: [asdict(h) for h in hs] for t, hs in run.held_elsewhere.items()},
         },
     }
+
+
+@router.get("/plans/{plan_id}/blueprints/{bp_id}/options", response=BlueprintOptions)
+def blueprint_options(request: HttpRequest, plan_id: int, bp_id: int):
+    """What buying BPCs or an extra BPO for one blueprint would save and cost: the plan run
+    again with each purchase. One plan run per candidate, so only on request."""
+    p = _plan(request, plan_id)
+    run = reservation.run_plans(_user(request), [p])[p.pk]
+    if run.input is None or run.result is None:
+        raise HttpError(422, run.error or "the plan has no result")
+    return purchase_options(run.input, bp_id, run.result)
 
 
 # --- progress (step 5) ---------------------------------------------------------------------

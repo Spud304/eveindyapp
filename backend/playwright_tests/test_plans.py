@@ -197,3 +197,33 @@ def test_blueprint_in_a_job_shows_in_the_library_and_is_not_offered(login):
     by_test_id(page, "plan.bpc-search").fill("Rifter")
     expect(by_test_id(page, f"plan.bpc.{free}")).to_be_visible()
     expect(by_test_id(page, f"plan.bpc.{busy}")).to_have_count(0)
+
+
+def test_buy_options_apply_and_remove(login):
+    s = login()
+    s.add_station()
+    plan = s.add_plan(uniq("buy"), [(RIFTER, 4)])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    by_test_id(page, "plan.tabs.blueprints").click()
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.buy").click()
+    bpcs = by_test_id(page, f"plan.blueprint.{RIFTER_BP}.option.bpcs")
+    expect(bpcs).to_contain_text("price not set")
+    expect(by_test_id(page, f"plan.blueprint.{RIFTER_BP}.option.bpo")).to_contain_text(
+        "Buy 1 extra BPO"
+    )
+
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.bpc-price").fill("1500000")
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.apply.bpcs").click()
+    row = by_test_id(page, f"plan.blueprint.{RIFTER_BP}")
+    expect(row).to_contain_text("bought")
+    expect(by_test_id(page, f"plan.blueprint.{RIFTER_BP}.options")).to_contain_text("Buying 1 BPC")
+
+    by_test_id(page, "plan.tabs.cost").click()
+    expect(by_test_id(page, "plan.cost.summary")).to_contain_text("Blueprints bought")
+    expect(by_test_id(page, "plan.cost.summary")).to_contain_text("1.5")
+
+    by_test_id(page, "plan.tabs.blueprints").click()
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.buy").click()
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.unbuy").click()
+    expect(row).not_to_contain_text("bought")

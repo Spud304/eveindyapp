@@ -161,6 +161,18 @@ export function usePlan(id: number) {
   })
 }
 
+/** Buy-BPC / extra-BPO options for one blueprint: one plan run per candidate, so on request
+ * only. Under the plans key, so any plan change refreshes them. */
+export function useBlueprintOptions(planId: number, bpId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: [...keys.plans, planId, 'options', bpId],
+    queryFn: async () =>
+      unwrap(await api.GET('/api/plans/{plan_id}/blueprints/{bp_id}/options', { params: { path: { plan_id: planId, bp_id: bpId } } })),
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
 /** The engine's result. Recomputed on the server each time; kept while a new one loads. */
 export function usePlanResult(id: number) {
   return useQuery({
