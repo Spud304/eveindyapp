@@ -30,11 +30,13 @@ const CLASSES = [
 ] as const
 
 /** Minerals on the shopping list bought as compressed ore and reprocessed: the cheapest mix. */
-export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut }) {
+export function OrePanel({ planId, data, stale = false }: { planId: number; data: PlanResultOut; stale?: boolean }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState<OreQuery>({ ore_classes: 'asteroid' })
   const ore = useCompressedOre(planId, q, open)
   const refresh = useRefreshOre(planId, q)
+  // While the plan or the mix is recomputing, the lists on screen are the old ones.
+  const busy = stale || ore.isFetching || refresh.isPending
   const { copied, copy } = useCopy<'ore' | 'all'>()
   const d = ore.data
   const mix = d?.mix
@@ -48,6 +50,7 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
   const covered = new Set((mix?.minerals ?? []).filter((m) => m.needed > 0).map((m) => m.type_id))
   const allText = [...data.result!.shopping_list.filter((s) => !covered.has(s.type_id)).map((s) => `${s.name}\t${s.quantity}`), oreText].filter(Boolean).join('\n')
   const saving = mix && mix.mineral_cost != null ? mix.mineral_cost - mix.ore_cost : null
+  const hasTax = (mix?.ores ?? []).some((o) => o.tax > 0)
   // Everything to buy with ore in place of the covered minerals.
   const allVolume = data.result!.shopping_list.filter((s) => !covered.has(s.type_id)).reduce((sum, s) => sum + s.volume, 0) + (mix?.ore_volume ?? 0)
   return (
@@ -127,10 +130,16 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                   </Badge>
                 ) : null}
                 <span className="ml-auto flex gap-2">
-                  <Button small onClick={() => void copy(oreText, 'ore', 'ore list')} disabled={!oreText} testId="plan.ore.copy">
+                  <Button small onClick={() => void copy(oreText, 'ore', 'ore list')} disabled={!oreText || busy} testId="plan.ore.copy" title={busy ? 'recomputing' : undefined}>
                     {copied === 'ore' ? 'Copied' : 'Copy ore'}
                   </Button>
-                  <Button small onClick={() => void copy(allText, 'all', 'shopping list')} disabled={!allText} testId="plan.ore.copy-all" title="the shopping list with these minerals replaced by the ore">
+                  <Button
+                    small
+                    onClick={() => void copy(allText, 'all', 'shopping list')}
+                    disabled={!allText || busy}
+                    testId="plan.ore.copy-all"
+                    title={busy ? 'recomputing' : 'the shopping list with these minerals replaced by the ore'}
+                  >
                     {copied === 'all' ? 'Copied' : 'Copy list with ore'}
                   </Button>
                 </span>
@@ -163,6 +172,11 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                       On sale
                     </th>
                     <th className="text-right">ISK</th>
+                    {hasTax ? (
+                      <th className="text-right" title="reprocessing tax on what the ore yields, at CCP's adjusted prices">
+                        Tax
+                      </th>
+                    ) : null}
                     <th className="text-right">Volume</th>
                   </tr>
                 </thead>
@@ -176,6 +190,7 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                       <Num className="text-muted">{o.top_price != null ? isk(o.top_price) : ''}</Num>
                       <Num className="text-muted">{o.on_sale != null ? qty(o.on_sale) : ''}</Num>
                       <Num>{isk(o.total)}</Num>
+                      {hasTax ? <Num className="text-muted">{isk(o.tax)}</Num> : null}
                       <Num className="text-muted">{m3(o.volume)}</Num>
                     </tr>
                   ))}

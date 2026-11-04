@@ -38,7 +38,7 @@ def test_edit_rigs_tax_and_activities(login):
         "Standup M-Set Basic Medium Ship Manufacturing Material Efficiency I"
     )
 
-    tax = row.locator('input[type="number"]')
+    tax = row.get_by_title("facility tax")
     tax.fill("2.5")
     tax.blur()
     expect(page.get_by_test_id("toast").last).to_have_text("Station saved")

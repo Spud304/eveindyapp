@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import clsx from 'clsx'
+import { useNow } from '@/hooks/useNow'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useDashboard, usePlanProgress, usePlans } from '@/lib/api/hooks'
 import type { JobRow } from '@/lib/api/client'
@@ -19,7 +20,7 @@ export function DashboardPage() {
   const dash = useDashboard()
   const plans = usePlans()
   const [mineOnly, setMineOnly] = useState(false)
-  const now = Date.now()
+  const now = useNow()
   const d = dash.data
   // Ready first (they need delivering), then running by end time, delivered last.
   const order = { ready: 0, active: 1, paused: 2, delivered: 3 } as Record<string, number>

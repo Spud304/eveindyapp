@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { useNow } from '@/hooks/useNow'
 import { useJobLinkMutations, usePlanProgress } from '@/lib/api/hooks'
 import type { JobRow, ProgressOut, ProgressRow } from '@/lib/api/client'
 import { duration, qty, since } from '@/lib/format'
@@ -24,7 +25,7 @@ function Bar({ row }: { row: ProgressRow }) {
 }
 
 function JobTable({ jobs, action, testId }: { jobs: (JobRow & { source?: string })[]; action: (j: JobRow) => React.ReactNode; testId: string }) {
-  const now = Date.now()
+  const now = useNow()
   return (
     <Table hover>
       <thead>
@@ -74,7 +75,7 @@ export function ProgressTab({ planId }: { planId: number }) {
   const { link, unlink } = useJobLinkMutations(planId)
   const d = progress.data
   if (progress.error) return <ErrorText error={progress.error} />
-  if (!d) return null
+  if (!d) return <p className="text-ui text-muted">Loading progress</p>
   const busy = link.isPending || unlink.isPending
   return <ProgressView d={d} actions={{ busy, link: (id) => link.mutate(id), unlink: (id) => unlink.mutate(id) }} />
 }

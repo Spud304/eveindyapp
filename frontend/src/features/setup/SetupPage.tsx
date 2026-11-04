@@ -214,6 +214,9 @@ function StationsPanel() {
               <th className="text-right" title="facility tax set by the structure owner; ESI cannot read it">
                 Tax %
               </th>
+              <th className="text-right" title="reprocessing tax the owner charges; the compressed ore mix pays it">
+                Reproc. %
+              </th>
               <th />
             </tr>
           </thead>
@@ -252,6 +255,7 @@ function DiscoverReport({ found, onClose }: { found: DiscoverOut; onClose: () =>
 function StationRow({ station: s }: { station: StationOut }) {
   const { edit, remove } = useStationMutations()
   const [tax, setTax] = useState(String(s.facility_tax))
+  const [reprocTax, setReprocTax] = useState(String(s.reprocessing_tax))
   const [rigQuery, setRigQuery] = useState('')
   const rigSearch = useTypeSearch(useDebouncedValue(rigQuery), 'rig')
   const save = (body: Parameters<typeof edit.mutate>[0]['body']) => edit.mutate({ id: s.id, body })
@@ -332,6 +336,23 @@ function StationRow({ station: s }: { station: StationOut }) {
           onBlur={() => {
             const v = Number(tax)
             if (!Number.isNaN(v) && (v !== s.facility_tax || !s.tax_confirmed)) save({ facility_tax: v })
+          }}
+        />
+      </td>
+      <td className="text-right">
+        <Input
+          type="number"
+          step="0.1"
+          min={0}
+          max={100}
+          value={reprocTax}
+          testId={`setup.station.${s.id}.reprocessing-tax`}
+          title="reprocessing tax"
+          className="w-16 text-right"
+          onChange={(e) => setReprocTax(e.target.value)}
+          onBlur={() => {
+            const v = Number(reprocTax)
+            if (!Number.isNaN(v) && v >= 0 && v <= 100 && v !== s.reprocessing_tax) save({ reprocessing_tax: v })
           }}
         />
       </td>

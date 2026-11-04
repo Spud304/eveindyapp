@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { usePlanView, useSharedLink } from '@/lib/api/hooks'
-import type { PlanResultOut, SharedPlanOut } from '@/lib/api/client'
+import { ApiError, type PlanResultOut, type SharedPlanOut } from '@/lib/api/client'
 import { Badge, Empty, ErrorText, Mono, PageHeader, Panel, Tabs } from '@/components/ui'
 import { ScheduleTab, ShoppingTab, type Lookups } from './tabs'
 import { ProgressView } from './progress'
@@ -19,23 +19,35 @@ const TABS: { key: TabKey; label: string }[] = [
 export function SharedLinkPage() {
   const { token } = useParams({ from: '/shared/$token' })
   const view = useSharedLink(token)
-  if (view.error) return <Empty testId="shared.missing">This link does not lead to a shared plan. It may have been replaced or turned off.</Empty>
-  return view.data ? <SharedView data={view.data} /> : null
+  if (isNotFound(view.error)) return <Empty testId="shared.missing">This link does not lead to a shared plan. It may have been replaced or turned off.</Empty>
+  if (view.error) return <ErrorText error={view.error} />
+  return view.data ? <SharedView data={view.data} /> : <Loading />
 }
 
 /** The read-only view for corp members of a corp-shared plan, and for the owner as a preview. */
 export function PlanViewPage() {
   const { planId } = useParams({ from: '/plans/$planId/view' })
   const view = usePlanView(Number(planId))
-  if (view.error) return <Empty testId="shared.missing">This plan is not shared with you.</Empty>
-  return view.data ? <SharedView data={view.data} /> : null
+  if (isNotFound(view.error)) return <Empty testId="shared.missing">This plan is not shared with you.</Empty>
+  if (view.error) return <ErrorText error={view.error} />
+  return view.data ? <SharedView data={view.data} /> : <Loading />
+}
+
+/** Only a 404 means "not shared"; any other failure is shown as the error it is. */
+function isNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+}
+
+function Loading() {
+  return <p className="text-ui text-muted">Loading plan</p>
 }
 
 function SharedView({ data }: { data: SharedPlanOut }) {
   usePageTitle(data.name)
   const [tab, setTab] = useState<TabKey>('shopping')
   const r = data.result
-  // The tabs take a plan result; viewers get no reservation details.
+  // The tabs take a plan result; viewers get no reservation details or feed health (it names
+  // the owner's characters).
   const asResult = {
     plan_id: data.plan_id ?? 0,
     error: data.error,
@@ -44,6 +56,7 @@ function SharedView({ data }: { data: SharedPlanOut }) {
     result: r,
     effective_rules: { item_blacklist: [], buy_categories: [], overrides: { blacklist_add: [], blacklist_remove: [], categories: {} } },
     reservation: { reserves: false, claims: {}, held_elsewhere: {} },
+    inputs: { as_of: null, problems: [] },
   } as PlanResultOut
   const lookups: Lookups = {
     characters: new Map(Object.entries(data.characters).map(([k, v]) => [Number(k), v])),

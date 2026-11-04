@@ -19,7 +19,13 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: '/', component: DashboardPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/plans', component: PlansPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/library', component: LibraryPage }),
-  createRoute({ getParentRoute: () => rootRoute, path: '/plans/$planId', component: PlanPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/plans/$planId',
+    component: PlanPage,
+    // The open tab is in the URL, so reload and Back keep it.
+    validateSearch: (search: Record<string, unknown>): { tab?: string } => (typeof search.tab === 'string' ? { tab: search.tab } : {}),
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: '/plans/$planId/view', component: PlanViewPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/shared/$token', component: SharedLinkPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/setup', component: SetupPage }),

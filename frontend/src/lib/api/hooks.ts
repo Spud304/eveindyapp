@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api,
@@ -10,6 +11,8 @@ import {
   type StationIn,
   type StationOut,
   type StationPatch,
+  type ChoiceIO,
+  type PlanOut,
 } from './client'
 
 export const keys = {
@@ -55,11 +58,22 @@ export function useCharacterMutations() {
 
 /** Polls every 5 s while a sync is queued or running, so the table fills in as feeds land. */
 export function useSyncStatus() {
-  return useQuery({
+  const qc = useQueryClient()
+  const status = useQuery({
     queryKey: keys.syncStatus,
     queryFn: async () => unwrap(await api.GET('/api/sync/status')),
     refetchInterval: (q) => (q.state.data?.queued ? 5_000 : false),
   })
+  // When a queued sync finishes, everything computed from ESI data is out of date.
+  const queued = status.data?.queued
+  const wasQueued = useRef(queued)
+  useEffect(() => {
+    if (wasQueued.current && queued === false) {
+      for (const key of [keys.plans, keys.library, keys.dashboard]) void qc.invalidateQueries({ queryKey: key })
+    }
+    wasQueued.current = queued
+  }, [queued, qc])
+  return status
 }
 
 export function useRefreshNow() {
@@ -183,6 +197,9 @@ export function usePlanResult(id: number, prices: 'jita' | 'average' = 'jita') {
   })
 }
 
+/** Line saves, so the lines editor can tell whether one is still on its way. */
+export const LINES_MUTATION = ['plan', 'lines'] as const
+
 export function usePlanMutations() {
   const qc = useQueryClient()
   // Any plan change can change every plan's result (reservations), so refresh them all.
@@ -200,14 +217,56 @@ export function usePlanMutations() {
       // One at a time, in order: two quick edits sent together could finish out of order and
       // leave the older value saved.
       scope: { id: 'plan-edit' },
-      onSuccess: done,
+      onSuccess: (plan, { id }) => {
+        qc.setQueryData(keys.plan(id), plan)
+        void done()
+      },
+      meta: { toast: 'Plan saved' },
+    }),
+    /** Buy or build one item in this plan only ('default': follow the account's rules again).
+     * Built from the plan as the previous queued save left it, like `setChoice`. */
+    setItemRule: useMutation({
+      mutationFn: async ({ id, typeId, mode }: { id: number; typeId: number; mode: 'buy' | 'build' | 'default' }) => {
+        const current = qc.getQueryData<PlanOut>(keys.plan(id))
+        const add = new Set(current?.blacklist_add ?? [])
+        const remove = new Set(current?.blacklist_remove ?? [])
+        add.delete(typeId)
+        remove.delete(typeId)
+        if (mode === 'buy') add.add(typeId)
+        if (mode === 'build') remove.add(typeId)
+        return unwrap(
+          await api.PATCH('/api/plans/{plan_id}', { ...path(id), body: { blacklist_add: [...add], blacklist_remove: [...remove] } }),
+        )
+      },
+      scope: { id: 'plan-edit' },
+      onSuccess: (plan, { id }) => {
+        qc.setQueryData(keys.plan(id), plan)
+        void done()
+      },
+      meta: { toast: 'Plan saved' },
+    }),
+    /** One blueprint's choice. The full map is built when the save runs, from the plan as the
+     * previous queued save left it, so two quick choices on different blueprints both stay. */
+    setChoice: useMutation({
+      mutationFn: async ({ id, blueprintId, choice }: { id: number; blueprintId: number; choice: ChoiceIO }) => {
+        const current = qc.getQueryData<PlanOut>(keys.plan(id))?.choices ?? {}
+        const choices = { ...(current as Record<string, ChoiceIO>), [String(blueprintId)]: choice }
+        return unwrap(await api.PATCH('/api/plans/{plan_id}', { ...path(id), body: { choices } }))
+      },
+      scope: { id: 'plan-edit' },
+      onSuccess: (plan, { id }) => {
+        qc.setQueryData(keys.plan(id), plan)
+        void done()
+      },
       meta: { toast: 'Plan saved' },
     }),
     setLines: useMutation({
+      mutationKey: LINES_MUTATION,
       mutationFn: async ({ id, lines }: { id: number; lines: LineIO[] }) =>
         unwrap(await api.PUT('/api/plans/{plan_id}/lines', { ...path(id), body: lines })),
       scope: { id: 'plan-edit' },
-      onSuccess: () => {
+      onSuccess: (plan, { id }) => {
+        qc.setQueryData(keys.plan(id), plan) // the saved lines, with names and ids, at once
         void done()
         void qc.invalidateQueries({ queryKey: keys.library }) // picked BPCs show their plan
       },

@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useIsMutating } from '@tanstack/react-query'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { usePriceSource, type PriceSource } from '@/hooks/usePriceSource'
 import { useLocalCopy } from '@/hooks/useLocalCopy'
-import { useCorporations, useLibrary, useMe, usePlan, usePlanMutations, usePlanResult, useStations, useTypeSearch } from '@/lib/api/hooks'
+import { LINES_MUTATION, useCorporations, useLibrary, useMe, usePlan, usePlanMutations, usePlanResult, useStations, useTypeSearch } from '@/lib/api/hooks'
 import { useCopy } from '@/hooks/useCopy'
 import { Link } from '@tanstack/react-router'
 import type { BlueprintRow, LineIO, PlanOut, PlanResultOut, TypeOut } from '@/lib/api/client'
-import { BUILD_CATEGORY_LABELS } from '@/lib/format'
+import { BUILD_CATEGORY_LABELS, since } from '@/lib/format'
 import {
   Badge,
   Button,
@@ -24,14 +25,15 @@ import {
   Select,
   Tabs,
 } from '@/components/ui'
-import { BlueprintsTab, CostTab, ScheduleTab, ShoppingTab, type Lookups } from './tabs'
+import { BlueprintsTab, CostTab, ItemsTab, ScheduleTab, ShoppingTab, type Lookups } from './tabs'
 import { ProgressTab } from './progress'
 import { OrePanel } from './ore'
 
-type TabKey = 'shopping' | 'blueprints' | 'schedule' | 'cost' | 'progress'
+type TabKey = 'shopping' | 'items' | 'blueprints' | 'schedule' | 'cost' | 'progress'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'shopping', label: 'Shopping list' },
+  { key: 'items', label: 'Items' },
   { key: 'blueprints', label: 'Blueprints' },
   { key: 'schedule', label: 'Schedule' },
   { key: 'cost', label: 'Cost' },
@@ -40,28 +42,33 @@ const TABS: { key: TabKey; label: string }[] = [
 
 export function PlanPage() {
   const { planId } = useParams({ from: '/plans/$planId' })
+  const search = useSearch({ from: '/plans/$planId' })
+  const navigate = useNavigate({ from: '/plans/$planId' })
   const id = Number(planId)
   const plan = usePlan(id)
   const [prices, setPrices] = usePriceSource()
   const result = usePlanResult(id, prices)
   const me = useMe()
   const stations = useStations()
-  const [tab, setTab] = useState<TabKey>('shopping')
+  const tab: TabKey = TABS.some((t) => t.key === search.tab) ? (search.tab as TabKey) : 'shopping'
+  const setTab = (next: TabKey) => void navigate({ search: next === 'shopping' ? {} : { tab: next }, replace: true })
   usePageTitle(plan.data?.name ?? 'Plan')
 
   if (plan.error) return <ErrorText error={plan.error} />
-  if (!plan.data) return null
+  if (!plan.data) return <p className="text-ui text-muted" data-testid="plan.loading">Loading plan</p>
   const p = plan.data
   const lookups: Lookups = {
     characters: new Map((me.data?.characters ?? []).map((c) => [c.character_id, c.name])),
     stations: new Map((stations.data ?? []).map((s) => [s.id, s.name])),
   }
   const r = result.data
+  // keepPreviousData shows the last result while a new one computes; mark it as old.
+  const stale = result.isFetching
   return (
     <>
-      <PlanHeader plan={p} result={r} computing={result.isFetching} prices={prices} onPrices={setPrices} />
+      <PlanHeader plan={p} result={r} computing={stale} prices={prices} onPrices={setPrices} />
       <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
-        <div className="min-w-0">
+        <div className={stale ? 'min-w-0 opacity-60 transition-opacity' : 'min-w-0'} data-testid="plan.main" data-stale={stale}>
           <Tabs tabs={TABS} value={tab} onChange={setTab} testId="plan.tabs" />
           <ErrorText error={result.error} />
           {r?.error ? (
@@ -73,10 +80,11 @@ export function PlanPage() {
             <>
               {tab === 'shopping' ? (
                 <div className="flex flex-col gap-4">
-                  <ShoppingTab data={r} />
-                  <OrePanel planId={p.id} data={r} />
+                  <ShoppingTab data={r} stale={stale} />
+                  <OrePanel planId={p.id} data={r} stale={stale} />
                 </div>
               ) : null}
+              {tab === 'items' ? <ItemsTab data={r} plan={p} /> : null}
               {tab === 'blueprints' ? <BlueprintsTab data={r} lookups={lookups} plan={p} /> : null}
               {tab === 'schedule' ? <ScheduleTab data={r} lookups={lookups} /> : null}
               {tab === 'cost' ? <CostTab data={r} /> : null}
@@ -85,10 +93,11 @@ export function PlanPage() {
           {tab === 'progress' ? <ProgressTab planId={p.id} /> : null}
         </div>
         <div className="flex min-w-0 flex-col gap-4">
+          {r?.inputs.problems.length ? <DataProblemsPanel data={r} /> : null}
+          {r?.result?.warnings.length ? <WarningsPanel data={r} /> : null}
           <LinesPanel plan={p} />
           <SharingPanel plan={p} />
           <SettingsPanel plan={p} />
-          {r?.result?.warnings.length ? <WarningsPanel data={r} /> : null}
         </div>
       </div>
     </>
@@ -142,6 +151,14 @@ function PlanHeader({
               <Mono className="text-fg">{days.toFixed(1)}</Mono> days
             </span>
           ) : null}
+          {result ? <DataAge data={result} /> : null}
+          {result?.result?.warnings.length ? (
+            <a href="#plan-warnings" data-testid="plan.warning-count">
+              <Badge tone="warn" title="engine warnings; see the Warnings panel">
+                {result.result.warnings.length} {result.result.warnings.length === 1 ? 'warning' : 'warnings'}
+              </Badge>
+            </a>
+          ) : null}
           {computing ? <span className="text-label">computing</span> : null}
         </>
       }
@@ -177,13 +194,29 @@ function PlanHeader({
   )
 }
 
+type LocalLine = LineIO & { id?: number; name?: string }
+
 function LinesPanel({ plan: p }: { plan: PlanOut }) {
   const { setLines } = usePlanMutations()
   const [q, setQ] = useState('')
   const [picking, setPicking] = useState(false)
   const search = useTypeSearch(useDebouncedValue(q), 'buildable')
-  const lines: LineIO[] = p.lines.map((l) => ({ type_id: l.type_id, quantity: l.quantity, blueprint_item_ids: l.blueprint_item_ids }))
-  const save = (next: LineIO[], onSuccess?: () => void) => setLines.mutate({ id: p.id, lines: next }, { onSuccess })
+  // Every change is computed from this local list, not from the server's: saves are queued,
+  // so a second quick edit built from the server list would undo the first. The list follows
+  // the server only once no line save is waiting (after the last one, or a refused one).
+  const saving = useIsMutating({ mutationKey: LINES_MUTATION }) > 0
+  const serverKey = JSON.stringify(p.lines)
+  const [lines, setLocal] = useState<LocalLine[]>(p.lines)
+  useEffect(() => {
+    if (!saving) setLocal(JSON.parse(serverKey) as LocalLine[])
+  }, [serverKey, saving])
+  const save = (next: LocalLine[], onSuccess?: () => void) => {
+    setLocal(next)
+    setLines.mutate(
+      { id: p.id, lines: next.map(({ type_id, quantity, blueprint_item_ids }) => ({ type_id, quantity, blueprint_item_ids })) },
+      { onSuccess },
+    )
+  }
   return (
     <Panel
       title="Build"
@@ -195,8 +228,8 @@ function LinesPanel({ plan: p }: { plan: PlanOut }) {
       }
     >
       <ul className="mb-2 flex flex-col gap-1">
-        {p.lines.map((l, i) => (
-          <li key={l.id} className="flex items-center gap-2" data-testid={`plan.line.${l.type_id}`}>
+        {lines.map((l, i) => (
+          <li key={l.id ?? `new-${l.type_id}-${i}`} className="flex items-center gap-2" data-testid={`plan.line.${l.type_id}`}>
             {l.blueprint_item_ids?.length ? (
               <span className="w-16 text-right" title="set by the runs of the picked BPCs">
                 <Mono>{l.quantity}</Mono>
@@ -209,7 +242,7 @@ function LinesPanel({ plan: p }: { plan: PlanOut }) {
               />
             )}
             <span className="min-w-0 flex-1 truncate">
-              {l.name}
+              {l.name ?? <span className="text-muted">saving</span>}
               {l.blueprint_item_ids?.length ? (
                 <span className="text-label text-muted" data-testid={`plan.line.${l.type_id}.bpcs`}>
                   {' '}
@@ -217,7 +250,18 @@ function LinesPanel({ plan: p }: { plan: PlanOut }) {
                 </span>
               ) : null}
             </span>
-            <Button small variant="ghost" onClick={() => save(lines.filter((_, j) => j !== i))} title="remove this line">
+            <Button
+              small
+              variant="ghost"
+              testId={`plan.line.${l.type_id}.remove`}
+              onClick={() => {
+                // Picked BPCs would have to be picked again, so ask first.
+                const picked = l.blueprint_item_ids?.length ?? 0
+                if (picked && !window.confirm(`Remove this line? Its ${picked} picked BPC(s) go back to the library.`)) return
+                save(lines.filter((_, j) => j !== i))
+              }}
+              title="remove this line"
+            >
               ×
             </Button>
           </li>
@@ -232,7 +276,7 @@ function LinesPanel({ plan: p }: { plan: PlanOut }) {
         onPick={(t) => {
           // Adding an item already in the plan raises its line; lines of picked BPCs are left alone.
           const at = lines.findIndex((l) => l.type_id === t.id && !l.blueprint_item_ids?.length)
-          save(at >= 0 ? lines.map((l, j) => (j === at ? { ...l, quantity: l.quantity + 1 } : l)) : [...lines, { type_id: t.id, quantity: 1, blueprint_item_ids: [] }])
+          save(at >= 0 ? lines.map((l, j) => (j === at ? { ...l, quantity: l.quantity + 1 } : l)) : [...lines, { type_id: t.id, name: t.name, quantity: 1, blueprint_item_ids: [] }])
           setQ('')
         }}
         placeholder="add item to build"
@@ -500,10 +544,60 @@ function HangarInput({ value, onSave }: { value: string[]; onSave: (v: string[])
   )
 }
 
+/** How old the ESI data behind the result is. Assets, blueprints, skills and jobs all feed the
+ * shopping list and schedule, so a failed or old feed is shown where the list is copied from. */
+function DataAge({ data }: { data: PlanResultOut }) {
+  const { as_of, problems } = data.inputs
+  const tone = problems.some((p) => p.severity === 'bad') ? 'bad' : problems.length ? 'warn' : null
+  const title = problems.length
+    ? problems.map((p) => p.text).join('\n')
+    : 'oldest sync of the skills, assets, blueprints and jobs this plan reads'
+  const label = `data ${as_of ? since(as_of) : 'never synced'}`
+  if (!tone)
+    return (
+      <span title={title} data-testid="plan.data-age">
+        {label}
+      </span>
+    )
+  return (
+    <a href="#plan-data" data-testid="plan.data-age">
+      <Badge tone={tone} title={title}>
+        {label} · {problems.length} {problems.length === 1 ? 'problem' : 'problems'}
+      </Badge>
+    </a>
+  )
+}
+
+function DataProblemsPanel({ data }: { data: PlanResultOut }) {
+  const problems = data.inputs.problems
+  return (
+    <Panel
+      title={`ESI data · ${problems.length} ${problems.length === 1 ? 'problem' : 'problems'}`}
+      testId="plan.data-problems"
+      actions={
+        <Link to="/setup" className="text-ui text-accent hover:underline">
+          Setup
+        </Link>
+      }
+    >
+      <div id="plan-data" />
+      <p className="mb-2 text-label">The shopping list and schedule use this data as it was last synced.</p>
+      <ul className="flex flex-col gap-1 text-ui">
+        {problems.map((p) => (
+          <li key={`${p.owner_name}:${p.feed}`} className={p.severity === 'bad' ? 'text-bad' : 'text-warn'}>
+            {p.text}
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  )
+}
+
 function WarningsPanel({ data }: { data: PlanResultOut }) {
   const warnings = data.result?.warnings ?? []
   return (
     <Panel title={`Warnings · ${warnings.length}`} testId="plan.warnings">
+      <div id="plan-warnings" />
       <ul className="flex flex-col gap-1 text-ui">
         {warnings.map((w, i) => (
           <li key={i} className="text-warn">

@@ -3,7 +3,7 @@ import { useCopy } from '@/hooks/useCopy'
 import { useBlueprintOptions, usePlanMutations } from '@/lib/api/hooks'
 import type { BlueprintChoice, BlueprintPlan, ChoiceIO, PlanOut, PlanResultOut, PurchaseOption } from '@/lib/api/client'
 import { duration, isk, iskExact, m3, pct, qty } from '@/lib/format'
-import { Badge, Button, Empty, Input, Mono, Num, Panel, Table, Why } from '@/components/ui'
+import { Badge, Button, Empty, Input, Mono, Num, Panel, Select, Table, Why } from '@/components/ui'
 
 export type Lookups = { characters: Map<number, string>; stations: Map<number, string> }
 
@@ -19,7 +19,7 @@ function names(data: PlanResultOut) {
 
 // --- shopping list -------------------------------------------------------------------------
 
-export function ShoppingTab({ data }: { data: PlanResultOut }) {
+export function ShoppingTab({ data, stale = false }: { data: PlanResultOut; stale?: boolean }) {
   const r = data.result!
   const held = data.reservation.held_elsewhere
   const { copied, copy } = useCopy()
@@ -41,7 +41,13 @@ export function ShoppingTab({ data }: { data: PlanResultOut }) {
             <span className="text-ui text-muted">
               <Mono className="text-fg">{isk(r.costs.materials + r.costs.invention_inputs)}</Mono>
             </span>
-            <Button small onClick={() => void copy(paste, true, 'shopping list')} disabled={!paste} testId="plan.shopping.copy" title="copy as name and quantity per line (EVE multibuy, Janice)">
+            <Button
+              small
+              onClick={() => void copy(paste, true, 'shopping list')}
+              disabled={!paste || stale}
+              testId="plan.shopping.copy"
+              title={stale ? 'recomputing' : 'copy as name and quantity per line (EVE multibuy, Janice)'}
+            >
               {copied ? 'Copied' : 'Copy list'}
             </Button>
           </>
@@ -137,6 +143,7 @@ export function BlueprintsTab({ data, lookups, plan }: { data: PlanResultOut; lo
   const jobsById = useMemo(() => new Map(r.jobs.map((j) => [j.job_id, j])), [r.jobs])
   const productNames = names(data)
   const [buying, setBuying] = useState<number | null>(null)
+  const [adjusting, setAdjusting] = useState<number | null>(null)
   return (
     <Panel title={`Blueprints · ${r.blueprints.length}`} testId="plan.blueprints" flush>
       <Table hover>
@@ -200,12 +207,31 @@ export function BlueprintsTab({ data, lookups, plan }: { data: PlanResultOut; lo
                       </div>
                     </>
                   ) : null}
+                  {b.activity === 'manufacturing' ? (
+                    <Button
+                      small
+                      variant="ghost"
+                      className="mt-0.5"
+                      testId={`plan.blueprint.${b.type_id}.adjust`}
+                      onClick={() => setAdjusting(adjusting === b.type_id ? null : b.type_id)}
+                      title={b.invention ? 'set ME / TE or the decryptor for this plan' : 'set ME / TE for this plan'}
+                    >
+                      {adjusting === b.type_id ? 'Close' : b.invention ? 'ME / TE / decryptor' : 'ME / TE'}
+                    </Button>
+                  ) : null}
                 </td>
                 <td className="max-w-80">
                   <div>{b.station.station_id != null ? (lookups.stations.get(b.station.station_id) ?? `station ${b.station.station_id}`) : <span className="text-bad">none</span>}</div>
                   <Why text={b.station.reason.text} />
                 </td>
                 </tr>
+                {adjusting === b.type_id ? (
+                  <tr>
+                    <td colSpan={5} className="bg-panel-2">
+                      <OverridePanel plan={plan} bp={b} />
+                    </td>
+                  </tr>
+                ) : null}
                 {buying === b.type_id ? (
                   <tr>
                     <td colSpan={5} className="bg-panel-2">
@@ -219,6 +245,58 @@ export function BlueprintsTab({ data, lookups, plan }: { data: PlanResultOut; lo
         </tbody>
       </Table>
     </Panel>
+  )
+}
+
+/** ME / TE overrides (blank: what the blueprint or invention gives) and, for invented
+ * blueprints, the decryptor. For when ESI's ME is wrong or the automatic decryptor is unwanted. */
+function OverridePanel({ plan, bp }: { plan: PlanOut; bp: BlueprintPlan }) {
+  const { setChoice } = usePlanMutations()
+  const current = storedChoice(plan, bp.type_id)
+  const [me, setMe] = useState(current.me != null ? String(current.me) : '')
+  const [te, setTe] = useState(current.te != null ? String(current.te) : '')
+  const num = (v: string) => (v.trim() === '' ? null : Number(v))
+  const valid = (v: string, lo: number, hi: number) => v.trim() === '' || (Number.isInteger(Number(v)) && Number(v) >= lo && Number(v) <= hi)
+  const ok = valid(me, -10, 10) && valid(te, 0, 20)
+  const decryptor = String(current.decryptor ?? 'auto')
+  const save = (change: Partial<ChoiceIO>) => setChoice.mutate({ id: plan.id, blueprintId: bp.type_id, choice: { ...current, ...change } })
+  return (
+    <div className="flex flex-wrap items-end gap-3 p-1" data-testid={`plan.blueprint.${bp.type_id}.override`}>
+      <label className="flex flex-col gap-0.5 text-label text-muted">
+        ME
+        <Input value={me} onChange={(e) => setMe(e.target.value)} placeholder="auto" className="w-16 text-right mono" testId={`plan.blueprint.${bp.type_id}.me`} />
+      </label>
+      <label className="flex flex-col gap-0.5 text-label text-muted">
+        TE
+        <Input value={te} onChange={(e) => setTe(e.target.value)} placeholder="auto" className="w-16 text-right mono" testId={`plan.blueprint.${bp.type_id}.te`} />
+      </label>
+      <Button small disabled={!ok} onClick={() => save({ me: num(me), te: num(te) })} testId={`plan.blueprint.${bp.type_id}.save-me`} title={ok ? 'blank means the blueprint’s own value' : 'ME -10 to 10, TE 0 to 20'}>
+        Save ME / TE
+      </Button>
+      {bp.invention ? (
+        <label className="flex flex-col gap-0.5 text-label text-muted">
+          Decryptor
+          <Select
+            value={decryptor}
+            testId={`plan.blueprint.${bp.type_id}.decryptor`}
+            onChange={(e) => {
+              const v = e.target.value
+              save({ decryptor: v === 'auto' || v === 'none' ? v : Number(v) })
+            }}
+          >
+            <option value="auto">automatic (lowest total cost)</option>
+            <option value="none">none</option>
+            {bp.invention.options
+              .filter((o) => o.decryptor_type_id != null)
+              .map((o) => (
+                <option key={o.decryptor_type_id} value={String(o.decryptor_type_id)}>
+                  {o.name}
+                </option>
+              ))}
+          </Select>
+        </label>
+      ) : null}
+    </div>
   )
 }
 
@@ -245,11 +323,10 @@ function toChoiceIO(c: BlueprintChoice): ChoiceIO {
 
 function PurchasePanel({ plan, bp }: { plan: PlanOut; bp: BlueprintPlan }) {
   const opts = useBlueprintOptions(plan.id, bp.type_id, true)
-  const { edit } = usePlanMutations()
+  const { setChoice } = usePlanMutations()
   const current = storedChoice(plan, bp.type_id)
   const [price, setPrice] = useState(current.bpc_price != null ? String(current.bpc_price) : '')
-  const save = (choice: ChoiceIO) =>
-    edit.mutate({ id: plan.id, body: { choices: { ...(plan.choices as Record<string, ChoiceIO>), [String(bp.type_id)]: choice } } })
+  const save = (choice: ChoiceIO) => setChoice.mutate({ id: plan.id, blueprintId: bp.type_id, choice })
   const buyingNow = (current.buy_bpcs ?? 0) > 0 || (current.extra_bpos ?? 0) > 0
   const apply = (o: PurchaseOption) => {
     const choice = toChoiceIO(o.choice)
@@ -338,8 +415,9 @@ export function ScheduleTab({ data, lookups }: { data: PlanResultOut; lookups: L
                 {j.copies > 1 ? <span className="text-muted"> × {j.copies} copies</span> : null}
               </td>
               <Num>{qty(j.runs)}</Num>
-              <td title={j.schedule.reason.text}>
-                {j.schedule.character_id != null ? (lookups.characters.get(j.schedule.character_id) ?? j.schedule.character_id) : <span className="text-bad">nobody</span>}
+              <td className="max-w-80">
+                <div>{j.schedule.character_id != null ? (lookups.characters.get(j.schedule.character_id) ?? j.schedule.character_id) : <span className="text-bad">nobody</span>}</div>
+                <Why text={j.schedule.reason.text} />
               </td>
               <td className="text-muted">{j.station_id != null ? lookups.stations.get(j.station_id) : ''}</td>
             </tr>
@@ -351,6 +429,88 @@ export function ScheduleTab({ data, lookups }: { data: PlanResultOut; lookups: L
 }
 
 // --- cost ----------------------------------------------------------------------------------
+
+// --- items ---------------------------------------------------------------------------------
+
+/** Every item in the merged tree: built or bought and why, how much is needed, on hand, made
+ * and left over. Each built or blacklisted item can be flipped for this plan only. */
+export function ItemsTab({ data, plan }: { data: PlanResultOut; plan: PlanOut }) {
+  const r = data.result!
+  const { setItemRule } = usePlanMutations()
+  const buyHere = new Set(plan.blacklist_add)
+  const buildHere = new Set(plan.blacklist_remove)
+  const lines = new Set(plan.lines.map((l) => l.type_id))
+  const items = [...r.items].sort((a, b) => Number(lines.has(b.type_id)) - Number(lines.has(a.type_id)) || a.decision.localeCompare(b.decision) || a.name.localeCompare(b.name))
+  const set = (typeId: number, mode: 'buy' | 'build' | 'default') => setItemRule.mutate({ id: plan.id, typeId, mode })
+  return (
+    <Panel title={`Items · ${r.items.length}`} testId="plan.items" flush>
+      <Table hover>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Decision</th>
+            <th className="text-right" title="plan lines plus what the plan's jobs consume">
+              Needed
+            </th>
+            <th className="text-right" title="from hangars in this plan's scope">
+              On hand
+            </th>
+            <th className="text-right" title="covered by jobs already running for this plan">
+              Started
+            </th>
+            <th className="text-right">Made</th>
+            <th className="text-right" title="made beyond what is needed (whole runs)">
+              Left over
+            </th>
+            <th className="text-right">To buy</th>
+            <th>This plan</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((i) => {
+            const isLine = lines.has(i.type_id)
+            const override = buyHere.has(i.type_id) ? 'buy' : buildHere.has(i.type_id) ? 'build' : null
+            return (
+              <tr key={i.type_id} data-testid={`plan.item.${i.type_id}`} className="align-top">
+                <td>
+                  {i.name}
+                  {isLine ? <span className="text-label text-muted"> · plan line</span> : null}
+                </td>
+                <td className="max-w-80">
+                  <Badge tone={i.decision === 'build' ? 'build' : 'muted'}>{i.decision}</Badge>
+                  <div>
+                    <Why text={i.reason.text} />
+                  </div>
+                </td>
+                <Num>{qty(i.line_quantity + i.input_quantity)}</Num>
+                <Num className="text-muted">{i.on_hand_used ? qty(i.on_hand_used) : ''}</Num>
+                <Num className="text-muted">{i.started ? qty(i.started) : ''}</Num>
+                <Num>{i.produced ? qty(i.produced) : ''}</Num>
+                <Num className={i.surplus ? 'text-warn' : 'text-muted'}>{i.surplus ? qty(i.surplus) : ''}</Num>
+                <Num>{i.to_buy ? qty(i.to_buy) : ''}</Num>
+                <td>
+                  {override ? (
+                    <Button small variant="ghost" testId={`plan.item.${i.type_id}.default`} onClick={() => set(i.type_id, 'default')} title="follow the account's build rules again">
+                      Undo {override}
+                    </Button>
+                  ) : isLine ? null : i.decision === 'build' ? (
+                    <Button small variant="ghost" testId={`plan.item.${i.type_id}.buy`} onClick={() => set(i.type_id, 'buy')} title="buy this item instead of building it, in this plan only">
+                      Buy here
+                    </Button>
+                  ) : i.reason.code === 'buy_blacklist' ? (
+                    <Button small variant="ghost" testId={`plan.item.${i.type_id}.build`} onClick={() => set(i.type_id, 'build')} title="build this item although the account blacklist buys it, in this plan only">
+                      Build here
+                    </Button>
+                  ) : null}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </Table>
+    </Panel>
+  )
+}
 
 export function CostTab({ data }: { data: PlanResultOut }) {
   const r = data.result!

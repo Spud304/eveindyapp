@@ -143,26 +143,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/plan/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview
-         * @description Run the engine on the account's data without saving a plan.
-         */
-        post: operations["apps_planning_api_preview"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/plans/shared-with-me": {
         parameters: {
             query?: never;
@@ -325,7 +305,8 @@ export interface paths {
         /**
          * Blueprint Options
          * @description What buying BPCs or an extra BPO for one blueprint would save and cost: the plan run
-         *     again with each purchase. One plan run per candidate, so only on request.
+         *     again with each purchase. One plan run per candidate, so only on request. Priced like the
+         *     plan result, so the cost changes match the Cost tab.
          */
         get: operations["apps_planning_plans_api_blueprint_options"];
         put?: never;
@@ -701,6 +682,8 @@ export interface components {
             facility_tax: number;
             /** Tax Confirmed */
             tax_confirmed: boolean;
+            /** Reprocessing Tax */
+            reprocessing_tax: number;
             /** Enabled */
             enabled: boolean;
             /** Source */
@@ -762,6 +745,8 @@ export interface components {
             activities?: components["schemas"]["Activity"][] | null;
             /** Facility Tax */
             facility_tax?: number | null;
+            /** Reprocessing Tax */
+            reprocessing_tax?: number | null;
             /** Enabled */
             enabled?: boolean | null;
         };
@@ -784,332 +769,6 @@ export interface components {
              * @default []
              */
             buy_categories: components["schemas"]["BuildCategory"][];
-        };
-        /**
-         * BlueprintPlan
-         * @description One blueprint used by the plan, with the decisions behind its jobs.
-         */
-        BlueprintPlan: {
-            /** Type Id */
-            type_id: number;
-            /** Name */
-            name: string;
-            activity: components["schemas"]["Activity"];
-            /** Product Type Id */
-            product_type_id: number;
-            /** Runs */
-            runs: number;
-            /** Sources */
-            sources: components["schemas"]["BlueprintSource"][];
-            source_reason: components["schemas"]["Reason"];
-            station: components["schemas"]["StationChoice"];
-            /** Job Ids */
-            job_ids: string[];
-            invention?: components["schemas"]["InventionPlan"] | null;
-        };
-        /**
-         * BlueprintSource
-         * @enum {string}
-         */
-        BlueprintSource: "bpo" | "bpc" | "copy" | "bought" | "invention" | "missing";
-        /** CostSummary */
-        CostSummary: {
-            /** Materials */
-            materials: number;
-            /** Invention Inputs */
-            invention_inputs: number;
-            /** Job Fees */
-            job_fees: {
-                [key: string]: number;
-            };
-            /** Blueprints */
-            blueprints: number;
-            /** Total */
-            total: number;
-            /** Unpriced Type Ids */
-            unpriced_type_ids: number[];
-        };
-        /** DecryptorOption */
-        DecryptorOption: {
-            /** Decryptor Type Id */
-            decryptor_type_id: number | null;
-            /** Name */
-            name: string;
-            /** Probability */
-            probability: number;
-            /** Me */
-            me: number;
-            /** Te */
-            te: number;
-            /** Runs Per Bpc */
-            runs_per_bpc: number;
-            /** Bpcs Needed */
-            bpcs_needed: number;
-            /** Attempts */
-            attempts: number;
-            /** Invention Input Cost */
-            invention_input_cost: number;
-            /** Material Cost */
-            material_cost: number;
-            /** Total Cost */
-            total_cost: number;
-        };
-        /** InventionPlan */
-        InventionPlan: {
-            /** T1 Blueprint Type Id */
-            t1_blueprint_type_id: number;
-            /** Decryptor Type Id */
-            decryptor_type_id: number | null;
-            reason: components["schemas"]["Reason"];
-            /** Probability */
-            probability: number;
-            probability_reason: components["schemas"]["Reason"];
-            /** Runs Per Bpc */
-            runs_per_bpc: number;
-            /** Bpcs Needed */
-            bpcs_needed: number;
-            /** Attempts */
-            attempts: number;
-            /** Options */
-            options: components["schemas"]["DecryptorOption"][];
-            /**
-             * Attempts In Progress
-             * @default 0
-             */
-            attempts_in_progress: number;
-        };
-        /**
-         * ItemDecision
-         * @enum {string}
-         */
-        ItemDecision: "build" | "buy";
-        /**
-         * ItemPlan
-         * @description One item anywhere in the merged tree.
-         */
-        ItemPlan: {
-            /** Type Id */
-            type_id: number;
-            /** Name */
-            name: string;
-            decision: components["schemas"]["ItemDecision"];
-            reason: components["schemas"]["Reason"];
-            /** Line Quantity */
-            line_quantity: number;
-            /** Input Quantity */
-            input_quantity: number;
-            /** On Hand Used */
-            on_hand_used: number;
-            /** Produced */
-            produced: number;
-            /** Surplus */
-            surplus: number;
-            /** To Buy */
-            to_buy: number;
-            /** Blueprint Type Id */
-            blueprint_type_id?: number | null;
-            build_category?: components["schemas"]["BuildCategory"] | null;
-            /**
-             * Started
-             * @default 0
-             */
-            started: number;
-            /**
-             * Over Plan
-             * @default 0
-             */
-            over_plan: number;
-        };
-        /**
-         * JobCost
-         * @description Install cost split as the game splits it. Each part is rounded to whole ISK.
-         *     `base` is EIV x runs (x 2% for copying and invention); the parts are fractions of it.
-         */
-        JobCost: {
-            /** Estimated Item Value */
-            estimated_item_value: number;
-            /** Fee */
-            fee: number | null;
-            reason: components["schemas"]["Reason"];
-            /**
-             * Base
-             * @default 0
-             */
-            base: number;
-            /**
-             * Job Cost
-             * @default 0
-             */
-            job_cost: number;
-            /**
-             * Facility Tax
-             * @default 0
-             */
-            facility_tax: number;
-            /**
-             * Scc Surcharge
-             * @default 0
-             */
-            scc_surcharge: number;
-            /**
-             * Security Tax
-             * @default 0
-             */
-            security_tax: number;
-        };
-        /** Material */
-        Material: {
-            /** Type Id */
-            type_id: number;
-            /** Quantity */
-            quantity: number;
-        };
-        /** PlanResult */
-        PlanResult: {
-            /** Items */
-            items: components["schemas"]["ItemPlan"][];
-            /** Blueprints */
-            blueprints: components["schemas"]["BlueprintPlan"][];
-            /** Jobs */
-            jobs: components["schemas"]["PlannedJob"][];
-            /** Shopping List */
-            shopping_list: components["schemas"]["ShoppingItem"][];
-            costs: components["schemas"]["CostSummary"];
-            /** Total Seconds */
-            total_seconds: number;
-            /** Warnings */
-            warnings: components["schemas"]["PlanWarning"][];
-        };
-        /** PlanWarning */
-        PlanWarning: {
-            code: components["schemas"]["ReasonCode"];
-            /** Text */
-            text: string;
-        };
-        /** PlannedJob */
-        PlannedJob: {
-            /** Job Id */
-            job_id: string;
-            activity: components["schemas"]["Activity"];
-            /** Blueprint Type Id */
-            blueprint_type_id: number;
-            /** Runs */
-            runs: number;
-            /** Me */
-            me: number;
-            /** Te */
-            te: number;
-            me_reason: components["schemas"]["Reason"];
-            source: components["schemas"]["BlueprintSource"];
-            /** Station Id */
-            station_id: number | null;
-            /** Materials */
-            materials: components["schemas"]["Material"][];
-            /** Product Type Id */
-            product_type_id: number | null;
-            /** Product Quantity */
-            product_quantity: number;
-            /** Depends On */
-            depends_on: string[];
-            cost: components["schemas"]["JobCost"];
-            schedule: components["schemas"]["ScheduledSlot"];
-            /**
-             * Copies
-             * @default 0
-             */
-            copies: number;
-        };
-        /**
-         * Reason
-         * @description Why a derived value is what it is. `code` is stable for code and
-         *     tests; `text` is the human-readable sentence the UI shows.
-         */
-        Reason: {
-            code: components["schemas"]["ReasonCode"];
-            /** Text */
-            text: string;
-        };
-        /**
-         * ReasonCode
-         * @enum {string}
-         */
-        ReasonCode: "plan_line" | "build_component" | "buy_no_blueprint" | "buy_blacklist" | "buy_rule" | "buy_invention_input" | "buy_blueprint" | "line_not_buildable" | "me_override" | "me_owned_bpo" | "me_owned_bpc" | "me_bought" | "me_invented" | "me_reaction" | "me_missing_blueprint" | "source_bpo" | "source_bpc" | "source_copy" | "source_bought" | "source_invention" | "source_missing" | "station_best" | "station_none" | "decryptor_chosen" | "decryptor_auto" | "scheduled" | "unscheduled_no_character" | "fee_computed" | "fee_not_modelled" | "price_missing";
-        /** ScheduledSlot */
-        ScheduledSlot: {
-            /** Character Id */
-            character_id: number | null;
-            /** Start Seconds */
-            start_seconds: number;
-            /** End Seconds */
-            end_seconds: number;
-            reason: components["schemas"]["Reason"];
-        };
-        /** ShoppingItem */
-        ShoppingItem: {
-            /** Type Id */
-            type_id: number;
-            /** Name */
-            name: string;
-            /** Quantity */
-            quantity: number;
-            /** Unit Price */
-            unit_price: number | null;
-            /** Total Price */
-            total_price: number | null;
-            reason: components["schemas"]["Reason"];
-            /**
-             * Volume
-             * @default 0
-             */
-            volume: number;
-            /**
-             * Price Source
-             * @default average
-             */
-            price_source: string;
-            /** On Sale */
-            on_sale?: number | null;
-        };
-        /** StationChoice */
-        StationChoice: {
-            /** Station Id */
-            station_id: number | null;
-            /** Me Percent */
-            me_percent: number;
-            /** Time Multiplier */
-            time_multiplier: number;
-            reason: components["schemas"]["Reason"];
-        };
-        /** ChoiceIn */
-        ChoiceIn: {
-            /** Blueprint Type Id */
-            blueprint_type_id: number;
-            /** Me Override */
-            me_override?: number | null;
-            /** Te Override */
-            te_override?: number | null;
-            /**
-             * Decryptor
-             * @default auto
-             */
-            decryptor: number | string;
-        };
-        /** LineIn */
-        LineIn: {
-            /** Type Id */
-            type_id: number;
-            /** Quantity */
-            quantity: number;
-        };
-        /** PreviewIn */
-        PreviewIn: {
-            /** Lines */
-            lines: components["schemas"]["LineIn"][];
-            /**
-             * Choices
-             * @default []
-             */
-            choices: components["schemas"]["ChoiceIn"][];
         };
         /** SharedSummary */
         SharedSummary: {
@@ -1333,6 +992,75 @@ export interface components {
          * @enum {string}
          */
         Visibility: "private" | "corp" | "link";
+        /**
+         * BlueprintPlan
+         * @description One blueprint used by the plan, with the decisions behind its jobs.
+         */
+        BlueprintPlan: {
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            activity: components["schemas"]["Activity"];
+            /** Product Type Id */
+            product_type_id: number;
+            /** Runs */
+            runs: number;
+            /** Sources */
+            sources: components["schemas"]["BlueprintSource"][];
+            source_reason: components["schemas"]["Reason"];
+            station: components["schemas"]["StationChoice"];
+            /** Job Ids */
+            job_ids: string[];
+            invention?: components["schemas"]["InventionPlan"] | null;
+        };
+        /**
+         * BlueprintSource
+         * @enum {string}
+         */
+        BlueprintSource: "bpo" | "bpc" | "copy" | "bought" | "invention" | "missing";
+        /** CostSummary */
+        CostSummary: {
+            /** Materials */
+            materials: number;
+            /** Invention Inputs */
+            invention_inputs: number;
+            /** Job Fees */
+            job_fees: {
+                [key: string]: number;
+            };
+            /** Blueprints */
+            blueprints: number;
+            /** Total */
+            total: number;
+            /** Unpriced Type Ids */
+            unpriced_type_ids: number[];
+        };
+        /** DecryptorOption */
+        DecryptorOption: {
+            /** Decryptor Type Id */
+            decryptor_type_id: number | null;
+            /** Name */
+            name: string;
+            /** Probability */
+            probability: number;
+            /** Me */
+            me: number;
+            /** Te */
+            te: number;
+            /** Runs Per Bpc */
+            runs_per_bpc: number;
+            /** Bpcs Needed */
+            bpcs_needed: number;
+            /** Attempts */
+            attempts: number;
+            /** Invention Input Cost */
+            invention_input_cost: number;
+            /** Material Cost */
+            material_cost: number;
+            /** Total Cost */
+            total_cost: number;
+        };
         /** EffectiveRulesOut */
         EffectiveRulesOut: {
             /** Item Blacklist */
@@ -1340,6 +1068,22 @@ export interface components {
             /** Buy Categories */
             buy_categories: components["schemas"]["BuildCategory"][];
             overrides: components["schemas"]["RuleOverridesOut"];
+        };
+        /** FeedProblemOut */
+        FeedProblemOut: {
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "bad" | "warn";
+            /** Owner Name */
+            owner_name: string;
+            /** Feed */
+            feed: string;
+            /** Fetched At */
+            fetched_at: string | null;
+            /** Text */
+            text: string;
         };
         /** HolderOut */
         HolderOut: {
@@ -1349,6 +1093,144 @@ export interface components {
             plan_name: string;
             /** Quantity */
             quantity: number;
+        };
+        /**
+         * InputsHealthOut
+         * @description How old the ESI data behind this result is: the oldest last sync of the skills, assets,
+         *     blueprints and jobs it read (None if one never synced), and every feed that failed or is
+         *     older than its sync interval allows.
+         */
+        InputsHealthOut: {
+            /** As Of */
+            as_of: string | null;
+            /** Problems */
+            problems: components["schemas"]["FeedProblemOut"][];
+        };
+        /** InventionPlan */
+        InventionPlan: {
+            /** T1 Blueprint Type Id */
+            t1_blueprint_type_id: number;
+            /** Decryptor Type Id */
+            decryptor_type_id: number | null;
+            reason: components["schemas"]["Reason"];
+            /** Probability */
+            probability: number;
+            probability_reason: components["schemas"]["Reason"];
+            /** Runs Per Bpc */
+            runs_per_bpc: number;
+            /** Bpcs Needed */
+            bpcs_needed: number;
+            /** Attempts */
+            attempts: number;
+            /** Options */
+            options: components["schemas"]["DecryptorOption"][];
+            /**
+             * Attempts In Progress
+             * @default 0
+             */
+            attempts_in_progress: number;
+        };
+        /**
+         * ItemDecision
+         * @enum {string}
+         */
+        ItemDecision: "build" | "buy";
+        /**
+         * ItemPlan
+         * @description One item anywhere in the merged tree.
+         */
+        ItemPlan: {
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            decision: components["schemas"]["ItemDecision"];
+            reason: components["schemas"]["Reason"];
+            /** Line Quantity */
+            line_quantity: number;
+            /** Input Quantity */
+            input_quantity: number;
+            /** On Hand Used */
+            on_hand_used: number;
+            /** Produced */
+            produced: number;
+            /** Surplus */
+            surplus: number;
+            /** To Buy */
+            to_buy: number;
+            /** Blueprint Type Id */
+            blueprint_type_id?: number | null;
+            build_category?: components["schemas"]["BuildCategory"] | null;
+            /**
+             * Started
+             * @default 0
+             */
+            started: number;
+            /**
+             * Over Plan
+             * @default 0
+             */
+            over_plan: number;
+        };
+        /**
+         * JobCost
+         * @description Install cost split as the game splits it. Each part is rounded to whole ISK.
+         *     `base` is EIV x runs (x 2% for copying and invention); the parts are fractions of it.
+         */
+        JobCost: {
+            /** Estimated Item Value */
+            estimated_item_value: number;
+            /** Fee */
+            fee: number | null;
+            reason: components["schemas"]["Reason"];
+            /**
+             * Base
+             * @default 0
+             */
+            base: number;
+            /**
+             * Job Cost
+             * @default 0
+             */
+            job_cost: number;
+            /**
+             * Facility Tax
+             * @default 0
+             */
+            facility_tax: number;
+            /**
+             * Scc Surcharge
+             * @default 0
+             */
+            scc_surcharge: number;
+            /**
+             * Security Tax
+             * @default 0
+             */
+            security_tax: number;
+        };
+        /** Material */
+        Material: {
+            /** Type Id */
+            type_id: number;
+            /** Quantity */
+            quantity: number;
+        };
+        /** PlanResult */
+        PlanResult: {
+            /** Items */
+            items: components["schemas"]["ItemPlan"][];
+            /** Blueprints */
+            blueprints: components["schemas"]["BlueprintPlan"][];
+            /** Jobs */
+            jobs: components["schemas"]["PlannedJob"][];
+            /** Shopping List */
+            shopping_list: components["schemas"]["ShoppingItem"][];
+            costs: components["schemas"]["CostSummary"];
+            /** Total Seconds */
+            total_seconds: number;
+            /** Warnings */
+            warnings: components["schemas"]["PlanWarning"][];
         };
         /** PlanResultOut */
         PlanResultOut: {
@@ -1370,7 +1252,64 @@ export interface components {
             result: components["schemas"]["PlanResult"] | null;
             effective_rules: components["schemas"]["EffectiveRulesOut"];
             reservation: components["schemas"]["ReservationOut"];
+            inputs: components["schemas"]["InputsHealthOut"];
         };
+        /** PlanWarning */
+        PlanWarning: {
+            code: components["schemas"]["ReasonCode"];
+            /** Text */
+            text: string;
+        };
+        /** PlannedJob */
+        PlannedJob: {
+            /** Job Id */
+            job_id: string;
+            activity: components["schemas"]["Activity"];
+            /** Blueprint Type Id */
+            blueprint_type_id: number;
+            /** Runs */
+            runs: number;
+            /** Me */
+            me: number;
+            /** Te */
+            te: number;
+            me_reason: components["schemas"]["Reason"];
+            source: components["schemas"]["BlueprintSource"];
+            /** Station Id */
+            station_id: number | null;
+            /** Materials */
+            materials: components["schemas"]["Material"][];
+            /** Product Type Id */
+            product_type_id: number | null;
+            /** Product Quantity */
+            product_quantity: number;
+            /** Depends On */
+            depends_on: string[];
+            cost: components["schemas"]["JobCost"];
+            schedule: components["schemas"]["ScheduledSlot"];
+            /**
+             * Copies
+             * @default 0
+             */
+            copies: number;
+            /** Blueprint Item Id */
+            blueprint_item_id?: number | null;
+        };
+        /**
+         * Reason
+         * @description Why a derived value is what it is. `code` is stable for code and
+         *     tests; `text` is the human-readable sentence the UI shows.
+         */
+        Reason: {
+            code: components["schemas"]["ReasonCode"];
+            /** Text */
+            text: string;
+        };
+        /**
+         * ReasonCode
+         * @enum {string}
+         */
+        ReasonCode: "plan_line" | "build_component" | "buy_no_blueprint" | "buy_blacklist" | "buy_rule" | "buy_invention_input" | "buy_blueprint" | "line_not_buildable" | "me_override" | "me_owned_bpo" | "me_owned_bpc" | "me_bought" | "me_invented" | "me_reaction" | "me_missing_blueprint" | "source_bpo" | "source_bpc" | "source_copy" | "source_bought" | "source_invention" | "source_missing" | "station_best" | "station_none" | "decryptor_chosen" | "decryptor_auto" | "scheduled" | "unscheduled_no_character" | "fee_computed" | "fee_not_modelled" | "price_missing";
         /** ReservationOut */
         ReservationOut: {
             /** Reserves */
@@ -1394,6 +1333,52 @@ export interface components {
             categories: {
                 [key: string]: string;
             };
+        };
+        /** ScheduledSlot */
+        ScheduledSlot: {
+            /** Character Id */
+            character_id: number | null;
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+            reason: components["schemas"]["Reason"];
+        };
+        /** ShoppingItem */
+        ShoppingItem: {
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            /** Quantity */
+            quantity: number;
+            /** Unit Price */
+            unit_price: number | null;
+            /** Total Price */
+            total_price: number | null;
+            reason: components["schemas"]["Reason"];
+            /**
+             * Volume
+             * @default 0
+             */
+            volume: number;
+            /**
+             * Price Source
+             * @default average
+             */
+            price_source: string;
+            /** On Sale */
+            on_sale?: number | null;
+        };
+        /** StationChoice */
+        StationChoice: {
+            /** Station Id */
+            station_id: number | null;
+            /** Me Percent */
+            me_percent: number;
+            /** Time Multiplier */
+            time_multiplier: number;
+            reason: components["schemas"]["Reason"];
         };
         /**
          * BlueprintChoice
@@ -1744,6 +1729,11 @@ export interface components {
             top_price?: number | null;
             /** On Sale */
             on_sale?: number | null;
+            /**
+             * Tax
+             * @default 0
+             */
+            tax: number;
         };
         /** OreMix */
         OreMix: {
@@ -2191,30 +2181,6 @@ export interface operations {
             };
         };
     };
-    apps_planning_api_preview: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PreviewIn"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PlanResult"];
-                };
-            };
-        };
-    };
     apps_planning_plans_api_shared_with_me: {
         parameters: {
             query?: never;
@@ -2463,7 +2429,9 @@ export interface operations {
     };
     apps_planning_plans_api_blueprint_options: {
         parameters: {
-            query?: never;
+            query?: {
+                prices?: "jita" | "average";
+            };
             header?: never;
             path: {
                 plan_id: number;

@@ -38,6 +38,82 @@ def test_create_plan_add_line_and_see_the_shopping_list(login):
     assert 2 * one - 1 <= two <= 2 * one
 
 
+def test_quick_line_edits_build_on_each_other(login):
+    """A second edit made while the first is saving starts from the first, not from the
+    lines the server last sent."""
+    s = login()
+    s.add_station()
+    plan = s.add_plan(uniq("quick"), [(RIFTER, 1)])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    qty = by_test_id(page, f"plan.line.{RIFTER}.qty")
+    expect(qty).to_have_value("1")
+    qty.fill("3")
+    qty.press("Enter")
+    pick(page, "plan.add-line", "Rifter", "Rifter")  # raises the Rifter line by one
+    expect(qty).to_have_value("4")
+    page.reload()
+    expect(by_test_id(page, f"plan.line.{RIFTER}.qty")).to_have_value("4")
+
+
+def test_copy_waits_for_the_recompute(login):
+    s = login()
+    s.add_station()
+    plan = s.add_plan(uniq("copy"), [(RIFTER, 1)])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    copy = by_test_id(page, "plan.shopping.copy")
+    expect(copy).to_be_enabled()
+    expect(by_test_id(page, "plan.data-age")).to_be_visible()
+    qty = by_test_id(page, f"plan.line.{RIFTER}.qty")
+    qty.fill("2")
+    qty.press("Enter")
+    # Disabled while the old list is on screen, enabled again with the new one.
+    expect(by_test_id(page, "plan.main")).to_have_attribute("data-stale", "false")
+    expect(copy).to_be_enabled()
+
+
+PACKRAT, TRACTOR_BEAM = 33700, 24348  # 'Packrat' Mobile Tractor Unit uses a Small Tractor Beam I
+
+
+def test_items_tab_flips_one_item_for_this_plan(login):
+    s = login()
+    s.add_station()
+    plan = s.add_plan(uniq("items"), [(PACKRAT, 1)])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    by_test_id(page, "plan.tabs.items").click()
+    beam = by_test_id(page, f"plan.item.{TRACTOR_BEAM}")
+    expect(beam).to_contain_text("build")
+    expect(by_test_id(page, f"plan.item.{PACKRAT}")).to_contain_text("plan line")
+
+    by_test_id(page, f"plan.item.{TRACTOR_BEAM}.buy").click()
+    expect(beam).to_contain_text("buy")
+    expect(by_test_id(page, f"plan.item.{TRACTOR_BEAM}.default")).to_have_text("Undo buy")
+    by_test_id(page, "plan.tabs.shopping").click()
+    expect(by_test_id(page, f"plan.shopping.{TRACTOR_BEAM}")).to_be_visible()
+
+    by_test_id(page, "plan.tabs.items").click()
+    by_test_id(page, f"plan.item.{TRACTOR_BEAM}.default").click()
+    expect(beam).to_contain_text("build")
+
+
+def test_blueprint_me_override(login):
+    s = login()
+    s.add_station()
+    plan = s.add_plan(uniq("me"), [(RIFTER, 1)])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    by_test_id(page, "plan.tabs.blueprints").click()
+    row = by_test_id(page, f"plan.blueprint.{RIFTER_BP}")
+    expect(row).to_contain_text("0 / 0")
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.adjust").click()
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.me").fill("10")
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.te").fill("20")
+    by_test_id(page, f"plan.blueprint.{RIFTER_BP}.save-me").click()
+    expect(row).to_contain_text("10 / 20")
+
+
 def test_tabs_show_reasons(login):
     s = login()
     s.add_station(name="PW Azbel")
