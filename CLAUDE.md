@@ -21,7 +21,7 @@ Dev setup:
 Build order steps 0–7 are done, and step 8's compressed ore calculator; each has a "Step N progress" section in `docs/redesign.md` with what was built, verified and left open. A seven-reviewer panel review (2026-11-03) and its follow-up are done: `docs/reviews/2026-11-03-panel-review/` and "Panel review follow-up" in `docs/redesign.md`. Plan results, shared views and the ore calculator price from Jita 4-4 sell orders (`apps/esidata/market.py`, `engine/pricing.py`); tests stub the market (`no_market` fixture in `tests/planning/conftest.py`). The Flask app is removed and the production stack (Caddy + frontend, web, worker, scheduler, Postgres, Redis) was checked locally; see "Deployment" in `docs/redesign.md`. The user runs it on localhost only for now (decided 2026-11-04); other users would run their own copy, not share one site (decided 2026-11-04).
 
 Open from the review:
-- Not yet run on real data: `manage.py rekey_tokens` (stored tokens still use the key derived from the default `SECRET_KEY`) and `make backup` (decision D4: do both).
+- Tokens were re-keyed on 2026-11-04: `backend/.env` holds `SECRET_KEY` and `TOKEN_ENCRYPTION_KEY`, and the stored tokens decrypt only with them. Losing that file means re-linking every character, so `make backup` copies it with the database dump (into `~/eveindy-backups`).
 - Waiting on the owner: whether an item keeps its `item_id` moving to a corp hangar (DATA-2), contact details for the ESI User-Agent, and how a self-hosted copy limits signup.
 
 Open from steps 6–7:
