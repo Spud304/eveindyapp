@@ -77,6 +77,40 @@ def test_network_failures_become_sso_errors(monkeypatch, settings):
     cache.clear()
 
 
+@pytest.mark.parametrize(
+    ("status", "body", "rejected"),
+    [
+        (400, {"error": "invalid_grant"}, True),
+        (401, {"error": "invalid_token"}, True),
+        (401, {"error": "invalid_client"}, False),  # this app's secret, not the token
+        (401, {}, False),
+        (500, {}, False),
+    ],
+)
+def test_only_a_bad_refresh_token_counts_as_rejected(monkeypatch, status, body, rejected):
+    import httpx
+    from django.core.cache import cache
+
+    cache.set(
+        sso.DISCOVERY_CACHE_KEY,
+        {
+            "authorization_endpoint": "a",
+            "token_endpoint": "https://sso.test/token",
+            "jwks_uri": "j",
+        },
+        60,
+    )
+    monkeypatch.setattr(
+        sso.httpx,
+        "post",
+        lambda *a, **kw: httpx.Response(status, json=body, request=httpx.Request("POST", a[0])),
+    )
+    with pytest.raises(sso.SsoError) as exc:
+        sso.refresh_tokens("r")
+    assert isinstance(exc.value, sso.SsoTokenRejected) is rejected
+    cache.clear()
+
+
 @pytest.mark.django_db
 def test_login_page_explains_an_unreachable_sso(client, settings, monkeypatch):
     settings.EVE_CLIENT_ID = "client"

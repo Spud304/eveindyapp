@@ -118,6 +118,11 @@ class Asset(models.Model):
 
     class Meta:
         db_table = "esidata_asset"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner_kind", "owner_id", "item_id"], name="esidata_asset_owner_item"
+            )
+        ]
         indexes = [
             models.Index(
                 fields=["owner_kind", "owner_id", "type_id"], name="esidata_asset_owner_type"
@@ -145,6 +150,11 @@ class BlueprintItem(models.Model):
 
     class Meta:
         db_table = "esidata_blueprint"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner_kind", "owner_id", "item_id"], name="esidata_bp_owner_item"
+            )
+        ]
         indexes = [
             models.Index(
                 fields=["owner_kind", "owner_id", "type_id"], name="esidata_bp_owner_type"

@@ -11,7 +11,14 @@ from .sync import CORP_FEEDS
 def readable_corp_feeds(user: User) -> dict[int, set[Feed]]:
     """corporation_id -> feeds this account may read."""
     out: dict[int, set[Feed]] = {}
-    for r in CharacterRoles.objects.filter(character__user=user).select_related("character"):
+    # Only characters with a working token count: a revoked or rejected token, or a transfer
+    # (which drops the token), ends access instead of leaving the last roles in force.
+    rows = CharacterRoles.objects.filter(
+        character__user=user,
+        character__esi_token__isnull=False,
+        character__esi_token__refresh_failed_at__isnull=True,
+    ).select_related("character")
+    for r in rows:
         if r.corporation_id is None or r.corporation_id != r.character.corporation_id:
             continue  # roles are from a corp the character has since left
         for cf in CORP_FEEDS:

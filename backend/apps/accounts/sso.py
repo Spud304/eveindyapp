@@ -23,6 +23,11 @@ class SsoError(Exception):
     pass
 
 
+def _headers() -> dict[str, str]:
+    """The same User-Agent as ESI calls, so CCP can tell this app's SSO traffic apart."""
+    return {"User-Agent": settings.ESI_USER_AGENT}
+
+
 @dataclass(frozen=True)
 class SsoIdentity:
     character_id: int
@@ -36,7 +41,7 @@ def discovery() -> dict:
     if doc:
         return doc
     try:
-        resp = httpx.get(settings.EVE_SSO_DISCOVERY_URL, timeout=10)
+        resp = httpx.get(settings.EVE_SSO_DISCOVERY_URL, timeout=10, headers=_headers())
         resp.raise_for_status()
         doc = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
@@ -82,6 +87,7 @@ def exchange_code(*, code: str, code_verifier: str, redirect_uri: str) -> dict:
             },
             auth=(settings.EVE_CLIENT_ID, settings.EVE_CLIENT_SECRET),
             timeout=15,
+            headers=_headers(),
         )
     except httpx.HTTPError as exc:
         raise SsoError(f"token exchange failed: {exc}") from exc
@@ -109,6 +115,7 @@ def refresh_tokens(refresh_token: str) -> dict:
             data={"grant_type": "refresh_token", "refresh_token": refresh_token},
             auth=(settings.EVE_CLIENT_ID, settings.EVE_CLIENT_SECRET),
             timeout=15,
+            headers=_headers(),
         )
     except httpx.HTTPError as exc:
         raise SsoError(f"token refresh failed: {exc}") from exc
@@ -117,8 +124,11 @@ def refresh_tokens(refresh_token: str) -> dict:
             error = resp.json().get("error", "")
         except ValueError:
             error = ""
-        if error in ("invalid_grant", "invalid_token") or resp.status_code == 401:
-            raise SsoTokenRejected(f"refresh token rejected: {error or resp.status_code}")
+        # Only these say the refresh token itself is bad. Any other 400/401 (e.g.
+        # `invalid_client` from a wrong EVE_CLIENT_SECRET) is this app's problem, and marking
+        # every character's token as rejected would force relinking them all.
+        if error in ("invalid_grant", "invalid_token"):
+            raise SsoTokenRejected(f"refresh token rejected: {error}")
     if resp.status_code != 200:
         log.warning("sso token refresh failed: %s %s", resp.status_code, resp.text[:300])
         raise SsoError(f"token refresh failed: HTTP {resp.status_code}")
@@ -135,7 +145,7 @@ def _signing_key(token: str):
     jwks_uri = discovery()["jwks_uri"]
     client = _jwk_clients.get(jwks_uri)
     if client is None:
-        client = PyJWKClient(jwks_uri, cache_keys=True, lifespan=24 * 3600)
+        client = PyJWKClient(jwks_uri, cache_keys=True, lifespan=24 * 3600, headers=_headers())
         _jwk_clients[jwks_uri] = client
     return client.get_signing_key_from_jwt(token).key
 

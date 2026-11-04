@@ -10,12 +10,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from apps.accounts import tokens
 from apps.accounts.models import EveCharacter, User
+from apps.core.locks import transaction_lock
 from apps.esi.client import EsiClient, EsiError, get_client
 
 from .models import (
@@ -87,7 +88,9 @@ def _record(
     status.source_character = source
     try:
         status.rows = fetch()
-    except (EsiError, tokens.TokenUnavailable, FeedUnavailable) as exc:
+    # IntegrityError: the snapshot repeats an item id (the unique constraint on assets and
+    # blueprints); the old rows stay and the feed shows as failing.
+    except (EsiError, tokens.TokenUnavailable, FeedUnavailable, IntegrityError) as exc:
         status.ok = False
         status.error = str(exc)[:300]
         log.warning("%s %s %s failed: %s", kind, owner_id, feed, exc)
@@ -133,6 +136,7 @@ def _dt(value: str | None) -> datetime | None:
 def _write_assets(kind: str, owner_id: int, rows: list[dict]) -> int:
     where = resolve_locations(rows)
     with transaction.atomic():
+        transaction_lock(f"esidata:assets:{kind}:{owner_id}")
         Asset.objects.filter(owner_kind=kind, owner_id=owner_id).delete()
         Asset.objects.bulk_create(
             [
@@ -168,6 +172,7 @@ def _write_blueprints(kind: str, owner_id: int, rows: list[dict]) -> int:
         assets + [{k: r[k] for k in ("item_id", "location_id", "location_flag")} for r in rows]
     )
     with transaction.atomic():
+        transaction_lock(f"esidata:blueprints:{kind}:{owner_id}")
         BlueprintItem.objects.filter(owner_kind=kind, owner_id=owner_id).delete()
         BlueprintItem.objects.bulk_create(
             [
@@ -250,6 +255,7 @@ def sync_character(
         )
         rows = body.get("skills", [])
         with transaction.atomic():
+            transaction_lock(f"esidata:skills:{cid}")
             CharacterSkill.objects.filter(character=character).delete()
             CharacterSkill.objects.bulk_create(
                 [
@@ -394,6 +400,7 @@ def _corp_fetcher(cf: CorpFeed, corp_id: int, source: EveCharacter, client: EsiC
         corp = Corporation.objects.get(pk=corp_id)
         hangars = body.get("hangar", [])
         with transaction.atomic():
+            transaction_lock(f"esidata:divisions:{corp.pk}")
             CorpDivision.objects.filter(corporation=corp).delete()
             CorpDivision.objects.bulk_create(
                 [

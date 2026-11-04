@@ -1,6 +1,9 @@
+import threading
+
 import httpx
 import pytest
 from django.core.cache import cache
+from django.db import connection, transaction
 
 from apps.accounts import services, tokens
 from apps.accounts.models import EveCharacter
@@ -64,9 +67,11 @@ class FakeEsi:
             return httpx.Response(value[0], json=value[1])
         if isinstance(value, Pages):
             page = int(request.url.params.get("page", 1))
-            return httpx.Response(
-                200, json=value.pages[page - 1], headers={"X-Pages": str(len(value.pages))}
-            )
+            body = value.pages[page - 1]
+            headers = {"X-Pages": str(len(value.pages))}
+            if isinstance(body, tuple):  # (status, body): this page fails
+                return httpx.Response(body[0], json=body[1], headers=headers)
+            return httpx.Response(200, json=body, headers=headers)
         return httpx.Response(200, json=value)
 
 
@@ -280,6 +285,35 @@ def test_resync_replaces_assets_and_keeps_old_jobs():
     assert IndustryJob.objects.filter(pk=2).exists()  # dropped by ESI, kept here
 
 
+def test_failed_resync_keeps_the_previous_assets():
+    ch = linked()
+    routes = character_routes()
+    sync.sync_character(ch, client=client(routes)[0])
+    before = set(Asset.objects.filter(owner_id=MAIN).values_list("item_id", "quantity"))
+    assert before
+    routes[f"/characters/{MAIN}/assets/"] = (500, {"error": "boom"})
+    cache.clear()
+    statuses = {s.feed: s for s in sync.sync_character(ch, client=client(routes)[0])}
+    assert not statuses[Feed.ASSETS].ok and "500" in statuses[Feed.ASSETS].error
+    assert set(Asset.objects.filter(owner_id=MAIN).values_list("item_id", "quantity")) == before
+
+
+def test_corp_resync_failing_on_a_later_page_keeps_every_previous_row():
+    main = linked()
+    routes = {**character_routes(), **corp_routes()}
+    c, _ = client(routes)
+    sync.sync_character(main, client=c)
+    sync.sync_corporation(CORP, client=c)
+    corp_rows = Asset.objects.filter(owner_kind=OwnerKind.CORPORATION, owner_id=CORP)
+    before = set(corp_rows.values_list("item_id", "quantity"))
+    first_page = routes[f"/corporations/{CORP}/assets/"].pages[0]
+    routes[f"/corporations/{CORP}/assets/"] = Pages(first_page, (503, {"error": "busy"}))
+    cache.clear()
+    statuses = {s.feed: s for s in sync.sync_corporation(CORP, client=client(routes)[0])}
+    assert not statuses[Feed.ASSETS].ok
+    assert set(corp_rows.values_list("item_id", "quantity")) == before  # no half snapshot
+
+
 def test_failed_feed_is_recorded_and_others_still_run():
     ch = linked()
     routes = character_routes()
@@ -289,6 +323,76 @@ def test_failed_feed_is_recorded_and_others_still_run():
     assert statuses[Feed.SKILLS].ok and statuses[Feed.JOBS].ok
     status = FeedStatus.objects.get(owner_id=MAIN, feed=Feed.ASSETS)
     assert status.fetched_at is None and status.attempted_at is not None
+
+
+ASSET_ROWS = [
+    {
+        "item_id": i,
+        "type_id": 34,
+        "quantity": 100,
+        "location_id": STATION,
+        "location_type": "station",
+        "location_flag": "Hangar",
+        "is_singleton": False,
+    }
+    for i in range(1, 6)
+]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_overlapping_snapshot_writes_do_not_duplicate_rows():
+    """A "refresh now" sync writing an owner's assets while the cron sync's write is still
+    open: the second waits for the first and replaces its rows. Without the lock, the second
+    DELETE cannot see the first one's uncommitted rows and both inserts survive."""
+    errors = []
+
+    def second():
+        try:
+            sync._write_assets(OwnerKind.CORPORATION, CORP, ASSET_ROWS)
+        except Exception as exc:  # noqa: BLE001 - reported through the assertion below
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    with transaction.atomic():
+        sync._write_assets(OwnerKind.CORPORATION, CORP, ASSET_ROWS)
+        t = threading.Thread(target=second)
+        t.start()
+        t.join(timeout=1.0)
+        assert t.is_alive(), "the second writer should wait for the first transaction"
+    t.join()
+    assert errors == []
+    assert Asset.objects.filter(owner_kind=OwnerKind.CORPORATION, owner_id=CORP).count() == 5
+
+
+def test_snapshot_repeating_an_item_id_fails_the_feed_and_keeps_old_rows():
+    sync._write_assets(OwnerKind.CORPORATION, CORP, ASSET_ROWS)
+    repeated = ASSET_ROWS + [{**ASSET_ROWS[0], "quantity": 1}]
+    status = sync._record(
+        OwnerKind.CORPORATION,
+        CORP,
+        Feed.ASSETS,
+        lambda: sync._write_assets(OwnerKind.CORPORATION, CORP, repeated),
+    )
+    assert not status.ok and "esidata_asset_owner_item" in status.error
+    assert Asset.objects.filter(owner_kind=OwnerKind.CORPORATION, owner_id=CORP).count() == 5
+
+
+def test_sso_outage_is_a_feed_error_and_the_account_sync_goes_on(monkeypatch):
+    main = linked()
+    alt = linked(ALT, "Alt", user=main.user)
+
+    def down(character, *scopes):
+        if getattr(character, "pk", character) == MAIN:
+            raise tokens.TokenRefreshFailed("character 90000001: token refresh failed: HTTP 502")
+        return "tok"
+
+    monkeypatch.setattr(tokens, "access_token", down)
+    routes = {**character_routes(MAIN), **character_routes(ALT)}
+    sync.sync_account(main.user, client=client(routes)[0])
+    failed = FeedStatus.objects.get(owner_id=MAIN, feed=Feed.SKILLS)
+    assert not failed.ok and "HTTP 502" in failed.error
+    assert FeedStatus.objects.get(owner_id=alt.pk, feed=Feed.SKILLS).ok
 
 
 def test_missing_token_is_a_feed_error(monkeypatch):
@@ -388,4 +492,18 @@ def test_corp_data_readable_only_with_role_in_that_corp():
         Feed.JOBS,
     }
     EveCharacter.objects.filter(pk=MAIN).update(corporation_id=555)  # left the corp
+    assert access.readable_corp_feeds(main.user) == {}
+
+
+def test_corp_access_ends_when_the_token_does():
+    from django.utils import timezone
+
+    from apps.accounts.models import EsiToken
+
+    main = linked()
+    CharacterRoles.objects.create(character=main, corporation_id=CORP, roles=["Director"])
+    assert CORP in access.readable_corp_feeds(main.user)
+    EsiToken.objects.filter(pk=MAIN).update(refresh_failed_at=timezone.now())  # revoked
+    assert access.readable_corp_feeds(main.user) == {}
+    EsiToken.objects.filter(pk=MAIN).delete()  # transferred or unlinked
     assert access.readable_corp_feeds(main.user) == {}

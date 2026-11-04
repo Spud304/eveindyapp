@@ -1,9 +1,21 @@
 """Cross-process locks for jobs that must not overlap (cron and CLI share the same tables)."""
 
+import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 from django.db import connections
+
+
+def transaction_lock(name: str, *, using: str = "default") -> None:
+    """Wait for a Postgres advisory lock held until the current transaction ends. Call it
+    inside `transaction.atomic()`: writers that replace the same rows then run one after
+    another instead of interleaving their deletes and inserts."""
+    conn = connections[using]
+    if conn.vendor != "postgresql":
+        return
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_xact_lock(%s)", [zlib.crc32(name.encode())])
 
 
 @contextmanager

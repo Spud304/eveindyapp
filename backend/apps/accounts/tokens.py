@@ -22,6 +22,11 @@ class TokenUnavailable(Exception):
     """No usable token: never linked, missing scopes, or rejected by SSO."""
 
 
+class TokenRefreshFailed(TokenUnavailable):
+    """The refresh did not complete (SSO down, a bad answer, a client credential problem).
+    The token itself is kept; the next attempt tries again."""
+
+
 def access_token(character: EveCharacter | int, *scopes: str) -> str:
     character_id = character if isinstance(character, int) else character.character_id
     with transaction.atomic():
@@ -56,6 +61,9 @@ def access_token(character: EveCharacter | int, *scopes: str) -> str:
             token.save(update_fields=["refresh_failed_at", "refresh_error", "access_token"])
             log.warning("token for %s rejected: %s", token.character_id, exc)
             rejected = exc
+        except sso.SsoError as exc:
+            log.warning("token refresh for %s failed: %s", token.character_id, exc)
+            raise TokenRefreshFailed(f"character {character_id}: {exc}") from exc
     raise TokenUnavailable(f"character {character_id} token rejected; link it again") from rejected
 
 
