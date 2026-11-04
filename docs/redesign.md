@@ -146,6 +146,7 @@ Pure package (no Django imports) inside the Django project; imported as `engine`
 - Decisions made in the engine:
   - Assets reduce input demand only, never a plan line's own quantity (a line means "build this").
   - A plan line is always built, even if a rule would buy its category.
+  - When several blueprints make one product (fixed 2026-11-03, panel review EVE-1): published first, manufacturing before reaction, then the lowest type id; invention sources the same way, without the activity step. Before, the last one loaded won, so build 3667080's unpublished "Test Reaction Blueprint" (45732, no fuel blocks, 20 units per run) could replace the Tungsten Carbide formula (46207). The SDE has 5 such products, each with exactly one published blueprint. [SDE] Invention with several published sources (T3 relics Intact / Malfunctioning / Wrecked, Capital Hull Repairer from the T1 or a meta blueprint, condenser packs from two T1 blueprints) now takes the lowest type id (Intact relics, the T1 hull repairer); choosing by what the account owns is not done.
   - Blueprint source per blueprint: owned BPO (one job, all runs, or split with copies; see Step 6 progress) → owned BPCs (best ME first, one job each) → invention for T2 → "missing" at ME 0 / TE 0 with a warning.
   - Station: among stations offering the activity, lowest material multiplier, then time, then fee rate. Copy and invention jobs pick a station too, so hull and lab-rig time bonuses apply to them.
   - Decryptor `auto`: lowest invention inputs + direct T2 job materials at market price (not invention cost alone, which ignores what the ME bonus saves). With no prices it says so and takes the fewest attempts.
@@ -416,5 +417,17 @@ Step 4 is done apart from per-plan sharing views (step 7).
 - BPO vs BPC: auto-copy to fill idle mfg slots; buying BPCs / extra BPOs is opt-in per blueprint with cost vs time shown.
 - Corp roles: all my characters are Directors, so corp assets, blueprints, jobs and divisions come straight from ESI; paste fallback is deferred.
 
+## Decisions (panel review, 2026-11-03)
+Review in `docs/reviews/2026-11-03-panel-review/` (report, brief, seven reviewers' findings).
+- **Invention with characters of different skill (D2):** invention jobs are pinned to the characters whose chance the attempts were computed from, and the reason says so. Rejected: computing attempts per scheduled character (a second planning pass). Attempts stay the expected value `ceil(bpcs / chance)`; a confidence margin is not planned.
+- **Deployment model (D3):** other users run their own deploy (self-hosted, like Wanderer), not a shared site. So the production stack must be safe for someone else to run as is; hardening for many accounts on one instance is not a goal.
+- **Token key and backups (D4):** set an explicit `TOKEN_ENCRYPTION_KEY` and a random `SECRET_KEY` in `backend/.env`, re-encrypt the stored tokens from the derived key with a one-off script, and back up the dev database together with `backend/.env`. Rejected: re-linking the characters instead of the script; accepting the derived key.
+- **Mechanics questions (D1), checked against the client and SDE instead of in game:**
+  - Rig security multiplier on cost: settled. Every type with the engineering rig cost bonus (attr 2595, 111 types) has effect 6842 `structureEngineeringRigSecurityModification`, which multiplies 2593 / 2594 / 2595 by `securityModifier` (2358); reactor rigs have 6976 for 2713 / 2714. 2358 resolves to attr 2355 / 2356 / 2357 by system security (`dogma/attributes/securityModifierAttribute.py`). The engine's `station_bonuses` already applies it to cost. [SDE build 3667080][client]
+  - Upwell conversion rigs carry attr 2594 without effect 6842 (their effects are 7098–7110), so the security multiplier should not apply to them; relevant to EVE-3 in the review. [SDE]
+  - Slots: `industrySvc._UpdateSlots` asks the server `GetJobCounts(session.charid)` per character and refreshes on any job whose `installerID` is the character, whoever owns it. So corp jobs very likely count against the installer's slots; the count itself is server-side. Whether a ready, undelivered job holds a slot is not in client code. [client]
+  - Whether an item keeps its `item_id` when moved between a personal and a corp hangar is server-side; not in client code.
+
 ## Open questions
 - Exact list of tier/category build switches.
+- In game, needing no particular blueprints: does a ready, undelivered job hold a slot (the industry window's "jobs x / y" tooltip with one ready job), do corp jobs count against the installer's slots (same tooltip), and does an item keep its `item_id` when moved whole from a personal to a corp hangar.
