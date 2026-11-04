@@ -52,12 +52,21 @@ class WorkJob:
         return float(f.round_half_up(seconds))  # the client rounds job time to seconds
 
 
-_SLOT_KIND = {
+SLOT_KIND = {
     Activity.MANUFACTURING: "mfg",
     Activity.REACTION: "reaction",
     Activity.COPYING: "science",
     Activity.INVENTION: "science",
 }
+
+
+def _slots_at_start(character: Character, activity: Activity, kind: str) -> list[float]:
+    """When each of the character's slots of `kind` is free: 0 for an idle slot, the end of
+    the running job for a busy one. More running jobs than slots (skills lost since they were
+    installed) fill every slot with the latest ends."""
+    n = f.slots(character, activity)
+    busy = sorted(max(0.0, t) for t in character.busy.get(kind, ()))[-n:] if n else []
+    return busy + [0.0] * (n - len(busy))
 
 
 def schedule(
@@ -73,8 +82,8 @@ def schedule(
     by_id = {j.job_id: j for j in jobs}
     free: dict[tuple[int, str], list[float]] = {}
     for ch in characters:
-        for activity, kind in _SLOT_KIND.items():
-            free.setdefault((ch.character_id, kind), [0.0] * f.slots(ch, activity))
+        for activity, kind in SLOT_KIND.items():
+            free.setdefault((ch.character_id, kind), _slots_at_start(ch, activity, kind))
 
     locks = dict(locks or {})
     # Durations without skills order the ready jobs; computed once per job.
@@ -106,7 +115,7 @@ def schedule(
 
 
 def _place(job: WorkJob, ready_at: float, characters, free) -> None:
-    kind = _SLOT_KIND[job.activity]
+    kind = SLOT_KIND[job.activity]
     eligible = [
         ch
         for ch in characters

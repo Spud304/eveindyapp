@@ -279,6 +279,10 @@ class Character:
     skills: Mapping[int, int]  # skill_id -> active level
     activities: frozenset[Activity]  # what this character is allowed to run
     is_alpha: bool = False
+    # Slots taken by jobs already running, by slot kind ("mfg", "science", "reaction"): the
+    # seconds until each frees. Corp jobs count for the character who installed them; a job
+    # past its end (ready to deliver) no longer holds its slot.
+    busy: Mapping[str, tuple[float, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

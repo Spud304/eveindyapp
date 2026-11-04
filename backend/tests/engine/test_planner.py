@@ -424,6 +424,24 @@ def test_t1_copying_and_t1_manufacturing_share_the_bpo():
     assert on_bpo[1].schedule.start_seconds >= on_bpo[0].schedule.end_seconds
 
 
+def test_running_jobs_hold_their_slots_until_they_end():
+    # One manufacturing slot (no skills), taken by a job that ends in 5000 s.
+    busy = character(busy={"mfg": (5000.0,)})
+    r = plan(make_input([(COMP_A, 1)], blueprints=(bpo(BP_COMP_A),), characters=(busy,)))
+    [job] = jobs_for(r, BP_COMP_A)
+    assert job.schedule.start_seconds == 5000.0
+    # A science job does not take a manufacturing slot.
+    lab_busy = character(busy={"science": (5000.0,)})
+    r = plan(make_input([(COMP_A, 1)], blueprints=(bpo(BP_COMP_A),), characters=(lab_busy,)))
+    assert jobs_for(r, BP_COMP_A)[0].schedule.start_seconds == 0.0
+
+
+def test_a_second_slot_is_used_while_the_first_is_busy():
+    two_slots = character(skills={3387: 1}, busy={"mfg": (5000.0,)})
+    r = plan(make_input([(COMP_A, 1)], blueprints=(bpo(BP_COMP_A),), characters=(two_slots,)))
+    assert jobs_for(r, BP_COMP_A)[0].schedule.start_seconds == 0.0
+
+
 def test_t3_from_relics_is_not_planned_as_invention():
     # A relic: an invention activity and nothing to copy or build.
     t1 = BLUEPRINTS[BP_T1_MOD]

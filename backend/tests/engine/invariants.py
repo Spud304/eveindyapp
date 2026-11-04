@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 
 from engine import formulas as f
 from engine import plan
-from engine.schedule import _SLOT_KIND
+from engine.schedule import SLOT_KIND
 from engine.types import Activity, ItemDecision, PlanInput, PlanResult
 
 PRODUCING = (Activity.MANUFACTURING, Activity.REACTION)
@@ -68,17 +68,26 @@ def assert_consistent(r: PlanResult, inp: PlanInput) -> None:
 
 
 def _assert_slots(r: PlanResult, inp: PlanInput) -> None:
-    """At no moment does a character run more jobs of one slot kind than it has slots."""
+    """At no moment does a character run more jobs of one slot kind than it has slots,
+    counting the jobs already running (`Character.busy`) until they end."""
     characters = {ch.character_id: ch for ch in inp.characters}
     events: dict[tuple[int, str], list[tuple[float, int]]] = defaultdict(list)
     limits: dict[tuple[int, str], int] = {}
+    for ch in inp.characters:
+        for kind, ends in ch.busy.items():
+            events[(ch.character_id, kind)] += [
+                e for end in ends if end > 0 for e in ((0.0, 1), (end, -1))
+            ]
     for j in r.jobs:
         cid = j.schedule.character_id
         if cid is None or j.schedule.end_seconds == j.schedule.start_seconds:
             continue
-        key = (cid, _SLOT_KIND[j.activity])
+        key = (cid, SLOT_KIND[j.activity])
         limits[key] = f.slots(characters[cid], j.activity)
         events[key] += [(j.schedule.start_seconds, 1), (j.schedule.end_seconds, -1)]
+    for cid, kind in events:
+        activity = next(a for a, k in SLOT_KIND.items() if k == kind)
+        limits.setdefault((cid, kind), f.slots(characters[cid], activity))
     for key, evs in events.items():
         running = 0
         for _, delta in sorted(evs):  # an end (-1) sorts before a start at the same moment

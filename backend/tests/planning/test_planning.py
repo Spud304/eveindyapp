@@ -113,6 +113,34 @@ def test_available_assets_filters_location_flag_and_singletons(sde, user):
     assert available(user, AZBEL_ID) == {34: 157}
 
 
+def test_busy_slots_from_running_jobs(sde, user):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from apps.esidata.models import IndustryJob
+
+    from .conftest import OTHER_CHAR, job
+
+    now = timezone.now()
+
+    def running(job_id, activity=1, ends_in_h=2.0, status="active", installer=MAIN):
+        job(job_id, AZBEL_ID, activity=activity)
+        IndustryJob.objects.filter(pk=job_id).update(
+            status=status, end_date=now + timedelta(hours=ends_in_h), installer_id=installer
+        )
+
+    running(1)  # a corp job MAIN installed: MAIN's manufacturing slot
+    running(2, activity=4)  # ME research: a science slot
+    running(3, ends_in_h=-1)  # past its end: ready to deliver, slot free
+    running(4, status="paused", ends_in_h=5)
+    running(5, installer=OTHER_CHAR)  # a corpmate's job: not our slot
+    busy = inputs.busy_slots(user)
+    assert set(busy) == {MAIN}
+    assert sorted(round(t / 3600) for t in busy[MAIN]["mfg"]) == [2, 5]
+    assert [round(t / 3600) for t in busy[MAIN]["science"]] == [2]
+
+
 def test_corp_assets_need_director(sde, user):
     asset(2, 34, 50, AZBEL_ID, flag="CorpSAG3", kind="corporation", owner=CORP)
     CharacterRoles.objects.filter(character_id=MAIN).update(roles=["Factory_Manager"])

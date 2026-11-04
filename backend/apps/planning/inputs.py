@@ -66,11 +66,42 @@ def characters(user: User) -> tuple[Character, ...]:
         "character_id", "skill_id", "active_level"
     ):
         skills[cid][sid] = level
+    busy = busy_slots(user)
     return tuple(
         # Every activity allowed and omega until per-character settings exist.
-        Character(c.character_id, c.name, skills.get(c.character_id, {}), frozenset(Activity))
+        Character(
+            c.character_id,
+            c.name,
+            skills.get(c.character_id, {}),
+            frozenset(Activity),
+            busy=busy.get(c.character_id, {}),
+        )
         for c in user.characters.filter(character_id__in=skills.keys()).order_by("name")
     )
+
+
+# ESI activity id -> the slot it takes. Research (3 TE, 4 ME) uses science slots too, though
+# plans never schedule it. [client: industry activities]
+SLOT_OF_ACTIVITY = {1: "mfg", 3: "science", 4: "science", 5: "science", 8: "science", 9: "reaction"}
+
+
+def busy_slots(user: User) -> dict[int, dict[str, tuple[float, ...]]]:
+    """character id -> slot kind -> seconds until each running job ends. Running means active
+    and not yet past its end (a job ready to deliver frees its slot) or paused (until its stored
+    end, as for blueprint locks). Corp jobs count for the character who installed them."""
+    now = timezone.now()
+    out: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    jobs = IndustryJob.objects.filter(
+        owner_q(user, Feed.JOBS),
+        installer_id__in=user.characters.values("character_id"),
+        status__in=("active", "paused"),
+    ).values_list("installer_id", "activity_id", "status", "end_date")
+    for installer, activity, status, end in jobs:
+        kind = SLOT_OF_ACTIVITY.get(activity)
+        if kind is None or (status == "active" and end <= now):
+            continue
+        out[installer][kind].append(max(0.0, (end - now).total_seconds()))
+    return {cid: {k: tuple(v) for k, v in kinds.items()} for cid, kinds in out.items()}
 
 
 def owned_blueprints(user: User) -> tuple[OwnedBlueprint, ...]:

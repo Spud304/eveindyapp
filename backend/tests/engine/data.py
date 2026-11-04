@@ -232,8 +232,10 @@ def bpc(type_id, runs, me=0, te=0, item_id=None):
     return OwnedBlueprint(item_id or type_id * 10 + runs, type_id, True, runs, me, te, 99)
 
 
-def character(cid=1, name="Builder", skills=None, activities=ALL_ACTIVITIES, alpha=False):
-    return Character(cid, name, skills or {}, activities, alpha)
+def character(
+    cid=1, name="Builder", skills=None, activities=ALL_ACTIVITIES, alpha=False, busy=None
+):
+    return Character(cid, name, skills or {}, activities, alpha, busy or {})
 
 
 def lines(*pairs):
