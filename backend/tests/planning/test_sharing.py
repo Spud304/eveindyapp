@@ -1,6 +1,7 @@
 """Sharing (step 7): link and corp visibility, aliases for link viewers, the cache."""
 
 import json
+import re
 from datetime import timedelta
 
 import pytest
@@ -10,10 +11,11 @@ from django.utils import timezone
 from apps.accounts import services
 from apps.accounts.models import EveCharacter
 from apps.accounts.sso import SsoIdentity
+from apps.esidata.models import IndustryJob
 from apps.planning import reservation, sharing
 from apps.planning.models import Plan, PlanLine, Station
 
-from .conftest import AZBEL_ID, AZBEL_TYPE, CORP, D_SYSTEM, MAIN, OTHER_CHAR
+from .conftest import AZBEL_ID, AZBEL_TYPE, CORP, D_SYSTEM, MAIN, NO_ACCESS, OTHER_CHAR, job
 
 pytestmark = pytest.mark.django_db
 OTHER_CORP = 98000002
@@ -68,6 +70,26 @@ def test_link_view_needs_no_login_and_hides_names(user, plan):
     assert "Secret Keep" not in text and str(MAIN) not in text
     assert {j["station_id"] for j in shared["result"]["jobs"]} <= {1, None}
     assert "Station 1" in shared["result"]["blueprints"][0]["station"]["reason"]["text"]
+
+
+def test_link_view_hides_corpmates_and_structures_in_progress_jobs(user, plan):
+    from apps.planning.models import JobLink, LinkSource
+
+    corpmate()  # "Mate", OTHER_CHAR: a corpmate who installs jobs for the plan
+    at_keep = job(1, AZBEL_ID)
+    elsewhere = job(2, NO_ACCESS)  # a structure the owner has no station for
+    IndustryJob.objects.filter(pk__in=[1, 2]).update(installer_id=OTHER_CHAR)
+    for j in (at_keep, elsewhere):
+        JobLink.objects.create(user=user, plan=plan, job=j, source=LinkSource.AUTO)
+    token = patch(user, plan, {"visibility": "link"}).json()["share_token"]
+    shared = Client().get(f"/api/shared/{token}").json()
+    jobs = shared["progress"]["jobs"]
+    assert len(jobs) == 2
+    text = json.dumps(shared)
+    for secret in ("Mate", str(OTHER_CHAR), str(AZBEL_ID), str(NO_ACCESS), "Secret Keep"):
+        assert secret not in text, secret
+    assert all(re.fullmatch(r"Corp member \d+", j["installer_name"]) for j in jobs)
+    assert all(re.fullmatch(r"(Station|Structure) \d+", j["facility_name"]) for j in jobs)
 
 
 def test_link_stops_working_when_private_or_renewed(user, plan):

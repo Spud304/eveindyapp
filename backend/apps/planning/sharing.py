@@ -26,9 +26,10 @@ from apps.accounts.models import EveCharacter, User
 from apps.esidata import names
 from apps.sde.models import EveType
 
-from . import reservation
+from . import inputs, reservation
 from .models import Plan, Visibility
-from .prices import jita_priced
+from .prices import jita_plan
+from .progress import progress_data
 
 AFFILIATION_MAX_AGE = timedelta(hours=24)
 SHARED_CACHE_SECONDS = 60
@@ -118,12 +119,13 @@ def view(p: Plan, anonymize: bool) -> dict:
 
 
 def _build(p: Plan, anonymize: bool) -> dict:
-    from .plans_api import progress_data  # the API module imports this one
 
     owner = p.user
-    data = reservation.load(owner)
+    data = inputs.load(owner)
     run = reservation.run_plans(owner, [p], data)[p.pk]
-    priced, _ = jita_priced(run.result)
+    priced = run.result
+    if run.input is not None and run.result is not None:
+        priced = jita_plan(run.input, run.result).result
     lines = list(p.lines.all())
     line_names = dict(
         EveType.objects.filter(pk__in=[ln.type_id for ln in lines]).values_list("id", "name")

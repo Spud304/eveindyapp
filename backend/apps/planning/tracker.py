@@ -22,7 +22,6 @@ Progress fed to the engine, per linked job (cancelled and reverted jobs count fo
   blueprint sync.
 """
 
-import dataclasses
 import logging
 from collections import defaultdict
 
@@ -34,6 +33,7 @@ from apps.esidata.models import Feed, IndustryJob
 from engine import PlanError, plan
 from engine.types import Activity, GameData, PlanResult
 
+from . import inputs
 from .models import JobLink, LinkSource, Plan
 
 log = logging.getLogger(__name__)
@@ -53,29 +53,28 @@ def plan_keys(base: PlanResult) -> set[tuple[int, Activity]]:
     return {(j.blueprint_type_id, j.activity) for j in base.jobs}
 
 
-def base_result(p: Plan, data) -> PlanResult | None:
+def base_result(p: Plan, data: inputs.AccountData) -> PlanResult | None:
     """The plan with no progress, no stock and no copies in the making: every blueprint and
     activity it could need, so a new copy job still matches after copies are under way."""
-    from . import reservation
-
-    inp = reservation.plan_input(p, data, {}, incoming=False)
+    inp = inputs.plan_input(p, data, {}, incoming=False)
     if not inp.lines:
         return None
     try:
-        return plan(dataclasses.replace(inp, started={}, started_attempts={}))
+        return plan(inp)
     except PlanError:
         return None
 
 
-def match(user: User, data=None) -> list[JobLink]:
-    """Link new jobs to the account's active plan. Returns the links it created."""
-    from . import reservation
-
+def match(
+    user: User, data: inputs.AccountData | None = None, base: PlanResult | None = None
+) -> list[JobLink]:
+    """Link new jobs to the account's active plan. Returns the links it created. `base`: the
+    active plan's `base_result`, when the caller already has it."""
     active = Plan.objects.filter(user=user, is_active=True).prefetch_related("lines").first()
     if active is None or active.activated_at is None:
         return []
-    data = data or reservation.load(user)
-    base = base_result(active, data)
+    data = data or inputs.load(user)
+    base = base or base_result(active, data)
     if base is None:
         return []
     keys = plan_keys(base)
@@ -116,6 +115,18 @@ def progress_inputs(p: Plan, game: GameData) -> tuple[dict[int, int], dict[int, 
         elif activity == Activity.INVENTION and job.status in NOT_DELIVERED and job.product_type_id:
             attempts[job.product_type_id] += job.runs
     return dict(started), dict(attempts)
+
+
+def unreadable_links(p: Plan) -> list[IndustryJob]:
+    """Linked, still-counting jobs the account can no longer read (character unlinked, corp
+    role or token lost). Their status no longer updates, yet they still count as started; the
+    plan says so rather than dropping progress the user may want kept."""
+    readable = IndustryJob.objects.filter(owner_q(p.user, Feed.JOBS)).values("job_id")
+    return list(
+        IndustryJob.objects.filter(links__plan=p)
+        .exclude(status__in=DEAD)
+        .exclude(job_id__in=readable)
+    )
 
 
 def match_after_sync(user: User) -> int:

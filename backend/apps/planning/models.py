@@ -25,6 +25,8 @@ class Station(models.Model):
     activities = models.JSONField(default=list, blank=True)  # engine Activity values
     facility_tax = models.FloatField(default=0.0)  # percent
     tax_confirmed = models.BooleanField(default=False)
+    # Percent the owner takes when you reprocess here; the compressed ore mix pays it.
+    reprocessing_tax = models.FloatField(default=0.0)
     enabled = models.BooleanField(default=True)
     source = models.CharField(max_length=16, choices=StationSource.choices)
     created_at = models.DateTimeField(auto_now_add=True)

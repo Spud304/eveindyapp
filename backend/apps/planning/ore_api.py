@@ -65,7 +65,7 @@ def compressed_ore(
         classes = [OreClass(c) for c in ore_classes.split(",") if c]
     except ValueError as exc:
         raise HttpError(422, str(exc)) from exc
-    data = reservation.load(user)
+    data = inputs.load(user)
     run = reservation.run_plans(user, [p], data)[p.pk]
     if run.result is None:
         raise HttpError(422, run.error or "the plan has no result")
@@ -83,6 +83,7 @@ def compressed_ore(
             gamedata.hull_refining_bonus(s.structure_type_id),
             f.security_class(system.security if system else None),
             rigs,
+            s.reprocessing_tax,
         )
     if not refineries:
         raise HttpError(422, "add a station in Setup first")
@@ -131,6 +132,9 @@ def compressed_ore(
             {m: average.get(m) for m in minerals},
             mineral_volumes={m: data.game.types[m].volume for m in minerals},
             mineral_books={m: books[m] for m in need if m in books},
+            adjusted_prices={
+                m: data.prices[m].adjusted_price for m in minerals if m in data.prices
+            },
         )
 
     if character_id is not None and character_id not in chars:

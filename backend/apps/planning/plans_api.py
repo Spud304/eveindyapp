@@ -1,7 +1,7 @@
 """Plans: CRUD, lines, active plan, and the computed result with reservations."""
 
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Literal, cast
 
 from django.db import transaction
@@ -13,15 +13,17 @@ from ninja.errors import HttpError
 
 from apps.accounts.models import User
 from apps.esidata.access import owner_q
-from apps.esidata.models import BlueprintItem, Feed, IndustryJob
-from apps.esidata.overview_api import JobRow, describe_jobs
+from apps.esidata.freshness import feed_health, oldest
+from apps.esidata.models import Asset, BlueprintItem, Feed, IndustryJob
+from apps.esidata.overview_api import JobRow
 from apps.sde.models import BlueprintProduct, EveType
 from engine import BlueprintOptions, purchase_options
-from engine.types import Activity, BuildCategory, PlanResult
+from engine.types import BuildCategory, PlanResult
 
-from . import reservation, sharing, tracker
+from . import inputs, reservation, sharing, tracker
 from .models import JobLink, LinkSource, Plan, PlanLine, Visibility
-from .prices import jita_priced
+from .prices import jita_plan
+from .progress import progress_data
 
 router = Router(tags=["plans"])
 
@@ -281,6 +283,20 @@ def edit_plan(request: HttpRequest, plan_id: int, body: PlanSettings):
         }
     if "choices" in data:
         data["choices"] = {str(k): v for k, v in data["choices"].items()}
+    if data.get("hangar_flags"):
+        known = {*inputs.AVAILABLE_FLAGS, *(f"CorpSAG{i}" for i in range(1, 8))}
+        bad = sorted(set(data["hangar_flags"]) - known)
+        if bad:
+            raise HttpError(422, f"unknown hangar flags: {bad}")
+    if data.get("extra_location_ids"):
+        held = set(
+            Asset.objects.filter(owner_q(_user(request), Feed.ASSETS))
+            .filter(root_location_id__in=data["extra_location_ids"])
+            .values_list("root_location_id", flat=True)
+        )
+        bad = sorted(set(data["extra_location_ids"]) - held)
+        if bad:
+            raise HttpError(422, f"no assets of yours at locations {bad}")
     corp = data.get("share_corporation_id")
     if corp is not None and corp not in sharing.owner_corporations(_user(request)):
         raise HttpError(422, "none of your characters is in that corporation")
@@ -356,6 +372,23 @@ class ReservationOut(Schema):
     held_elsewhere: dict[int, list[HolderOut]]  # type id -> earlier plans holding stock
 
 
+class FeedProblemOut(Schema):
+    severity: Literal["bad", "warn"]  # bad: the last sync failed; warn: old or never synced
+    owner_name: str
+    feed: str
+    fetched_at: datetime | None
+    text: str
+
+
+class InputsHealthOut(Schema):
+    """How old the ESI data behind this result is: the oldest last sync of the skills, assets,
+    blueprints and jobs it read (None if one never synced), and every feed that failed or is
+    older than its sync interval allows."""
+
+    as_of: datetime | None
+    problems: list[FeedProblemOut]
+
+
 class PlanResultOut(Schema):
     prices: Literal["jita", "average"] = "average"
     priced_at_average: int = 0  # shopping items whose Jita orders could not be fetched
@@ -364,6 +397,25 @@ class PlanResultOut(Schema):
     result: PlanResult | None
     effective_rules: EffectiveRulesOut
     reservation: ReservationOut
+    inputs: InputsHealthOut
+
+
+def inputs_health(user) -> dict:
+    health = feed_health(user)
+    return {
+        "as_of": oldest(health),
+        "problems": [
+            {
+                "severity": "bad" if not h.ok else "warn",
+                "owner_name": h.owner_name,
+                "feed": h.feed,
+                "fetched_at": h.fetched_at,
+                "text": h.describe(),
+            }
+            for h in health
+            if h.problem
+        ],
+    }
 
 
 @router.get("/plans/{plan_id}/result", response=PlanResultOut)
@@ -373,7 +425,14 @@ def plan_result(request: HttpRequest, plan_id: int, prices: Literal["jita", "ave
     p = _plan(request, plan_id)
     run = reservation.run_plans(_user(request), [p])[p.pk]
     rules = run.rules
-    result, failed = jita_priced(run.result) if prices == "jita" else (run.result, 0)
+    result, failed = run.result, 0
+    if prices == "jita" and run.input is not None and run.result is not None:
+        priced = jita_plan(run.input, run.result)
+        result, failed = priced.result, priced.failed
+        if p.reserve_assets:
+            # What this plan holds is what the priced run takes from stock (the same stock;
+            # only a different automatic decryptor can change it).
+            run.claims = {i.type_id: i.on_hand_used for i in result.items if i.on_hand_used}
     return {
         "plan_id": p.pk,
         "error": run.error,
@@ -394,18 +453,25 @@ def plan_result(request: HttpRequest, plan_id: int, prices: Literal["jita", "ave
             "claims": run.claims,
             "held_elsewhere": {t: [asdict(h) for h in hs] for t, hs in run.held_elsewhere.items()},
         },
+        "inputs": inputs_health(_user(request)),
     }
 
 
 @router.get("/plans/{plan_id}/blueprints/{bp_id}/options", response=BlueprintOptions)
-def blueprint_options(request: HttpRequest, plan_id: int, bp_id: int):
+def blueprint_options(
+    request: HttpRequest, plan_id: int, bp_id: int, prices: Literal["jita", "average"] = "jita"
+):
     """What buying BPCs or an extra BPO for one blueprint would save and cost: the plan run
-    again with each purchase. One plan run per candidate, so only on request."""
+    again with each purchase. One plan run per candidate, so only on request. Priced like the
+    plan result, so the cost changes match the Cost tab."""
     p = _plan(request, plan_id)
     run = reservation.run_plans(_user(request), [p])[p.pk]
     if run.input is None or run.result is None:
         raise HttpError(422, run.error or "the plan has no result")
-    return purchase_options(run.input, bp_id, run.result)
+    if prices == "average":
+        return purchase_options(run.input, bp_id, run.result)
+    priced = jita_plan(run.input, run.result, also=(bp_id,))
+    return purchase_options(priced.input, bp_id, priced.result)
 
 
 # --- progress (step 5) ---------------------------------------------------------------------
@@ -437,124 +503,18 @@ class ProgressOut(Schema):
     candidates: list[JobRow]  # recent jobs of this plan's blueprints that are not linked here
 
 
-CANDIDATE_DAYS = 30
-
-
 @router.get("/plans/{plan_id}/progress", response=ProgressOut)
 def plan_progress(request: HttpRequest, plan_id: int):
     """Jobs linked to this plan, per blueprint, with what is left. Matching runs first, so
     jobs synced since the last match show up here."""
     user = _user(request)
     p = _plan(request, plan_id)
-    data = reservation.load(user)
+    data = inputs.load(user)
+    base = tracker.base_result(p, data)  # one base run for matching and the rows
     if p.is_active:
-        tracker.match(user, data)
+        tracker.match(user, data, base=base)
     run = reservation.run_plans(user, [p], data)[p.pk]
-    return progress_data(user, p, data, run, candidates=True)
-
-
-def progress_data(user: User, p: Plan, data, run, candidates: bool) -> dict:
-    """Progress rows and linked jobs for a plan of `user`; `candidates` adds the unlinked
-    recent jobs offered for linking (owner only)."""
-    base = tracker.base_result(p, data)
-    keys = tracker.plan_keys(base) if base else set()
-    now = timezone.now()
-
-    links = list(
-        JobLink.objects.filter(user=user, plan=p).select_related("job").order_by("job__start_date")
-    )
-    linked_jobs = [ln.job for ln in links]
-    rows_by_job = {r["job_id"]: r for r in describe_jobs(user, linked_jobs, now)}
-
-    remaining: dict[tuple[int, str], int] = {}
-    over: dict[int, int] = {}
-    if run.result:
-        for j in run.result.jobs:
-            key = (j.blueprint_type_id, j.activity.value)
-            remaining[key] = remaining.get(key, 0) + j.runs * max(j.copies, 1)
-        over = {i.type_id: i.over_plan for i in run.result.items if i.over_plan}
-    products = _products(data.game, keys)
-    names = dict(
-        EveType.objects.filter(
-            pk__in={bp for bp, _ in keys}
-            | set(products.values())
-            | {j.product_type_id for j in linked_jobs if j.product_type_id}
-        ).values_list("id", "name")
-    )
-    counts: dict[tuple[int, str], dict[str, int]] = {}
-    for job in linked_jobs:
-        activity = tracker.JOB_ACTIVITY.get(job.activity_id)
-        if activity is None:
-            continue
-        status = rows_by_job[job.job_id]["status"]
-        c = counts.setdefault(
-            (job.blueprint_type_id, activity.value), {"running": 0, "ready": 0, "delivered": 0}
-        )
-        if status in ("active", "paused"):
-            c["running"] += job.runs
-        elif status in c:
-            c[status] += job.runs
-    rows = []
-    for bp_id, activity in sorted(
-        keys | {(k[0], Activity(k[1])) for k in counts}, key=lambda k: names.get(k[0], "")
-    ):
-        key = (bp_id, activity.value)
-        c = counts.get(key, {"running": 0, "ready": 0, "delivered": 0})
-        product = products.get(key)
-        rows.append(
-            {
-                "blueprint_type_id": bp_id,
-                "activity": activity.value,
-                "name": names.get(bp_id, str(bp_id)),
-                "product_name": names.get(product, "") if product else "",
-                "remaining_runs": remaining.get(key, 0),
-                "running_runs": c["running"],
-                "ready_runs": c["ready"],
-                "delivered_runs": c["delivered"],
-                "over_plan": over.get(product, 0) if product else 0,
-            }
-        )
-
-    if not candidates:
-        return {
-            "active": p.is_active,
-            "activated_at": p.activated_at,
-            "rows": rows,
-            "jobs": [{**rows_by_job[ln.job_id], "source": ln.source} for ln in links],
-            "candidates": [],
-        }
-    linked_ids = JobLink.objects.filter(user=user, plan__isnull=False).values("job_id")
-    since = now - timedelta(days=CANDIDATE_DAYS)
-    offered = [
-        j
-        for j in IndustryJob.objects.filter(owner_q(user, Feed.JOBS), start_date__gte=since)
-        .exclude(status__in=tracker.DEAD)
-        .exclude(pk__in=linked_ids)
-        .order_by("-start_date")
-        if (j.blueprint_type_id, tracker.JOB_ACTIVITY.get(j.activity_id)) in keys
-    ]
-    return {
-        "active": p.is_active,
-        "activated_at": p.activated_at,
-        "rows": rows,
-        "jobs": [{**rows_by_job[ln.job_id], "source": ln.source} for ln in links],
-        "candidates": describe_jobs(user, offered[:100], now),
-    }
-
-
-def _products(game, keys) -> dict[tuple[int, str], int]:
-    out = {}
-    for bp_id, activity in keys:
-        bp = game.blueprints.get(bp_id)
-        if bp is None:
-            continue
-        recipe = {
-            Activity.MANUFACTURING: bp.manufacturing,
-            Activity.REACTION: bp.reaction,
-        }.get(activity)
-        if recipe and recipe.product_type_id:
-            out[(bp_id, activity.value)] = recipe.product_type_id
-    return out
+    return progress_data(user, p, data, run, candidates=True, base=base)
 
 
 @router.post("/plans/{plan_id}/jobs/{job_id}", response=ProgressOut)

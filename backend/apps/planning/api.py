@@ -7,10 +7,9 @@ from ninja.errors import HttpError
 
 from apps.accounts.models import User
 from apps.sde.models import EveType, SolarSystem
-from engine import PlanError, plan
-from engine.types import Activity, BlueprintChoice, BuildCategory, PlanLine, PlanResult
+from engine.types import Activity, BuildCategory
 
-from . import inputs, stations
+from . import stations
 from .models import BuildRules, Station, StationSource
 
 router = Router(tags=["planning"])
@@ -33,6 +32,7 @@ class StationOut(Schema):
     activities: list[str]
     facility_tax: float
     tax_confirmed: bool
+    reprocessing_tax: float
     enabled: bool
     source: str
 
@@ -52,6 +52,7 @@ class StationPatch(Schema):
     rig_type_ids: list[int] | None = None
     activities: list[Activity] | None = None
     facility_tax: float | None = Field(None, ge=0, le=100)
+    reprocessing_tax: float | None = Field(None, ge=0, le=100)
     enabled: bool | None = None
 
 
@@ -65,23 +66,6 @@ class DiscoverOut(Schema):
 class BuildRulesIO(Schema):
     item_blacklist: list[int] = []
     buy_categories: list[BuildCategory] = []
-
-
-class LineIn(Schema):
-    type_id: int
-    quantity: int = Field(..., ge=1)
-
-
-class ChoiceIn(Schema):
-    blueprint_type_id: int
-    me_override: int | None = Field(None, ge=-10, le=10)
-    te_override: int | None = Field(None, ge=0, le=20)
-    decryptor: int | str = "auto"
-
-
-class PreviewIn(Schema):
-    lines: list[LineIn] = Field(..., min_length=1)
-    choices: list[ChoiceIn] = []
 
 
 def _user(request: HttpRequest) -> User:
@@ -109,6 +93,7 @@ def _station_out(s: Station) -> dict:
         "activities": s.activities,
         "facility_tax": s.facility_tax,
         "tax_confirmed": s.tax_confirmed,
+        "reprocessing_tax": s.reprocessing_tax,
         "enabled": s.enabled,
         "source": s.source,
     }
@@ -205,17 +190,3 @@ def put_rules(request: HttpRequest, body: BuildRulesIO):
         },
     )
     return row
-
-
-@router.post("/plan/preview", response=PlanResult)
-def preview(request: HttpRequest, body: PreviewIn):
-    """Run the engine on the account's data without saving a plan."""
-    lines = [PlanLine(f"l{i}", ln.type_id, ln.quantity) for i, ln in enumerate(body.lines)]
-    choices = {}
-    for c in body.choices:
-        dec = c.decryptor if c.decryptor in ("auto", "none") else int(c.decryptor)
-        choices[c.blueprint_type_id] = BlueprintChoice(c.me_override, c.te_override, dec)
-    try:
-        return plan(inputs.plan_input(_user(request), lines, choices))
-    except PlanError as exc:
-        raise HttpError(422, str(exc)) from exc

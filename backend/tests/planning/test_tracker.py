@@ -9,8 +9,8 @@ from django.utils import timezone
 
 from apps.accounts import services
 from apps.accounts.sso import SsoIdentity
-from apps.esidata.models import IndustryJob
-from apps.planning import reservation, tracker
+from apps.esidata.models import CharacterRoles, IndustryJob
+from apps.planning import inputs, reservation, tracker
 from apps.planning.models import JobLink, Plan, PlanLine, Station
 
 from .conftest import AZBEL_ID, AZBEL_TYPE, CORP, D_SYSTEM, MAIN, OTHER_CHAR
@@ -157,6 +157,16 @@ def test_running_job_reduces_runs_and_materials(setup, user):
     assert item(after, TRIT).to_buy < item(before, TRIT).to_buy
 
 
+def test_linked_job_the_account_can_no_longer_read_is_flagged(setup, user):
+    job(1, runs=1)
+    tracker.match(user)
+    assert not any("no longer read" in w.text for w in run(user, setup).warnings)
+    CharacterRoles.objects.filter(character_id=MAIN).update(roles=[])  # corp jobs out of reach
+    after = run(user, setup)
+    assert item(after, RIFTER).started == 1  # still counted, as the warning says
+    assert any("1 linked job(s)" in w.text for w in after.warnings)
+
+
 def test_over_plan_is_reported(setup, user):
     job(1, runs=5)
     tracker.match(user)
@@ -177,7 +187,7 @@ def test_delivered_component_output_is_left_to_assets(sde, user):
     PlanLine.objects.create(plan=p, type_id=TRIT, quantity=1)  # Tritanium is not built: no keys
     j = job(1, status="delivered")
     JobLink.objects.create(user=user, plan=p, job=j, source="manual")
-    started, attempts = tracker.progress_inputs(p, reservation.load(user).game)
+    started, attempts = tracker.progress_inputs(p, inputs.load(user).game)
     assert started == {} and attempts == {}  # Rifter is not a line of this plan
 
 
@@ -248,7 +258,7 @@ def test_copies_being_made_belong_to_the_linked_plan(setup, user):
     assert sources(setup) == ["bpc", "bpc", "bpc"]  # one job per copy, usable when it ends
     assert sources(other) == ["missing"]  # the copies are for plan P
     # The tracker's base run leaves them out, so copy jobs stay matchable.
-    base = tracker.base_result(setup, reservation.load(user))
+    base = tracker.base_result(setup, inputs.load(user))
     assert [str(j.source) for j in base.jobs] == ["missing"]
 
     link.plan = None  # unlinked by hand: any plan may use the copies

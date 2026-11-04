@@ -15,7 +15,7 @@ from apps.planning import inputs, reservation
 from apps.planning.models import Plan, PlanLine, Station
 from engine.types import BuildCategory, BuildRules
 
-from .conftest import AZBEL_ID, AZBEL_TYPE, D_SYSTEM, MAIN, OTHER_CHAR, asset, job
+from .conftest import AZBEL_ID, AZBEL_TYPE, CORP, D_SYSTEM, MAIN, OTHER_CHAR, asset, job
 
 pytestmark = pytest.mark.django_db
 
@@ -150,7 +150,7 @@ def test_effective_rules_apply_plan_overrides():
         blacklist_remove=[35],
         category_overrides={"t2_items": "build", "capital_components": "buy"},
     )
-    rules = reservation.effective_rules(default, p)
+    rules = inputs.effective_rules(default, p)
     assert rules.item_blacklist == {34, 36}
     assert rules.buy_categories == {BuildCategory.FUEL_BLOCKS, BuildCategory.CAPITAL_COMPONENTS}
 
@@ -341,6 +341,31 @@ def test_picked_bpcs_belong_to_their_plan(api, user, azbel):
     assert rows[1]["product_type_id"] == 587
 
 
+def test_reserving_plans_take_bpc_runs_in_priority_order(user, azbel):
+    rifter_bp(1, 9)
+    first = make_plan(user, "first", rifters=6, reserve_assets=True, priority=1)
+    second = make_plan(user, "second", rifters=6, reserve_assets=True, priority=2)
+    runs = reservation.run_plans(user)
+
+    def bpc_jobs(pid):
+        return [
+            (j.runs, j.blueprint_item_id)
+            for j in runs[pid].result.jobs
+            if j.blueprint_type_id == 691 and j.source == "bpc"
+        ]
+
+    assert bpc_jobs(first.pk) == [(6, 1)]
+    assert bpc_jobs(second.pk) == [(3, 1)]  # the 3 runs "first" leaves on the copy
+
+
+def test_two_reserving_plans_on_one_bpo_are_warned(user, azbel):
+    rifter_bp(1, copy=False)
+    make_plan(user, "first", reserve_assets=True, priority=1)
+    second = make_plan(user, "second", reserve_assets=True, priority=2)
+    run = reservation.run_plans(user)[second.pk]
+    assert any("Plan first also schedules Rifter Blueprint" in w.text for w in run.result.warnings)
+
+
 def test_blueprints_in_open_jobs(api, user, azbel):
     rifter_bp(1, copy=False)
     rifter_bp(2, 9)
@@ -381,6 +406,52 @@ def test_purchase_options_and_saving_one(api, user, azbel):
     assert "bought" in next(b for b in result["blueprints"] if b["type_id"] == 691)["sources"]
     assert result["costs"]["blueprints"] == 2_000_000
     assert api("get", f"/api/plans/{pid}/blueprints/587/options").json()["options"] == []
+
+
+def test_settings_refuse_unknown_hangars_and_foreign_locations(api, user, azbel):
+    p = make_plan(user, "scope")
+
+    def patch(body):
+        return api("patch", f"/api/plans/{p.pk}", body)
+
+    assert patch({"hangar_flags": ["CorpSAG3", "Hangar"]}).status_code == 200
+    resp = patch({"hangar_flags": ["CorpSAG9"]})
+    assert resp.status_code == 422 and "CorpSAG9" in resp.json()["detail"]
+    asset(1, 34, 10, AZBEL_ID)
+    assert patch({"extra_location_ids": [AZBEL_ID]}).status_code == 200
+    resp = patch({"extra_location_ids": [123]})
+    assert resp.status_code == 422 and "123" in resp.json()["detail"]
+
+
+def test_result_reports_how_old_its_data_is(api, user, azbel):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from apps.esidata.models import FeedStatus
+
+    now = timezone.now()
+    for kind, owner, feeds in (
+        ("character", MAIN, ("skills", "assets", "blueprints", "jobs")),
+        ("corporation", CORP, ("assets", "blueprints", "jobs")),
+    ):
+        for feed in feeds:
+            FeedStatus.objects.create(
+                owner_kind=kind,
+                owner_id=owner,
+                feed=feed,
+                ok=True,
+                attempted_at=now,
+                fetched_at=now - timedelta(minutes=5),
+            )
+    FeedStatus.objects.filter(owner_kind="corporation", feed="assets").update(
+        fetched_at=now - timedelta(days=2)
+    )
+    inputs = api("get", f"/api/plans/{make_plan(user, 'p').pk}/result").json()["inputs"]
+    assert inputs["as_of"] is not None
+    [problem] = inputs["problems"]
+    assert problem["severity"] == "warn" and problem["feed"] == "assets"
+    assert problem["text"].endswith("assets: last synced 2 days ago.")
 
 
 def test_result_priced_from_jita_orders(api, user, azbel, monkeypatch):

@@ -10,8 +10,8 @@ from django.utils import timezone
 from ninja import Router, Schema
 
 from apps.accounts.models import EsiToken, User
+from apps.planning.inputs import picked_blueprints
 from apps.planning.models import Plan
-from apps.planning.reservation import picked_blueprints
 from apps.sde.models import BlueprintProduct, EveType
 from engine import formulas
 from engine.types import Activity
@@ -19,8 +19,17 @@ from engine.types import Character as EngineCharacter
 
 from . import names
 from .access import owner_q, readable_corp_feeds
+from .freshness import feed_health
 from .jobs import ACTIVITY_NAMES, OPEN_STATUSES, blueprint_jobs, effective_status
-from .models import BlueprintItem, CharacterSkill, CorpDivision, Feed, FeedStatus, IndustryJob
+from .models import (
+    BlueprintItem,
+    CharacterSkill,
+    CorpDivision,
+    Corporation,
+    Feed,
+    FeedStatus,
+    IndustryJob,
+)
 
 router = Router(tags=["overview"])
 
@@ -312,16 +321,26 @@ def _problems(user: User, own: set[int]) -> list[dict]:
                     "where": "setup",
                 }
             )
+    health = feed_health(user, feeds=tuple(Feed))
+    for h in health:
+        if h.problem:
+            out.append(
+                {"severity": "bad" if not h.ok else "warn", "text": h.describe(), "where": "setup"}
+            )
+    # Corp feeds no character may read (no role) still record why they failed.
+    covered = {(h.owner_kind, h.owner_id, h.feed) for h in health}
     corps = set(
         user.characters.exclude(corporation_id=None).values_list("corporation_id", flat=True)
     )
-    for s in FeedStatus.objects.filter(ok=False).filter(
-        owner_q(user, Feed.SKILLS) | owner_q(user, Feed.ASSETS) | _corp_q(corps)
-    ):
+    corp_names = dict(Corporation.objects.filter(pk__in=corps).values_list("id", "name"))
+    for s in FeedStatus.objects.filter(ok=False).filter(_corp_q(corps)):
+        if (s.owner_kind, s.owner_id, s.feed) in covered:
+            continue
+        name = corp_names.get(s.owner_id) or f"Corporation {s.owner_id}"
         out.append(
             {
                 "severity": "bad",
-                "text": f"{s.owner_kind} {s.owner_id} {s.feed}: {s.error}",
+                "text": f"{name} {Feed(s.feed).label.lower()}: {s.error}",
                 "where": "setup",
             }
         )

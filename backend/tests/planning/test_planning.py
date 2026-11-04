@@ -95,6 +95,13 @@ def test_engine_station_uses_sde_hull_and_rigs(sde, user):
 # --- plan input ------------------------------------------------------------------------------
 
 
+def available(user, location):
+    totals = {}
+    for (type_id, _, _), qty in inputs.asset_buckets(user, [location]).items():
+        totals[type_id] = totals.get(type_id, 0) + qty
+    return totals
+
+
 def test_available_assets_filters_location_flag_and_singletons(sde, user):
     asset(1, 34, 100, AZBEL_ID)
     asset(2, 34, 50, AZBEL_ID, flag="CorpSAG3", kind="corporation", owner=CORP)
@@ -103,13 +110,13 @@ def test_available_assets_filters_location_flag_and_singletons(sde, user):
     asset(5, 34, 9, AZBEL_ID, flag="Cargo")  # inside a ship
     asset(6, 587, 1, AZBEL_ID, singleton=True)  # an assembled Rifter
     asset(7, 34, 11, AZBEL_ID, kind="corporation", owner=555, flag="CorpSAG1")  # another corp
-    assert inputs.available_assets(user, [AZBEL_ID]) == {34: 157}
+    assert available(user, AZBEL_ID) == {34: 157}
 
 
 def test_corp_assets_need_director(sde, user):
     asset(2, 34, 50, AZBEL_ID, flag="CorpSAG3", kind="corporation", owner=CORP)
     CharacterRoles.objects.filter(character_id=MAIN).update(roles=["Factory_Manager"])
-    assert inputs.available_assets(user, [AZBEL_ID]) == {}
+    assert available(user, AZBEL_ID) == {}
 
 
 def test_blueprints_characters_rules_and_prices(sde, user):
@@ -215,38 +222,3 @@ def test_build_rules_roundtrip(sde, logged_in):
     )
     assert put.json() == {"item_blacklist": [34], "buy_categories": ["t2_items"]}
     assert logged_in.get("/api/build-rules").json()["buy_categories"] == ["t2_items"]
-
-
-def test_plan_preview_runs_the_engine_on_account_data(sde, logged_in, user):
-    Station.objects.create(
-        user=user,
-        name="Azbel",
-        location_id=AZBEL_ID,
-        system_id=D_SYSTEM,
-        structure_type_id=AZBEL_TYPE,
-        activities=["manufacturing"],
-        source="manual",
-    )
-    asset(1, 34, 2000, AZBEL_ID)
-    resp = logged_in.post(
-        "/api/plan/preview",
-        {"lines": [{"type_id": 587, "quantity": 1}]},
-        content_type="application/json",
-    )
-    assert resp.status_code == 200, resp.content
-    body = resp.json()
-    (buy,) = [s for s in body["shopping_list"] if s["type_id"] == 34]
-    # 32000 x Azbel 0.99 = 31680, minus 2000 on hand
-    assert buy["quantity"] == 31680 - 2000
-    assert body["blueprints"][0]["station"]["station_id"] is not None
-
-
-def test_plan_preview_requires_login(client, sde):
-    assert (
-        client.post(
-            "/api/plan/preview",
-            {"lines": [{"type_id": 587, "quantity": 1}]},
-            content_type="application/json",
-        ).status_code
-        == 401
-    )
