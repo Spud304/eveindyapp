@@ -5,6 +5,7 @@ from engine.reprocess import (
     OreClass,
     Refinery,
     RefineryRig,
+    book_cost,
     character_yield,
     cheapest_mix,
     produced,
@@ -119,3 +120,82 @@ def test_volumes_of_ore_and_minerals():
     assert mix.ore_volume == pytest.approx(0.5)
     assert mix.mineral_volume == pytest.approx(10.0)
     assert mix.minerals[0].volume == pytest.approx(10.0)
+
+
+# --- order books ------------------------------------------------------------------------------
+
+NPC = Refinery("NPC", 0.0, SecurityClass.HIGH)
+
+
+def booked(type_id, mats, book, portion=100):
+    return Ore(
+        type_id,
+        f"Ore {type_id}",
+        OreClass.ASTEROID,
+        portion,
+        tuple(Material(t, q) for t, q in mats),
+        SIMPLE,
+        None,
+        0.0,
+        book,
+    )
+
+
+def test_book_cost_walks_orders_cheapest_first():
+    book = ((1.0, 100), (2.0, 50))
+    assert book_cost(book, 120) == (100 * 1.0 + 20 * 2.0, 2.0, 0)
+    assert book_cost(book, 200) == (200.0, 2.0, 50)
+
+
+def test_mix_uses_cheap_orders_then_switches_ore():
+    # At 50%, a batch of either ore gives 200 Tritanium. Ore 1 has 300 units (3 batches) at
+    # 1 ISK, then orders at 5 ISK; ore 2 is 2 ISK with plenty on sale. Need 1000 Tritanium:
+    # 3 batches of ore 1 (600) and 2 batches of ore 2 (400).
+    cheap_then_dear = booked(1, [(TRIT, 400)], ((1.0, 300), (5.0, 10_000)))
+    steady = booked(2, [(TRIT, 400)], ((2.0, 10_000),))
+    mix = cheapest_mix({TRIT: 1000}, [cheap_then_dear, steady], NPC, {}, BONUS, GENERAL, {})
+    got = {line.type_id: line for line in mix.ores}
+    assert {t: line.batches for t, line in got.items()} == {1: 3, 2: 2}
+    assert got[1].total == 300 and got[1].top_price == 1.0 and got[1].on_sale == 10_300
+    assert mix.ore_cost == 300 + 2 * 100 * 2.0
+
+
+def test_ore_with_nothing_on_sale_is_left_out():
+    mix = cheapest_mix(
+        {TRIT: 100},
+        [booked(1, [(TRIT, 400)], ()), booked(2, [(TRIT, 400)], ((3.0, 1000),))],
+        NPC,
+        {},
+        BONUS,
+        GENERAL,
+        {},
+    )
+    assert [line.type_id for line in mix.ores] == [2]
+    assert any("nothing on sale" in w for w in mix.warnings)
+
+
+def test_minerals_bought_directly_through_their_book():
+    mix = cheapest_mix(
+        {TRIT: 150},
+        [booked(1, [(TRIT, 400)], ((1.0, 1000),))],
+        NPC,
+        {},
+        BONUS,
+        GENERAL,
+        {},
+        mineral_books={TRIT: ((4.0, 100), (6.0, 1000))},
+    )
+    assert mix.mineral_cost == 100 * 4.0 + 50 * 6.0
+    assert mix.minerals[0].unit_price == pytest.approx(700 / 150)
+    short = cheapest_mix(
+        {TRIT: 150},
+        [booked(1, [(TRIT, 400)], ((1.0, 1000),))],
+        NPC,
+        {},
+        BONUS,
+        GENERAL,
+        {},
+        mineral_books={TRIT: ((4.0, 100),)},
+    )
+    assert short.mineral_cost is None
+    assert any("enough on sale" in w for w in short.warnings)

@@ -13,12 +13,17 @@ the best reprocessing rig for the ore class gives its `refiningYieldMultiplier` 
 0.53 T2) times its security modifier (attrs 2355-2357: 1.0 / 1.06 / 1.12); without one, 0.50. Then
 x (1 + the hull's strRefiningYieldBonus (attr 2722: Athanor 2, Tatara 5.5) / 100).
 
-The mix is an integer programme over whole batches (scipy's HiGHS MILP): least ISK spent on ore
-such that every needed mineral is produced. Mixes over LP_ROUNDING_BATCHES batches use the linear
-answer rounded up (at most one batch per ore over the cheapest; exact solving took seconds on
-a dreadnought plan). The floor per material is handled by solving without
-it, checking with it, and raising the target of any mineral that came up short (it loses at most
-one unit per ore used), then solving again.
+Prices: an ore or mineral with an order `book` (sell orders, cheapest first) is bought through it:
+each order is a price tier with its units as the cap, so big buys pay the higher orders and no
+more can be bought than is on sale. Without a book, its flat `price` is used with no cap. Order
+minimum quantities are ignored.
+
+The mix is the least ISK spent on ore such that every needed mineral is produced, over whole
+batches (scipy HiGHS). Mixes over LP_ROUNDING_BATCHES batches use the linear answer rounded up
+(at most one batch per ore over the cheapest; exact integer solving took seconds on a
+dreadnought plan); smaller ones are solved as integers. The floor per material is handled by
+solving without it, checking with it, and raising the target of any mineral that came up short
+(it loses at most one unit per ore used), then solving again.
 """
 
 from __future__ import annotations
@@ -32,6 +37,8 @@ from .types import Material, Reason, ReasonCode, SecurityClass, TypeId
 
 NO_RIG_MULTIPLIER = 0.50
 LP_ROUNDING_BATCHES = 1000  # above this many batches, round the linear answer up
+
+Book = tuple[tuple[float, int], ...]  # sell orders as (price, units), cheapest first
 
 
 class OreClass(StrEnum):
@@ -48,8 +55,9 @@ class Ore:
     portion_size: int  # units reprocessed per batch
     materials: tuple[Material, ...]  # per batch, before efficiency
     skill_id: TypeId | None  # its processing skill (attr 790)
-    price: float | None  # per unit
+    price: float | None  # per unit, used when there is no `book`
     volume: float = 0.0  # m3 per unit
+    book: Book | None = None  # sell orders; () means none on sale
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,11 +83,13 @@ class OreLine:
     name: str
     batches: int
     quantity: int  # units to buy
-    unit_price: float
+    unit_price: float  # average paid per unit
     total: float
     efficiency: float
     reason: Reason
     volume: float = 0.0  # m3 for the whole quantity
+    top_price: float | None = None  # dearest order bought from (with a book)
+    on_sale: int | None = None  # units on sale (with a book)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,9 +98,10 @@ class MineralLine:
     needed: int
     produced: int
     surplus: int
-    unit_price: float | None
-    buy_cost: float | None  # buying `needed` directly
+    unit_price: float | None  # average paid per unit for `needed`
+    buy_cost: float | None  # buying `needed` directly; None if no price or not enough on sale
     volume: float = 0.0  # m3 of `needed`
+    on_sale: int | None = None  # units on sale (with a book)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +109,7 @@ class OreMix:
     ores: tuple[OreLine, ...]
     minerals: tuple[MineralLine, ...]
     ore_cost: float
-    mineral_cost: float | None  # buying the needed minerals directly; None if a price is missing
+    mineral_cost: float | None  # buying the needed minerals directly; None if not possible
     station_reason: Reason
     warnings: tuple[str, ...] = ()
     feasible: bool = True
@@ -141,6 +152,19 @@ def produced(ore: Ore, batches: int, efficiency: float) -> dict[TypeId, int]:
     return {m.type_id: math.floor(m.quantity * batches * efficiency) for m in ore.materials}
 
 
+def book_cost(book: Book, units: int) -> tuple[float, float | None, int]:
+    """(ISK for `units` bought cheapest first, dearest price paid, units short)."""
+    cost, top, left = 0.0, None, units
+    for price, available in book:
+        if left <= 0:
+            break
+        take = min(available, left)
+        cost += take * price
+        top = price
+        left -= take
+    return cost, top, max(0, left)
+
+
 def cheapest_mix(
     need: Mapping[TypeId, int],
     ores: list[Ore],
@@ -151,22 +175,29 @@ def cheapest_mix(
     mineral_prices: Mapping[TypeId, float | None],
     implant_percent: float = 0.0,
     mineral_volumes: Mapping[TypeId, float] | None = None,
+    mineral_books: Mapping[TypeId, Book] | None = None,
 ) -> OreMix:
     import numpy as np
-    from scipy.optimize import Bounds, LinearConstraint, linprog, milp
+    from scipy.optimize import Bounds, LinearConstraint, milp
 
     need = {m: q for m, q in need.items() if q > 0}
     vols = mineral_volumes or {}
+    books = mineral_books or {}
     mineral_volume = sum(vols.get(m, 0.0) * q for m, q in need.items())
-    warnings = []
-    usable = [
-        o
-        for o in ores
-        if o.price and o.portion_size > 0 and any(m.type_id in need for m in o.materials)
-    ]
-    unpriced = [o.name for o in ores if not o.price and any(m.type_id in need for m in o.materials)]
-    if unpriced:
-        warnings.append(f"{len(unpriced)} ore(s) have no price and are left out.")
+    warnings: list[str] = []
+
+    def priced(o: Ore) -> bool:
+        return bool(o.book) if o.book is not None else bool(o.price)
+
+    relevant = [o for o in ores if any(m.type_id in need for m in o.materials)]
+    usable = [o for o in relevant if o.portion_size > 0 and priced(o)]
+    no_stock = [o for o in relevant if o.book is not None and not o.book]
+    no_price = [o for o in relevant if o.book is None and not o.price]
+    if no_stock:
+        warnings.append(f"{len(no_stock)} ore(s) have nothing on sale and are left out.")
+    if no_price:
+        warnings.append(f"{len(no_price)} ore(s) have no price and are left out.")
+
     eff = {}
     station_text = {}
     for o in usable:
@@ -181,79 +212,88 @@ def cheapest_mix(
     )
     minerals = sorted(need)
 
-    def mineral_lines(made: dict[TypeId, int]) -> tuple[MineralLine, ...]:
-        rows = []
-        for m in sorted(set(need) | set(made)):
+    def mineral_line(m: TypeId, made: int) -> MineralLine:
+        n = need.get(m, 0)
+        book = books.get(m)
+        if book is not None:
+            cost, _, short = book_cost(book, n)
+            buy = cost if not short else None
+            unit = cost / n if n and not short else None
+            on_sale = sum(u for _, u in book)
+        else:
             p = mineral_prices.get(m)
-            n = need.get(m, 0)
-            rows.append(
-                MineralLine(
-                    m,
-                    n,
-                    made.get(m, 0),
-                    max(0, made.get(m, 0) - n),
-                    p,
-                    p * n if p else None,
-                    vols.get(m, 0.0) * n,
-                )
-            )
-        return tuple(rows)
+            unit, buy, on_sale = p, (p * n if p is not None else None), None
+        return MineralLine(m, n, made, max(0, made - n), unit, buy, vols.get(m, 0.0) * n, on_sale)
 
-    direct = [mineral_prices.get(m) for m in minerals]
+    def mineral_lines(made: dict[TypeId, int]) -> tuple[MineralLine, ...]:
+        return tuple(mineral_line(m, made.get(m, 0)) for m in sorted(set(need) | set(made)))
+
+    direct = [mineral_line(m, 0) for m in minerals]
+    short_minerals = [m.type_id for m in direct if m.buy_cost is None and m.on_sale is not None]
+    if short_minerals:
+        warnings.append(
+            f"{len(short_minerals)} mineral(s) do not have enough on sale to buy as they are."
+        )
     mineral_cost = (
-        sum(p * need[m] for m, p in zip(minerals, direct, strict=True))
-        if all(p is not None for p in direct)
+        sum(m.buy_cost for m in direct if m.buy_cost is not None)
+        if all(m.buy_cost is not None for m in direct)
         else None
     )
     if not need:
         return OreMix((), (), 0.0, 0.0, station_reason, tuple(warnings))
-    if not usable:
+
+    def infeasible(text: str) -> OreMix:
         return OreMix(
             (),
             mineral_lines({}),
             0.0,
             mineral_cost,
             station_reason,
-            (*warnings, "No priced ore yields these minerals."),
+            (*warnings, text),
             feasible=False,
             mineral_volume=mineral_volume,
         )
 
-    cost = np.array([o.price * o.portion_size for o in usable])
-    yield_matrix = np.array(
-        [
-            [
+    if not usable:
+        return infeasible("No ore on sale yields these minerals.")
+
+    # Variables: one batch count per ore, then one per price tier (orders, in batches).
+    tiers: list[tuple[int, float, float]] = []  # (ore index, ISK per batch, cap in batches)
+    for i, o in enumerate(usable):
+        if o.book is None:
+            tiers.append((i, o.price * o.portion_size, math.inf))
+        else:
+            tiers.extend((i, p * o.portion_size, u / o.portion_size) for p, u in o.book)
+    n_ore, n_tier = len(usable), len(tiers)
+    cost = np.concatenate([np.zeros(n_ore), np.array([t[1] for t in tiers])])
+    caps = np.concatenate([np.full(n_ore, np.inf), np.array([t[2] for t in tiers])])
+    link = np.zeros((n_ore, n_ore + n_tier))  # tiers of an ore add up to its batches
+    for i in range(n_ore):
+        link[i, i] = -1.0
+    for j, (i, _, _) in enumerate(tiers):
+        link[i, n_ore + j] = 1.0
+    yields = np.zeros((len(minerals), n_ore + n_tier))
+    for r, m in enumerate(minerals):
+        for i, o in enumerate(usable):
+            yields[r, i] = (
                 sum(mt.quantity for mt in o.materials if mt.type_id == m) * eff[o.type_id]
-                for o in usable
-            ]
-            for m in minerals
-        ]
-    )
+            )
+    bounds = Bounds(np.zeros(n_ore + n_tier), caps)
+
     target = {m: need[m] for m in minerals}
     for _ in range(20):
         lower = np.array([target[m] for m in minerals], dtype=float)
-        # Linear first: fast. Large mixes are rounded up (at most one extra batch per ore);
-        # only small ones, where a batch matters, are solved as integers.
-        res = linprog(cost, A_ub=-yield_matrix, b_ub=-lower, bounds=(0, None), method="highs")
-        if res.status == 0 and res.x is not None and res.x.sum() < LP_ROUNDING_BATCHES:
-            res = milp(
-                c=cost,
-                constraints=LinearConstraint(yield_matrix, lb=lower, ub=np.inf),
-                integrality=np.ones(len(usable)),
-                bounds=Bounds(0, np.inf),
-            )
+        constraints = [
+            LinearConstraint(yields, lb=lower, ub=np.inf),
+            LinearConstraint(link, lb=0.0, ub=0.0),
+        ]
+        res = milp(c=cost, constraints=constraints, bounds=bounds)  # linear: no integrality
+        if res.status == 0 and res.x is not None and res.x[:n_ore].sum() < LP_ROUNDING_BATCHES:
+            integral = np.concatenate([np.ones(n_ore), np.zeros(n_tier)])
+            res = milp(c=cost, constraints=constraints, bounds=bounds, integrality=integral)
         if res.status != 0 or res.x is None:
-            return OreMix(
-                (),
-                mineral_lines({}),
-                0.0,
-                mineral_cost,
-                station_reason,
-                (*warnings, f"No ore mix found ({res.message})."),
-                feasible=False,
-                mineral_volume=mineral_volume,
-            )
-        batches = [math.ceil(x - 1e-6) for x in res.x]
+            return infeasible(f"No ore mix found: {res.message}")
+        batches = [math.ceil(x - 1e-6) for x in res.x[:n_ore]]
         made: dict[TypeId, int] = {}
         for o, b in zip(usable, batches, strict=True):
             if b:
@@ -271,21 +311,34 @@ def cheapest_mix(
     for o, b in zip(usable, batches, strict=True):
         if not b:
             continue
+        units = b * o.portion_size
+        top = on_sale = None
+        if o.book is None:
+            total = o.price * units
+        else:
+            total, top, short_units = book_cost(o.book, units)
+            on_sale = sum(u for _, u in o.book)
+            if short_units:
+                # Rounding up to a whole batch can ask for a little more than is on sale.
+                total += short_units * (top or 0.0)
+                warnings.append(f"{o.name}: {short_units:,} more units than are on sale.")
         e = eff[o.type_id]
         lines.append(
             OreLine(
                 o.type_id,
                 o.name,
                 b,
-                b * o.portion_size,
-                o.price,
-                o.price * b * o.portion_size,
+                units,
+                total / units,
+                total,
                 e,
                 Reason(
                     ReasonCode.BUY_RULE,
                     f"{b} batch(es) of {o.portion_size} at {e:.2%} efficiency.",
                 ),
-                o.volume * b * o.portion_size,
+                o.volume * units,
+                top,
+                on_sale,
             )
         )
     lines.sort(key=lambda line: -line.total)
