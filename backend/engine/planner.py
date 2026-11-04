@@ -193,6 +193,8 @@ class _Planner:
             self.owned[ob.type_id].append(ob)
             if ob.job_activity_id is not None and not ob.is_copy:
                 self.busy[_item_lock(ob)] = max(0.0, ob.job_ends_in)
+            if ob.source_job_id is not None:
+                self.busy[_item_lock(ob)] = max(0.0, ob.available_in)
 
         self.line_qty: dict[TypeId, int] = defaultdict(int)
         # BPCs picked on plan lines, by item id, in the order they were picked.
@@ -450,7 +452,13 @@ class _Planner:
         in_jobs = [b for b in owned if b.is_copy and b.job_activity_id is not None]
         bpcs = sorted(
             (b for b in owned if b.is_copy and b.job_activity_id is None),
-            key=lambda b: (self.picked.get(b.item_id, len(self.picked)), -b.me, -b.te, b.item_id),
+            key=lambda b: (
+                self.picked.get(b.item_id, len(self.picked)),
+                -b.me,
+                -b.te,
+                b.available_in,
+                b.item_id,
+            ),
         )
         is_reaction = prod.activity == Activity.REACTION
 
@@ -472,7 +480,7 @@ class _Planner:
         usable = [
             b for b in bpcs if best_bpo is None or b.me >= best_bpo.me or b.item_id in self.picked
         ]
-        picked_used = 0
+        picked_used = incoming_used = 0
         for b in usable:
             if remaining <= 0:
                 break
@@ -485,21 +493,20 @@ class _Planner:
                     b.me,
                     b.te,
                     BlueprintSource.BPC,
-                    me_reason(
-                        ReasonCode.ME_OWNED_BPC,
-                        f"{'BPC picked for this plan' if b.item_id in self.picked else 'Owned BPC'}"
-                        f" {b.item_id}: ME {b.me} / TE {b.te}, {b.runs} runs.",
-                    ),
+                    me_reason(ReasonCode.ME_OWNED_BPC, self.bpc_text(b)),
                     _item_lock(b),
                 )
             )
             remaining -= take
             picked_used += b.item_id in self.picked
+            incoming_used += b.source_job_id is not None
         n_bpc_specs = len(specs)
         if specs:
             note = f"{len(specs)} owned BPC(s) cover {runs - remaining} runs"
             if picked_used:
                 note += f" ({picked_used} picked for this plan)"
+            if incoming_used:
+                note += f"; {incoming_used} of them still being made by copy jobs"
             source_notes.append(note)
         if in_jobs:
             source_notes.append(f"{len(in_jobs)} owned BPC(s) in jobs not used")
@@ -689,6 +696,18 @@ class _Planner:
                 invention=invention,
             )
         )
+
+    def bpc_text(self, b: OwnedBlueprint) -> str:
+        stats = f"ME {b.me} / TE {b.te}, {b.runs} runs"
+        if b.source_job_id is not None:
+            when = (
+                "finished: deliver it first"
+                if b.available_in <= 0
+                else f"ready in {_duration(b.available_in)}"
+            )
+            return f"Copy being made by job {b.source_job_id}: {stats}; {when}."
+        kind = "BPC picked for this plan" if b.item_id in self.picked else "Owned BPC"
+        return f"{kind} {b.item_id}: {stats}."
 
     def split_long(
         self, prod: _Producer, specs: list[_Spec], time_mult: float, notes: list[str]
@@ -899,10 +918,26 @@ class _Planner:
         inv_station, inv_bonuses, _ = self.choose_station(Activity.INVENTION, None, t1_bp_id)
         inv_cap = f.max_runs(Activity.INVENTION, inv.time_seconds, inv_bonuses.time)
         per_copy = max(1, min(t1.max_production_limit if t1 else 1, inv_cap))
-        copy_runs = list(_split(opt.attempts, per_copy))
+
+        # T1 copies on hand (not in a job) and copies an open copy job is making are used
+        # first, soonest available first; copy jobs make the rest.
+        t1_bpcs = sorted(
+            (b for b in t1_owned if b.is_copy and b.job_activity_id is None),
+            key=lambda b: (b.available_in, -b.runs, b.item_id),
+        )
+        on_hand: list[tuple[int, OwnedBlueprint]] = []
+        left = opt.attempts
+        for b in t1_bpcs:
+            if left <= 0:
+                break
+            take = min(b.runs, left)
+            on_hand.extend((r, b) for r in _split(take, inv_cap))
+            left -= take
+        copy_runs = list(_split(left, per_copy)) if left > 0 else []
+
         job_ids: list[str] = []
         copy_job_ids: list[str] = []
-        if t1_bpos and t1 and t1.copying:
+        if copy_runs and t1_bpos and t1 and t1.copying:
             # Same pick as manufacturing, so copying and building share the blueprint's lock.
             t1_bpo = _best_bpo(t1_bpos)
             copy_station, copy_bonuses, _ = self.choose_station(Activity.COPYING, None, t1_bp_id)
@@ -942,20 +977,21 @@ class _Planner:
                 )
                 copy_job_ids.append(copy_job_id)
             job_ids.extend(copy_job_ids)
-        t1_source = BlueprintSource.BPC
-        if (
-            not copy_job_ids
-            and sum(b.runs for b in t1_owned if b.is_copy and b.job_activity_id is None)
-            < opt.attempts
-        ):
-            t1_source = BlueprintSource.MISSING
+        copy_source = BlueprintSource.BPC
+        if copy_runs and not copy_job_ids:
+            copy_source = BlueprintSource.MISSING
             self.warn(
                 ReasonCode.SOURCE_MISSING,
-                f"{self.name(t2_bp_id)}: invention needs {opt.attempts} T1 copy runs of "
-                f"{self.name(t1_bp_id)}; no T1 BPO to copy and owned T1 BPCs fall short.",
+                f"{self.name(t2_bp_id)}: invention needs {left} more T1 copy runs of "
+                f"{self.name(t1_bp_id)}; no T1 BPO to copy and T1 BPCs fall short.",
             )
 
-        for i, r in enumerate(copy_runs, 1):
+        # (attempts, T1 copy used or None for one a planned copy job makes)
+        inv_jobs: list[tuple[int, OwnedBlueprint | None]] = [
+            *on_hand,
+            *((r, None) for r in copy_runs),
+        ]
+        for i, (r, used) in enumerate(inv_jobs, 1):
             mats = [Material(m.type_id, m.quantity * r) for m in inv.materials]
             if dec:
                 mats.append(Material(dec.type_id, r))
@@ -969,6 +1005,9 @@ class _Planner:
                     ),
                 )
             job_id = f"invention:{t1_bp_id}:for:{t2_bp_id}:{i}"
+            why = f"{r} attempts."
+            if used is not None:
+                why = f"{r} attempts on a T1 copy. {self.bpc_text(used)}"
             self.add_job(
                 WorkJob(
                     job_id=job_id,
@@ -978,13 +1017,14 @@ class _Planner:
                     time_per_run=inv.time_seconds,
                     time_multiplier=inv_bonuses.time,
                     skills=inv.skills,
-                    depends_on=list(copy_job_ids),
+                    depends_on=[] if used is not None else list(copy_job_ids),
+                    lock=_item_lock(used) if used is not None else None,
                 ),
                 _JobMeta(
                     me=0,
                     te=0,
-                    me_reason=Reason(ReasonCode.SOURCE_INVENTION, f"{r} attempts."),
-                    source=t1_source,
+                    me_reason=Reason(ReasonCode.SOURCE_INVENTION, why),
+                    source=BlueprintSource.BPC if used is not None else copy_source,
                     station=inv_station,
                     materials=tuple(mats),
                     product_type_id=t2_bp_id,

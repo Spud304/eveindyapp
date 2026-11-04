@@ -285,6 +285,10 @@ class OwnedBlueprint:
     # a BPO's jobs in the plan start when its job ends.
     job_activity_id: int | None = None
     job_ends_in: float = 0.0
+    # A copy an open copy job is still making: the job's id and seconds until it ends (0 or
+    # less: finished, waiting to be delivered). Usable from then on.
+    source_job_id: int | None = None
+    available_in: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

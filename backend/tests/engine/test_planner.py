@@ -732,6 +732,50 @@ def test_bpcs_in_jobs_are_not_used():
     assert "1 owned BPC(s) in jobs not used" in bp(r, BP_HULL).source_reason.text
 
 
+def test_owned_t1_bpcs_are_used_for_invention_before_copying():
+    # 5 attempts needed (see test_invention_attempts_and_datacores).
+    r = plan(t2_input(blueprints=(bpo(BP_T1_MOD), bpc(BP_T1_MOD, 2, item_id=7), bpo(BP_COMP_A))))
+    inv = jobs_for(r, BP_T1_MOD, Activity.INVENTION)
+    assert sorted(j.runs for j in inv) == [2, 3]
+    on_bpc = next(j for j in inv if j.runs == 2)
+    assert on_bpc.source == BlueprintSource.BPC and not on_bpc.depends_on
+    [copy] = jobs_for(r, BP_T1_MOD, Activity.COPYING)
+    assert copy.copies == 1 and copy.runs == 3
+
+
+def test_copies_being_made_cover_invention():
+    incoming = replace(bpc(BP_T1_MOD, 300, item_id=-1), source_job_id=77, available_in=7200.0)
+    r = plan(t2_input(blueprints=(bpo(BP_T1_MOD), incoming, bpo(BP_COMP_A))))
+    assert jobs_for(r, BP_T1_MOD, Activity.COPYING) == []
+    [inv] = jobs_for(r, BP_T1_MOD, Activity.INVENTION)
+    assert inv.runs == 5 and inv.schedule.start_seconds == 7200
+    assert "Copy being made by job 77" in inv.me_reason.text
+    assert "ready in 2h 0m" in inv.me_reason.text
+
+
+def test_copies_being_made_are_used_for_manufacturing():
+    incoming = replace(bpc(BP_HULL, 10, item_id=-1), source_job_id=78, available_in=3000.0)
+    r = plan(
+        make_input(
+            [(HULL, 10)],
+            blueprints=(bpo(BP_HULL), incoming),
+            rules=BuildRules(item_blacklist=frozenset({COMP_A})),
+        )
+    )
+    [hull] = jobs_for(r, BP_HULL)
+    assert hull.source == BlueprintSource.BPC and hull.schedule.start_seconds == 3000
+    assert hull.me_reason.text.startswith("Copy being made by job 78")
+    assert "1 owned BPC(s) cover 10 runs; 1 of them still being made by copy jobs" in (
+        bp(r, BP_HULL).source_reason.text
+    )
+
+
+def test_finished_copy_job_must_be_delivered():
+    ready = replace(bpc(BP_HULL, 10, item_id=-1), source_job_id=79, available_in=-5.0)
+    r = plan(make_input([(HULL, 10)], blueprints=(ready, bpo(BP_COMP_A))))
+    assert jobs_for(r, BP_HULL)[0].me_reason.text.endswith("finished: deliver it first.")
+
+
 def test_copy_job_layout_respects_thirty_days_per_copy():
     # 1 day per copied run, 10 runs per copy: one job may hold ceil(30 / 10) = 3 copies.
     cp = _CopyPlan(
