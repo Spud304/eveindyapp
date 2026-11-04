@@ -17,6 +17,14 @@ export function isk(n: number | null | undefined): string {
   return int.format(n)
 }
 
+const dec1 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 })
+
+/** Volume in m³: whole numbers from 100 up, one decimal below. */
+export function m3(n: number | null | undefined): string {
+  if (n == null) return ''
+  return `${Math.abs(n) >= 100 ? int.format(n) : dec1.format(n)} m³`
+}
+
 export function iskExact(n: number | null | undefined): string {
   return n == null ? '' : `${int.format(n)} ISK`
 }

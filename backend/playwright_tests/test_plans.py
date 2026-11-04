@@ -24,6 +24,8 @@ def test_create_plan_add_line_and_see_the_shopping_list(login):
     expect(by_test_id(page, f"plan.line.{RIFTER}")).to_be_visible()
     one = shopping_qty(page, TRITANIUM)
     assert one > 0
+    expect(by_test_id(page, f"plan.shopping.{TRITANIUM}")).to_contain_text(f"{one * 0.01:,.0f} m³")
+    expect(by_test_id(page, "plan.shopping.volume")).to_contain_text("m³")
 
     qty = by_test_id(page, f"plan.line.{RIFTER}.qty")
     qty.fill("2")
@@ -246,6 +248,10 @@ def test_minerals_as_compressed_ore(login):
     assert cell(2) >= cell(1) > 0  # made covers what is needed
     expect(page.locator('[data-testid^="plan.ore.line."]').first).to_be_visible()
     expect(by_test_id(page, "plan.ore.copy-all")).to_be_enabled()
+    # Tritanium is 0.01 m3 a unit; compressed ore is far smaller per mineral.
+    expect(by_test_id(page, "plan.ore.volume")).to_contain_text("m³")
+    expect(by_test_id(page, "plan.ore.mineral-volume")).to_contain_text("m³")
+    expect(by_test_id(page, "plan.ore.all-volume")).to_contain_text("m³")
     # Adding moon ore to the choice recomputes; Tritanium is still covered.
     by_test_id(page, "plan.ore.class.moon").check()
     expect(by_test_id(page, "plan.ore.class.moon")).to_be_checked()

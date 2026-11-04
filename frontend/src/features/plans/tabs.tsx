@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react'
 import { useCopy } from '@/hooks/useCopy'
 import { useBlueprintOptions, usePlanMutations } from '@/lib/api/hooks'
 import type { BlueprintChoice, BlueprintPlan, ChoiceIO, PlanOut, PlanResultOut, PurchaseOption } from '@/lib/api/client'
-import { duration, isk, iskExact, pct, qty } from '@/lib/format'
+import { duration, isk, iskExact, m3, pct, qty } from '@/lib/format'
 import { Badge, Button, Empty, Input, Mono, Num, Panel, Table, Why } from '@/components/ui'
 
 export type Lookups = { characters: Map<number, string>; stations: Map<number, string> }
@@ -26,6 +26,7 @@ export function ShoppingTab({ data }: { data: PlanResultOut }) {
   // EVE multibuy / Janice paste: "name<TAB>quantity" per line.
   const paste = r.shopping_list.map((s) => `${s.name}\t${s.quantity}`).join('\n')
   const onHand = r.items.filter((i) => i.on_hand_used > 0)
+  const volume = r.shopping_list.reduce((sum, s) => sum + s.volume, 0)
   return (
     <div className="flex flex-col gap-4">
       <Panel
@@ -34,6 +35,9 @@ export function ShoppingTab({ data }: { data: PlanResultOut }) {
         flush
         actions={
           <>
+            <span className="text-ui text-muted" data-testid="plan.shopping.volume" title="packaged volume of everything to buy">
+              <Mono className="text-fg">{m3(volume)}</Mono>
+            </span>
             <span className="text-ui text-muted">
               <Mono className="text-fg">{isk(r.costs.materials + r.costs.invention_inputs)}</Mono>
             </span>
@@ -55,6 +59,9 @@ export function ShoppingTab({ data }: { data: PlanResultOut }) {
                   Unit
                 </th>
                 <th className="text-right">Total</th>
+                <th className="text-right" title="packaged volume">
+                  Volume
+                </th>
                 <th>Why</th>
               </tr>
             </thead>
@@ -65,6 +72,7 @@ export function ShoppingTab({ data }: { data: PlanResultOut }) {
                   <Num>{qty(s.quantity)}</Num>
                   <Num className="text-muted">{s.unit_price == null ? <span className="text-warn">no price</span> : isk(s.unit_price)}</Num>
                   <Num title={iskExact(s.total_price)}>{isk(s.total_price)}</Num>
+                  <Num className="text-muted">{m3(s.volume)}</Num>
                   <td>
                     <Why text={s.reason.text} />
                     {held[s.type_id] ? (

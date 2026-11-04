@@ -1054,6 +1054,11 @@ export interface components {
             /** Total Price */
             total_price: number | null;
             reason: components["schemas"]["Reason"];
+            /**
+             * Volume
+             * @default 0
+             */
+            volume: number;
         };
         /** StationChoice */
         StationChoice: {
@@ -1667,6 +1672,11 @@ export interface components {
             unit_price: number | null;
             /** Buy Cost */
             buy_cost: number | null;
+            /**
+             * Volume
+             * @default 0
+             */
+            volume: number;
         };
         /**
          * OreClass
@@ -1690,6 +1700,11 @@ export interface components {
             /** Efficiency */
             efficiency: number;
             reason: components["schemas"]["Reason"];
+            /**
+             * Volume
+             * @default 0
+             */
+            volume: number;
         };
         /** OreMix */
         OreMix: {
@@ -1712,6 +1727,16 @@ export interface components {
              * @default true
              */
             feasible: boolean;
+            /**
+             * Ore Volume
+             * @default 0
+             */
+            ore_volume: number;
+            /**
+             * Mineral Volume
+             * @default 0
+             */
+            mineral_volume: number;
         };
         /** SearchIn */
         SearchIn: {

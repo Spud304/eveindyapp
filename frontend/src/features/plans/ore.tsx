@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useCopy } from '@/hooks/useCopy'
 import { useCompressedOre, type OreQuery } from '@/lib/api/hooks'
 import type { PlanResultOut } from '@/lib/api/client'
-import { isk, pct, qty } from '@/lib/format'
+import { isk, m3, pct, qty } from '@/lib/format'
 import { Badge, Button, Checkbox, Empty, ErrorText, Field, Mono, Num, Panel, Select, Table } from '@/components/ui'
 
 const CLASSES = [
@@ -29,6 +29,8 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
   const covered = new Set((mix?.minerals ?? []).filter((m) => m.needed > 0).map((m) => m.type_id))
   const allText = [...data.result!.shopping_list.filter((s) => !covered.has(s.type_id)).map((s) => `${s.name}\t${s.quantity}`), oreText].filter(Boolean).join('\n')
   const saving = mix && mix.mineral_cost != null ? mix.mineral_cost - mix.ore_cost : null
+  // Everything to buy with ore in place of the covered minerals.
+  const allVolume = data.result!.shopping_list.filter((s) => !covered.has(s.type_id)).reduce((sum, s) => sum + s.volume, 0) + (mix?.ore_volume ?? 0)
   return (
     <Panel
       title="Minerals as compressed ore"
@@ -77,10 +79,14 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
             <>
               <div className="flex flex-wrap items-center gap-3 text-ui" data-testid="plan.ore.summary">
                 <span>
-                  ore <Mono className="text-fg">{isk(mix.ore_cost)}</Mono>
+                  ore <Mono className="text-fg">{isk(mix.ore_cost)}</Mono> · <Mono className="text-fg" testId="plan.ore.volume">{m3(mix.ore_volume)}</Mono>
                 </span>
                 <span>
-                  vs minerals <Mono className="text-fg">{mix.mineral_cost != null ? isk(mix.mineral_cost) : 'no price'}</Mono>
+                  vs minerals <Mono className="text-fg">{mix.mineral_cost != null ? isk(mix.mineral_cost) : 'no price'}</Mono> ·{' '}
+                  <Mono className="text-fg" testId="plan.ore.mineral-volume">{m3(mix.mineral_volume)}</Mono>
+                </span>
+                <span title="the whole shopping list with these minerals bought as ore" data-testid="plan.ore.all-volume">
+                  whole list with ore <Mono className="text-fg">{m3(allVolume)}</Mono>
                 </span>
                 {saving != null ? (
                   <Badge tone={saving > 0 ? 'ok' : 'warn'} testId="plan.ore.saving">
@@ -109,6 +115,7 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                     <th className="text-right">Units</th>
                     <th className="text-right">Yield</th>
                     <th className="text-right">ISK</th>
+                    <th className="text-right">Volume</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -118,6 +125,7 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                       <Num>{qty(o.quantity)}</Num>
                       <Num>{pct(o.efficiency * 100, 1)}</Num>
                       <Num>{isk(o.total)}</Num>
+                      <Num className="text-muted">{m3(o.volume)}</Num>
                     </tr>
                   ))}
                 </tbody>
@@ -131,6 +139,9 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                     <th className="text-right" title="made beyond what the plan needs">
                       Spare
                     </th>
+                    <th className="text-right" title="volume of the needed amount, bought as minerals">
+                      Volume
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -140,6 +151,7 @@ export function OrePanel({ planId, data }: { planId: number; data: PlanResultOut
                       <Num>{qty(m.needed)}</Num>
                       <Num>{qty(m.produced)}</Num>
                       <Num className="text-muted">{m.surplus ? qty(m.surplus) : ''}</Num>
+                      <Num className="text-muted">{m.volume ? m3(m.volume) : ''}</Num>
                     </tr>
                   ))}
                 </tbody>
