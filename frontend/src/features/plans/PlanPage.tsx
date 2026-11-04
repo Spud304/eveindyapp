@@ -22,6 +22,7 @@ import {
   Tabs,
 } from '@/components/ui'
 import { BlueprintsTab, CostTab, ScheduleTab, ShoppingTab, type Lookups } from './tabs'
+import { ProgressTab } from './progress'
 
 type TabKey = 'shopping' | 'blueprints' | 'schedule' | 'cost' | 'progress'
 
@@ -71,9 +72,7 @@ export function PlanPage() {
               {tab === 'cost' ? <CostTab data={r} /> : null}
             </>
           ) : null}
-          {tab === 'progress' ? (
-            <Empty hint="The tracker (step 5) matches your ESI jobs to this plan once it is active.">Progress tracking is not built yet.</Empty>
-          ) : null}
+          {tab === 'progress' ? <ProgressTab planId={p.id} /> : null}
         </div>
         <div className="flex min-w-0 flex-col gap-4">
           <LinesPanel plan={p} />

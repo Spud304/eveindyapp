@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import clsx from 'clsx'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { useDashboard, usePlans } from '@/lib/api/hooks'
+import { useDashboard, usePlanProgress, usePlans } from '@/lib/api/hooks'
 import type { JobRow } from '@/lib/api/client'
 import { duration, qty } from '@/lib/format'
 import { Badge, Checkbox, Empty, ErrorText, Mono, Num, PageHeader, Panel, Table } from '@/components/ui'
@@ -101,7 +101,7 @@ export function DashboardPage() {
                 <Link to="/plans/$planId" params={{ planId: String(active.id) }} className="font-medium text-accent hover:underline">
                   {active.name}
                 </Link>
-                <span className="text-ui text-muted">Progress against your jobs comes with the tracker (step 5).</span>
+                <ActivePlanSummary planId={active.id} />
               </div>
             ) : (
               <span className="text-ui text-muted">
@@ -167,5 +167,19 @@ export function DashboardPage() {
         </div>
       </div>
     </>
+  )
+}
+
+/** Runs started, ready and still to start across the active plan's blueprints. */
+function ActivePlanSummary({ planId }: { planId: number }) {
+  const progress = usePlanProgress(planId)
+  const rows = progress.data?.rows ?? []
+  const sum = (k: 'remaining_runs' | 'running_runs' | 'ready_runs' | 'delivered_runs') => rows.reduce((s, r) => s + r[k], 0)
+  if (!progress.data) return null
+  return (
+    <span className="text-ui text-muted" data-testid="dashboard.plan.summary">
+      <Mono className="text-fg">{progress.data.jobs.length}</Mono> jobs linked · <Mono className="text-fg">{sum('running_runs')}</Mono> runs running ·{' '}
+      <Mono className="text-fg">{sum('ready_runs')}</Mono> ready · <Mono className="text-fg">{sum('remaining_runs')}</Mono> to start
+    </span>
   )
 }

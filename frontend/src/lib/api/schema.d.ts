@@ -274,6 +274,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plans/{plan_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plan Progress
+         * @description Jobs linked to this plan, per blueprint, with what is left. Matching runs first, so
+         *     jobs synced since the last match show up here.
+         */
+        get: operations["apps_planning_plans_api_plan_progress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plans/{plan_id}/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link Job
+         * @description Count a job toward this plan (moving it from another plan, or undoing an unlink).
+         */
+        post: operations["apps_planning_plans_api_link_job"];
+        /**
+         * Unlink Job
+         * @description Stop counting a job toward this plan. It is not matched again automatically.
+         */
+        delete: operations["apps_planning_plans_api_unlink_job"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/types/search": {
         parameters: {
             query?: never;
@@ -678,6 +723,11 @@ export interface components {
             attempts: number;
             /** Options */
             options: components["schemas"]["DecryptorOption"][];
+            /**
+             * Attempts In Progress
+             * @default 0
+             */
+            attempts_in_progress: number;
         };
         /**
          * ItemDecision
@@ -710,6 +760,16 @@ export interface components {
             /** Blueprint Type Id */
             blueprint_type_id?: number | null;
             build_category?: components["schemas"]["BuildCategory"] | null;
+            /**
+             * Started
+             * @default 0
+             */
+            started: number;
+            /**
+             * Over Plan
+             * @default 0
+             */
+            over_plan: number;
         };
         /**
          * JobCost
@@ -1092,6 +1152,127 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** JobRow */
+        JobRow: {
+            /** Job Id */
+            job_id: number;
+            /** Activity */
+            activity: string;
+            /** Status */
+            status: string;
+            /** Blueprint Type Id */
+            blueprint_type_id: number;
+            /** Blueprint Name */
+            blueprint_name: string;
+            /** Product Type Id */
+            product_type_id: number | null;
+            /** Product Name */
+            product_name: string | null;
+            /** Runs */
+            runs: number;
+            /** Installer Id */
+            installer_id: number;
+            /** Installer Name */
+            installer_name: string;
+            /** Mine */
+            mine: boolean;
+            /** Owner Kind */
+            owner_kind: string;
+            /** Facility Id */
+            facility_id: number;
+            /** Facility Name */
+            facility_name: string;
+            /**
+             * Start Date
+             * Format: date-time
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date-time
+             */
+            end_date: string;
+        };
+        /** LinkedJob */
+        LinkedJob: {
+            /** Job Id */
+            job_id: number;
+            /** Activity */
+            activity: string;
+            /** Status */
+            status: string;
+            /** Blueprint Type Id */
+            blueprint_type_id: number;
+            /** Blueprint Name */
+            blueprint_name: string;
+            /** Product Type Id */
+            product_type_id: number | null;
+            /** Product Name */
+            product_name: string | null;
+            /** Runs */
+            runs: number;
+            /** Installer Id */
+            installer_id: number;
+            /** Installer Name */
+            installer_name: string;
+            /** Mine */
+            mine: boolean;
+            /** Owner Kind */
+            owner_kind: string;
+            /** Facility Id */
+            facility_id: number;
+            /** Facility Name */
+            facility_name: string;
+            /**
+             * Start Date
+             * Format: date-time
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date-time
+             */
+            end_date: string;
+            /** Source */
+            source: string;
+        };
+        /** ProgressOut */
+        ProgressOut: {
+            /** Active */
+            active: boolean;
+            /** Activated At */
+            activated_at: string | null;
+            /** Rows */
+            rows: components["schemas"]["ProgressRow"][];
+            /** Jobs */
+            jobs: components["schemas"]["LinkedJob"][];
+            /** Candidates */
+            candidates: components["schemas"]["JobRow"][];
+        };
+        /**
+         * ProgressRow
+         * @description One blueprint and activity of the plan: what jobs are doing for it.
+         */
+        ProgressRow: {
+            /** Blueprint Type Id */
+            blueprint_type_id: number;
+            /** Activity */
+            activity: string;
+            /** Name */
+            name: string;
+            /** Product Name */
+            product_name: string;
+            /** Remaining Runs */
+            remaining_runs: number;
+            /** Running Runs */
+            running_runs: number;
+            /** Ready Runs */
+            ready_runs: number;
+            /** Delivered Runs */
+            delivered_runs: number;
+            /** Over Plan */
+            over_plan: number;
+        };
         /** SearchIn */
         SearchIn: {
             /**
@@ -1217,47 +1398,6 @@ export interface components {
             characters: components["schemas"]["CharacterSlots"][];
             /** Problems */
             problems: components["schemas"]["Problem"][];
-        };
-        /** JobRow */
-        JobRow: {
-            /** Job Id */
-            job_id: number;
-            /** Activity */
-            activity: string;
-            /** Status */
-            status: string;
-            /** Blueprint Type Id */
-            blueprint_type_id: number;
-            /** Blueprint Name */
-            blueprint_name: string;
-            /** Product Type Id */
-            product_type_id: number | null;
-            /** Product Name */
-            product_name: string | null;
-            /** Runs */
-            runs: number;
-            /** Installer Id */
-            installer_id: number;
-            /** Installer Name */
-            installer_name: string;
-            /** Mine */
-            mine: boolean;
-            /** Owner Kind */
-            owner_kind: string;
-            /** Facility Id */
-            facility_id: number;
-            /** Facility Name */
-            facility_name: string;
-            /**
-             * Start Date
-             * Format: date-time
-             */
-            start_date: string;
-            /**
-             * End Date
-             * Format: date-time
-             */
-            end_date: string;
         };
         /** Problem */
         Problem: {
@@ -1759,6 +1899,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanResultOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_plan_progress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_link_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: number;
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_unlink_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: number;
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressOut"];
                 };
             };
         };

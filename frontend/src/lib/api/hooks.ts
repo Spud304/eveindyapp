@@ -6,6 +6,7 @@ import {
   type LineIO,
   type PlanCreate,
   type PlanSettings,
+  type ProgressOut,
   type StationIn,
   type StationOut,
   type StationPatch,
@@ -19,6 +20,7 @@ export const keys = {
   plans: ['plans'] as const,
   plan: (id: number) => ['plans', id] as const,
   planResult: (id: number) => ['plans', id, 'result'] as const,
+  planProgress: (id: number) => ['plans', id, 'progress'] as const,
   typeSearch: (q: string, kind: string) => ['types', 'search', kind, q] as const,
   systemSearch: (q: string) => ['systems', 'search', q] as const,
   typeNames: (ids: number[]) => ['types', 'names', ids] as const,
@@ -254,4 +256,47 @@ export function useLibrary() {
 /** Refreshes every minute so "ready" and "finishing soon" follow the clock. */
 export function useDashboard() {
   return useQuery({ queryKey: keys.dashboard, queryFn: async () => unwrap(await api.GET('/api/dashboard')), refetchInterval: 60_000 })
+}
+
+// --- progress ----------------------------------------------------------------------------
+
+/** Jobs linked to a plan; the server matches new jobs first. Refreshes every minute. */
+export function usePlanProgress(id: number, enabled = true) {
+  const qc = useQueryClient()
+  return useQuery({
+    queryKey: keys.planProgress(id),
+    queryFn: async () => {
+      const before = qc.getQueryData<ProgressOut>(keys.planProgress(id))
+      const data = unwrap(await api.GET('/api/plans/{plan_id}/progress', { params: { path: { plan_id: id } } }))
+      // The server matches new jobs on this call; when the links change, every plan result
+      // (this plan's progress, the others' reservations) is out of date.
+      const ids = (p: ProgressOut | undefined) => (p?.jobs ?? []).map((j) => `${j.job_id}:${j.status}`).join(',')
+      if (ids(before) !== ids(data)) void qc.invalidateQueries({ queryKey: keys.plans, predicate: (q) => q.queryKey[2] === 'result' || q.queryKey.length === 1 })
+      return data
+    },
+    enabled,
+    refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useJobLinkMutations(planId: number) {
+  const qc = useQueryClient()
+  const path = (jobId: number) => ({ params: { path: { plan_id: planId, job_id: jobId } } })
+  const done = (data: unknown) => {
+    qc.setQueryData(keys.planProgress(planId), data)
+    void qc.invalidateQueries({ queryKey: keys.plans }) // links change every plan's result
+  }
+  return {
+    link: useMutation({
+      mutationFn: async (jobId: number) => unwrap(await api.POST('/api/plans/{plan_id}/jobs/{job_id}', path(jobId))),
+      onSuccess: done,
+      meta: { toast: 'Job linked to this plan' },
+    }),
+    unlink: useMutation({
+      mutationFn: async (jobId: number) => unwrap(await api.DELETE('/api/plans/{plan_id}/jobs/{job_id}', path(jobId))),
+      onSuccess: done,
+      meta: { toast: 'Job unlinked' },
+    }),
+  }
 }
