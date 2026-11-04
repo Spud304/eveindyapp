@@ -37,12 +37,11 @@ You need [uv](https://github.com/astral-sh/uv), Node 24, Docker and an
 `http://localhost:5050/callback`.
 
 ```bash
-docker compose -f deploy/docker-compose.dev.yml up -d     # Postgres on 5434, Redis on 6381
+docker compose -f deploy/docker-compose.dev.yml up -d     # Postgres, Redis, sync worker, scheduler
 cp deploy/.env.example deploy/.env                         # fill in the EVE_* values
 cd backend && uv sync && uv run python manage.py migrate
 uv run python manage.py import_sde --check-latest          # download and import CCP's static data
 uv run python manage.py runserver 127.0.0.1:8000
-uv run celery -A config worker -l INFO                     # syncs after linking a character
 cd frontend && npm ci && npm run dev                       # http://localhost:5050
 ```
 
