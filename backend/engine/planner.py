@@ -248,6 +248,9 @@ class _Planner:
 
         self.decisions: dict[TypeId, tuple[ItemDecision, Reason, BuildCategory | None]] = {}
         self.input_qty: dict[TypeId, int] = defaultdict(int)
+        # type id -> station id -> quantity jobs there consume (items are planned after the
+        # jobs that use them, so this is complete when an item's station is chosen)
+        self.used_at: dict[TypeId, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         self.item_rows: dict[TypeId, ItemPlan] = {}
         self.jobs: list[WorkJob] = []
         self.meta: dict[str, _JobMeta] = {}
@@ -412,6 +415,8 @@ class _Planner:
             reason = Reason(ReasonCode.STATION_NONE, f"No station offers {activity.value}.")
             return None, none, StationChoice(None, 0.0, 1.0, reason)
 
+        # Where the product is used: on equal materials, building there saves carrying it.
+        used_at = self.used_at.get(product_type_id, {}) if product_type_id is not None else {}
         scored = []
         for s in candidates:
             system = self.inp.systems.get(s.system_id)
@@ -419,15 +424,21 @@ class _Planner:
             bonuses = f.station_bonuses(s, activity, product, sec)
             index = system.cost_indices.get(activity, 0.0) if system else 0.0
             fee_rate = index * bonuses.cost + s.facility_tax / 100
-            key = (bonuses.material, bonuses.time, fee_rate, s.station_id)
+            used_here = used_at.get(s.station_id, 0)
+            key = (bonuses.material, -used_here, bonuses.time, fee_rate, s.station_id)
             scored.append((key, s, bonuses))
         scored.sort(key=lambda x: x[0])
         _, best, bonuses = scored[0]
+        rule = "Lowest materials, then time, then fee rate"
+        if used_at:
+            rule = "Lowest materials, then where it is used, then time, then fee rate"
         text = (
             f"{best.name}: {bonuses.description}; material x{bonuses.material:.4f}, "
-            f"time x{bonuses.time:.4f}, cost x{bonuses.cost:.4f}. Lowest materials, then time, "
-            f"then fee rate, of {len(candidates)} station(s) offering {activity.value}."
+            f"time x{bonuses.time:.4f}, cost x{bonuses.cost:.4f}. {rule}, "
+            f"of {len(candidates)} station(s) offering {activity.value}."
         )
+        if used_at.get(best.station_id) and len(candidates) > 1:
+            text += " Built where the jobs that use it run, so it need not be carried."
         choice = StationChoice(
             best.station_id,
             (1 - bonuses.material) * 100,
@@ -448,6 +459,8 @@ class _Planner:
             self.jobs_by_product[meta.product_type_id].append(work.job_id)
         for m in meta.materials:
             self.input_qty[m.type_id] += m.quantity
+            if meta.station is not None:
+                self.used_at[m.type_id][meta.station.station_id] += m.quantity
 
     def cover(self, type_id: TypeId) -> tuple[int, int, int, int]:
         """(started used, assets used, still needed, over plan) for one item.

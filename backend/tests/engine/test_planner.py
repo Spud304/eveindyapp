@@ -16,12 +16,14 @@ from engine.types import (
     GameData,
     ItemDecision,
     Material,
+    ModifierKind,
     PlanLine,
     Price,
     ReasonCode,
     Recipe,
     SkillRequirement,
     SolarSystem,
+    StructureModifier,
 )
 
 from .data import (
@@ -338,8 +340,40 @@ def test_station_picked_by_material_bonus_then_time():
         )
     )
     assert bp(r, BP_HULL).station.station_id == 2  # ME rig wins
-    assert bp(r, BP_COMP_A).station.station_id == 1  # same ME, TE rig wins
     assert bp(r, BP_HULL).station.reason.code == ReasonCode.STATION_BEST
+    # Same ME at both: the hull jobs at the Azbel use it, which beats the Raitaru's TE rig.
+    comp = bp(r, BP_COMP_A).station
+    assert comp.station_id == 2 and "need not be carried" in comp.reason.text
+
+    alone = plan(
+        make_input(
+            [(COMP_A, 1)],
+            blueprints=(bpo(BP_COMP_A),),
+            stations=(raitaru((ADV_COMPONENT_TE_RIG,)), azbel((MEDIUM_SHIP_ME_RIG,))),
+        )
+    )
+    assert bp(alone, BP_COMP_A).station.station_id == 1  # nothing uses it: TE rig wins
+
+
+def test_better_material_bonus_beats_building_where_it_is_used():
+    # The hull is built at the Azbel (ME rig); Comp A, used there, still goes to a Raitaru
+    # whose hull saves more material.
+    cheap = replace(
+        raitaru(),
+        structure=replace(
+            raitaru().structure,
+            modifiers=(StructureModifier(Activity.MANUFACTURING, ModifierKind.MATERIAL, 0.98),),
+        ),
+    )
+    r = plan(
+        make_input(
+            [(HULL, 1)],
+            blueprints=(bpo(BP_COMP_A), bpo(BP_HULL)),
+            stations=(cheap, azbel((MEDIUM_SHIP_ME_RIG,))),
+        )
+    )
+    assert bp(r, BP_HULL).station.station_id == 2
+    assert bp(r, BP_COMP_A).station.station_id == 1
 
 
 def test_no_station_warns_and_has_no_fee():
