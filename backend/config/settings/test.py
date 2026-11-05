@@ -2,6 +2,7 @@ from .base import *  # noqa: F403
 
 DEBUG = False
 SECRET_KEY = "test-secret-key"
+TOKEN_ENCRYPTION_KEY = ""  # not the one in backend/.env: tests set their own where they need it
 ALLOWED_HOSTS = ["*"]
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
