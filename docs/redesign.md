@@ -30,6 +30,12 @@ Plan settings:
 - **Reserve assets** (checkbox) — see Asset reservation.
 - **Visibility** — private / corp / anyone with link.
 - **Priority** — order among reserving plans.
+- **Complete** (added 2026-11-05, `Plan.completed_at`): set by hand and undone with Reopen.
+  - A completed plan is not active and can't be made active until reopened.
+  - It reserves no stock or BPC runs.
+  - It holds no picked BPCs, so another plan can pick them. Reopening is refused if one has been picked since.
+  - Its lines, settings and linked jobs stay. The plans list shows it under Completed.
+  - Rejected: completing a plan automatically when every job is delivered. Leftovers and partial batches make "done" the owner's call.
 
 No deadlines. A "done by" date isn't useful in practice; the plan just shows how long it will take.
 
