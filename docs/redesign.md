@@ -71,6 +71,12 @@ Decided (2026-11-03):
 - Non-reserving plans see only what's left over (and show "X reserved by plan Y").
 - Reservations shrink as the plan consumes materials (job started → inputs are gone from assets, so the reservation for them must be released, not double-counted). The tracker drives this.
 - Location filter per plan: default = assets at the plan's build stations; user can tick other locations/hangars.
+- **Stock to move (2026-11-05).** The engine counts a plan's stock at all of its locations as one pile. So the result also lists what has to be carried before jobs can start (`apps/planning/hauling.py`, `PlanResultOut.moves`).
+  - Per item, only the quantity taken from stock is placed: stock already at a station covers that station's jobs first, then the biggest stacks elsewhere cover the rest.
+  - A station with no known location (added by hand) gets no moves.
+  - Shared views leave the list out, because it names the owner's hangars.
+  - Rejected: flagging every item whose stock sits in two places. joe's has enough Tritanium on its own even though Polite holds some, so that flag would warn when nothing needs moving.
+  - Live on maelstroms: Megacyte, Mexallon and Zydrine go from Polite to joe's (where the mineral jobs run), and five PI inputs go from joe's to Polite (where their job is planned).
 - **Decided (2026-11-03): computed, not stored.** Each request reruns the account's reserving plans in priority order (lower number first, then id). Each claims what its engine run takes from stock (`on_hand_used`) out of a pool kept per (item, location, hangar), and only from buckets inside its own location and hangar filter. Non-reserving plans then run on the leftovers and claim nothing. Rejected: storing claims, because they would go stale whenever assets, plans, prices or rules change. Computing them costs one engine run per reserving plan (live: ~1.3 s for a two-plan account, most of it loading shared data). Claims come from remaining demand, so once the tracker (step 5) lowers demand as jobs start, they shrink without separate release logic.
 
 ### Job tracking
@@ -447,6 +453,13 @@ What changed from the review (`docs/reviews/2026-11-03-panel-review/`; item ids 
 - **Code:** the unused `/api/plan/preview` is gone; `inputs` assembles a plan's input (`load`, `plan_input`) and `progress` builds progress, so `tracker` no longer imports `reservation`.
 - **Tests:** result invariants on every planner test (`tests/engine/invariants.py`); golden tests on real SDE records through the real importer (`tests/golden/`, `extract.py` refreshes the fixture from CCP's zip); CI checks the frontend's API types against the schema (`make api-check`).
 - **Dev tooling:** root `Makefile` (`make help`). After a Docker Desktop restart, containers can keep stale bind mounts (`stat /app/deploy/entrypoint.sh: no such file`, or Celery's "module config was not found"): `make services-recreate`.
+
+**Left for later (owner, 2026-11-05):**
+- L2: move `_choose_sources` out of `plan_blueprint`, with unit tests, before the next blueprint-source rule.
+- L15: release the `edit` mutation queue once the PATCH returns.
+- Warn when a picked BPC disappears instead of skipping it silently.
+- Some POS structures list themselves as their own material in the SDE: not investigated.
+- Waiting on the owner: X7 (the item_id check below), L14 (User-Agent contact), and how a self-hosted copy limits signup (L19).
 
 ## Open questions
 - Exact list of tier/category build switches.
