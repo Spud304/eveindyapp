@@ -390,3 +390,24 @@ def test_stock_away_from_the_building_station_is_listed_to_move(login):
     expect(row).to_contain_text(f"{need - 20_000:,}")
     expect(by_test_id(page, "plan.moves.trip")).to_contain_text("PW builder")
     expect(by_test_id(page, "plan.on-hand")).to_contain_text(f"move {need - 20_000:,}")
+
+
+def test_mark_complete_moves_the_plan_to_completed_and_reopen_brings_it_back(login):
+    s = login()
+    plan = s.add_plan(uniq("finished"), [(RIFTER, 1)])
+    s.call("POST", f"/api/plans/{plan['id']}/activate")
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    by_test_id(page, "plan.complete").click()
+    expect(by_test_id(page, "plan.completed")).to_be_visible()
+    expect(by_test_id(page, "plan.activate")).to_have_count(0)
+    expect(by_test_id(page, "plan.deactivate")).to_have_count(0)
+
+    page.goto("/plans")
+    expect(by_test_id(page, f"plans.completed.{plan['id']}")).to_be_visible()
+    expect(by_test_id(page, f"plans.row.{plan['id']}")).to_have_count(0)
+
+    by_test_id(page, f"plans.completed.{plan['id']}").get_by_role("link").click()
+    by_test_id(page, "plan.reopen").click()
+    expect(by_test_id(page, "plan.activate")).to_be_visible()  # reopened, not active again
+    expect(by_test_id(page, "plan.completed")).to_have_count(0)

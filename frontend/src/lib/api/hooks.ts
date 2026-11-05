@@ -282,6 +282,23 @@ export function usePlanMutations() {
       onSuccess: done,
       meta: { toast: 'Plan deactivated' },
     }),
+    // Completing frees the plan's reservations and picked BPCs: every plan and the library change.
+    complete: useMutation({
+      mutationFn: async (id: number) => unwrap(await api.POST('/api/plans/{plan_id}/complete', path(id))),
+      onSuccess: () => {
+        void done()
+        void qc.invalidateQueries({ queryKey: keys.library })
+      },
+      meta: { toast: 'Plan marked complete' },
+    }),
+    reopen: useMutation({
+      mutationFn: async (id: number) => unwrap(await api.POST('/api/plans/{plan_id}/reopen', path(id))),
+      onSuccess: () => {
+        void done()
+        void qc.invalidateQueries({ queryKey: keys.library })
+      },
+      meta: { toast: 'Plan reopened' },
+    }),
     remove: useMutation({
       mutationFn: async (id: number) => unwrap(await api.DELETE('/api/plans/{plan_id}', path(id))),
       onSuccess: done,

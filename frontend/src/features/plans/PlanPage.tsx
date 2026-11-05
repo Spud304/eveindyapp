@@ -117,7 +117,7 @@ function PlanHeader({
   prices: PriceSource
   onPrices: (p: PriceSource) => void
 }) {
-  const { edit, activate, deactivate, remove } = usePlanMutations()
+  const { edit, activate, deactivate, complete, reopen, remove } = usePlanMutations()
   const navigate = useNavigate()
   const [name, setName] = useState(p.name)
   useEffect(() => setName(p.name), [p.name])
@@ -140,7 +140,12 @@ function PlanHeader({
       context={
         <>
           {p.is_active ? <Badge tone="accent">active</Badge> : null}
-          {p.reserve_assets ? <Badge tone="info">reserves · priority {p.priority}</Badge> : null}
+          {p.completed_at ? (
+            <Badge tone="ok" testId="plan.completed" title={new Date(p.completed_at).toLocaleString()}>
+              completed {new Date(p.completed_at).toLocaleDateString()}
+            </Badge>
+          ) : null}
+          {p.reserve_assets && !p.completed_at ? <Badge tone="info">reserves · priority {p.priority}</Badge> : null}
           {total != null ? (
             <span title="materials to buy plus job fees">
               total <Mono className="text-fg">{Math.round(total).toLocaleString('en-US')}</Mono> ISK
@@ -168,14 +173,30 @@ function PlanHeader({
             <option value="jita">Jita prices</option>
             <option value="average">CCP average prices</option>
           </Select>
-          {p.is_active ? (
-            <Button small onClick={() => deactivate.mutate(p.id)} testId="plan.deactivate">
-              Deactivate
+          {p.completed_at ? (
+            <Button small onClick={() => reopen.mutate(p.id)} testId="plan.reopen" title="reserve stock and BPCs again; the plan can then be made active">
+              Reopen
             </Button>
           ) : (
-            <Button small variant="primary" onClick={() => activate.mutate(p.id)} testId="plan.activate" title="the tracker attributes new jobs to the active plan; only one plan is active">
-              Make active
-            </Button>
+            <>
+              {p.is_active ? (
+                <Button small onClick={() => deactivate.mutate(p.id)} testId="plan.deactivate">
+                  Deactivate
+                </Button>
+              ) : (
+                <Button small variant="primary" onClick={() => activate.mutate(p.id)} testId="plan.activate" title="the tracker attributes new jobs to the active plan; only one plan is active">
+                  Make active
+                </Button>
+              )}
+              <Button
+                small
+                onClick={() => complete.mutate(p.id)}
+                testId="plan.complete"
+                title="done: stop tracking new jobs, reserving stock and holding picked BPCs. Lines and linked jobs stay; reopen any time."
+              >
+                Mark complete
+              </Button>
+            </>
           )}
           <Button
             small
