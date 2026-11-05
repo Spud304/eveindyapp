@@ -47,7 +47,7 @@ def _user(request: HttpRequest) -> User:
     return cast(User, request.user)
 
 
-def _location_names(user: User, ids: set[int]) -> dict[int, str]:
+def location_names(user: User, ids: set[int]) -> dict[int, str]:
     """The account's own station names first, then ESI for NPC stations."""
     out = {
         loc: name
@@ -58,7 +58,7 @@ def _location_names(user: User, ids: set[int]) -> dict[int, str]:
     return out
 
 
-def _divisions(user: User) -> dict[tuple[int, str], str]:
+def divisions(user: User) -> dict[tuple[int, str], str]:
     """(corp id, 'CorpSAG3') -> division name, for corps the account may read."""
     corps = list(readable_corp_feeds(user))
     return {
@@ -105,8 +105,8 @@ def library(request: HttpRequest):
         EveType.objects.filter(pk__in={b.type_id for b in rows}).values_list("id", "name")
     )
     owners = names.resolve({b.owner_id for b in rows})
-    locations = _location_names(user, {b.root_location_id for b in rows})
-    divisions = _divisions(user)
+    locations = location_names(user, {b.root_location_id for b in rows})
+    division_names = divisions(user)
     products = dict(
         BlueprintProduct.objects.filter(
             activity__activity="manufacturing",
@@ -139,7 +139,7 @@ def library(request: HttpRequest):
                 "location_name": locations.get(
                     b.root_location_id, f"Structure {b.root_location_id}"
                 ),
-                "hangar": divisions.get((b.owner_id, b.hangar_flag), b.hangar_flag),
+                "hangar": division_names.get((b.owner_id, b.hangar_flag), b.hangar_flag),
                 "product_type_id": products.get(b.type_id),
                 "plan_id": plan_id,
                 "plan_name": plan_names.get(plan_id) if plan_id else None,
@@ -217,7 +217,7 @@ def describe_jobs(user: User, jobs: list[IndustryJob], now: datetime) -> list[di
     for c in user.characters.all():
         people[c.character_id] = c.name
         own.add(c.character_id)
-    facilities = _location_names(user, {j.facility_id for j in jobs})
+    facilities = location_names(user, {j.facility_id for j in jobs})
     return [
         {
             "job_id": j.job_id,

@@ -267,6 +267,26 @@ def test_result_endpoint(api, user, azbel):
     ]
     trit_row = next(s for s in body["result"]["shopping_list"] if s["type_id"] == 34)
     assert trit_row["quantity"] == PER_RIFTER - (40_000 - PER_RIFTER)
+    assert body["moves"] == []
+
+
+def test_result_lists_stock_to_carry_to_the_building_station(api, user, azbel, raitaru):
+    asset(1, 34, 20_000, AZBEL_ID)
+    asset(2, 34, 30_000, RAITARU_LOC, flag="CorpSAG3", kind="corporation", owner=CORP)
+    # Builds at the Azbel only; the Raitaru's hangar counts as stock.
+    p = make_plan(user, "Split", station_ids=[azbel.pk], extra_location_ids=[RAITARU_LOC])
+    (move,) = api("get", f"/api/plans/{p.pk}/result").json()["moves"]
+    assert move == {
+        "type_id": 34,
+        "name": "Tritanium",
+        "quantity": PER_RIFTER - 20_000,
+        "volume": 0.0,  # the test SDE has no volumes; test_hauling checks them
+        "from_location_id": RAITARU_LOC,
+        "from_name": "Raitaru",
+        "from_hangar": "CorpSAG3",
+        "to_station_id": azbel.pk,
+        "to_name": "Azbel",
+    }
 
 
 # --- picked BPC lines ----------------------------------------------------------------------

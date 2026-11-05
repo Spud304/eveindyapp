@@ -46,6 +46,8 @@ class PlanRun:
     claims: dict[int, int] = field(default_factory=dict)
     # type id -> stock in this plan's scope that earlier reserving plans hold
     held_elsewhere: dict[int, list[Holder]] = field(default_factory=dict)
+    # The stock in this plan's scope it ran against, per bucket (for the hauling list).
+    stock: dict[AssetBucket, int] = field(default_factory=dict)
 
 
 def _claim(
@@ -78,6 +80,8 @@ def _run(
         result = plan(inp)
     except PlanError as exc:
         return PlanRun(p, inp, None, str(exc), rules)
+    locations, flags = plan_scope(p, data)
+    stock = {b: q for b, q in pool.items() if q > 0 and in_scope(b, locations, flags)}
     if lost := tracker.unreadable_links(p):
         warning = PlanWarning(
             ReasonCode.SOURCE_MISSING,
@@ -86,7 +90,7 @@ def _run(
             "Unlink them on the Progress tab if they are gone.",
         )
         result = dataclasses.replace(result, warnings=(*result.warnings, warning))
-    return PlanRun(p, inp, result, rules=rules)
+    return PlanRun(p, inp, result, rules=rules, stock=stock)
 
 
 def run_plans(user: User, plans: list[Plan] | None = None, data: AccountData | None = None):

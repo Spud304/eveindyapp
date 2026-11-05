@@ -1216,6 +1216,30 @@ export interface components {
             /** Quantity */
             quantity: number;
         };
+        /**
+         * MoveOut
+         * @description Stock the plan uses that sits away from the station whose jobs use it.
+         */
+        MoveOut: {
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            /** Quantity */
+            quantity: number;
+            /** Volume */
+            volume: number;
+            /** From Location Id */
+            from_location_id: number;
+            /** From Name */
+            from_name: string;
+            /** From Hangar */
+            from_hangar: string;
+            /** To Station Id */
+            to_station_id: number;
+            /** To Name */
+            to_name: string;
+        };
         /** PlanResult */
         PlanResult: {
             /** Items */
@@ -1253,6 +1277,11 @@ export interface components {
             effective_rules: components["schemas"]["EffectiveRulesOut"];
             reservation: components["schemas"]["ReservationOut"];
             inputs: components["schemas"]["InputsHealthOut"];
+            /**
+             * Moves
+             * @default []
+             */
+            moves: components["schemas"]["MoveOut"][];
         };
         /** PlanWarning */
         PlanWarning: {

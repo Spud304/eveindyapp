@@ -1,5 +1,6 @@
 """Plans: CRUD, lines, active plan, and the computed result with reservations."""
 
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from typing import Literal, cast
@@ -15,12 +16,12 @@ from apps.accounts.models import User
 from apps.esidata.access import owner_q
 from apps.esidata.freshness import feed_health, oldest
 from apps.esidata.models import Asset, BlueprintItem, Feed, IndustryJob
-from apps.esidata.overview_api import JobRow
+from apps.esidata.overview_api import JobRow, divisions, location_names
 from apps.sde.models import BlueprintProduct, EveType
 from engine import BlueprintOptions, purchase_options
 from engine.types import BuildCategory, PlanResult
 
-from . import inputs, reservation, sharing, tracker
+from . import hauling, inputs, reservation, sharing, tracker
 from .models import JobLink, LinkSource, Plan, PlanLine, Visibility
 from .prices import jita_plan
 from .progress import progress_data
@@ -389,6 +390,20 @@ class InputsHealthOut(Schema):
     problems: list[FeedProblemOut]
 
 
+class MoveOut(Schema):
+    """Stock the plan uses that sits away from the station whose jobs use it."""
+
+    type_id: int
+    name: str
+    quantity: int
+    volume: float
+    from_location_id: int
+    from_name: str
+    from_hangar: str  # corp division name, or the hangar flag
+    to_station_id: int
+    to_name: str
+
+
 class PlanResultOut(Schema):
     prices: Literal["jita", "average"] = "average"
     priced_at_average: int = 0  # shopping items whose Jita orders could not be fetched
@@ -398,6 +413,38 @@ class PlanResultOut(Schema):
     effective_rules: EffectiveRulesOut
     reservation: ReservationOut
     inputs: InputsHealthOut
+    moves: list[MoveOut] = []
+
+
+def moves_out(user: User, run: reservation.PlanRun, result: PlanResult | None) -> list[dict]:
+    if result is None or run.input is None:
+        return []
+    stations = {s.station_id: s for s in run.input.stations}
+    locations = dict(user.stations.filter(pk__in=list(stations)).values_list("pk", "location_id"))
+    types = run.input.game.types
+    found = hauling.moves(result, run.stock, locations, types)
+    if not found:
+        return []
+    names = location_names(user, {m.from_location for m in found})
+    # Bucket keys carry no corp id; name a division only where every readable corp agrees.
+    by_flag: dict[str, set[str]] = defaultdict(set)
+    for (_, flag), name in divisions(user).items():
+        by_flag[flag].add(name or flag)
+    hangars = {flag: next(iter(n)) for flag, n in by_flag.items() if len(n) == 1}
+    return [
+        {
+            "type_id": m.type_id,
+            "name": types[m.type_id].name if m.type_id in types else str(m.type_id),
+            "quantity": m.quantity,
+            "volume": m.volume,
+            "from_location_id": m.from_location,
+            "from_name": names.get(m.from_location, f"location {m.from_location}"),
+            "from_hangar": hangars.get(m.from_hangar, m.from_hangar),
+            "to_station_id": m.to_station,
+            "to_name": stations[m.to_station].name,
+        }
+        for m in found
+    ]
 
 
 def inputs_health(user) -> dict:
@@ -454,6 +501,7 @@ def plan_result(request: HttpRequest, plan_id: int, prices: Literal["jita", "ave
             "held_elsewhere": {t: [asdict(h) for h in hs] for t, hs in run.held_elsewhere.items()},
         },
         "inputs": inputs_health(_user(request)),
+        "moves": moves_out(_user(request), run, result),
     }
 
 
