@@ -1218,9 +1218,15 @@ export interface components {
         };
         /**
          * MoveOut
-         * @description Stock the plan uses that sits away from the station whose jobs use it.
+         * @description Something the plan's jobs use that is not at the station they run at: stock in a
+         *     hangar elsewhere, or an item another station of the plan builds.
          */
         MoveOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "stock" | "built";
             /** Type Id */
             type_id: number;
             /** Name */
@@ -1230,7 +1236,9 @@ export interface components {
             /** Volume */
             volume: number;
             /** From Location Id */
-            from_location_id: number;
+            from_location_id: number | null;
+            /** From Station Id */
+            from_station_id: number | null;
             /** From Name */
             from_name: string;
             /** From Hangar */

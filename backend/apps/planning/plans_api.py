@@ -391,15 +391,18 @@ class InputsHealthOut(Schema):
 
 
 class MoveOut(Schema):
-    """Stock the plan uses that sits away from the station whose jobs use it."""
+    """Something the plan's jobs use that is not at the station they run at: stock in a
+    hangar elsewhere, or an item another station of the plan builds."""
 
+    kind: Literal["stock", "built"]
     type_id: int
     name: str
     quantity: int
     volume: float
-    from_location_id: int
+    from_location_id: int | None  # stock: where it is
+    from_station_id: int | None  # built: the station that makes it
     from_name: str
-    from_hangar: str  # corp division name, or the hangar flag
+    from_hangar: str  # stock: corp division name or hangar flag; built: ""
     to_station_id: int
     to_name: str
 
@@ -425,7 +428,7 @@ def moves_out(user: User, run: reservation.PlanRun, result: PlanResult | None) -
     found = hauling.moves(result, run.stock, locations, types)
     if not found:
         return []
-    names = location_names(user, {m.from_location for m in found})
+    names = location_names(user, {m.from_location for m in found if m.from_location})
     # Bucket keys carry no corp id; name a division only where every readable corp agrees.
     by_flag: dict[str, set[str]] = defaultdict(set)
     for (_, flag), name in divisions(user).items():
@@ -433,12 +436,16 @@ def moves_out(user: User, run: reservation.PlanRun, result: PlanResult | None) -
     hangars = {flag: next(iter(n)) for flag, n in by_flag.items() if len(n) == 1}
     return [
         {
+            "kind": "built" if m.from_station is not None else "stock",
             "type_id": m.type_id,
             "name": types[m.type_id].name if m.type_id in types else str(m.type_id),
             "quantity": m.quantity,
             "volume": m.volume,
             "from_location_id": m.from_location,
-            "from_name": names.get(m.from_location, f"location {m.from_location}"),
+            "from_station_id": m.from_station,
+            "from_name": stations[m.from_station].name
+            if m.from_station is not None
+            else names.get(m.from_location or 0, f"location {m.from_location}"),
             "from_hangar": hangars.get(m.from_hangar, m.from_hangar),
             "to_station_id": m.to_station,
             "to_name": stations[m.to_station].name,

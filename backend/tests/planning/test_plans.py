@@ -277,6 +277,8 @@ def test_result_lists_stock_to_carry_to_the_building_station(api, user, azbel, r
     p = make_plan(user, "Split", station_ids=[azbel.pk], extra_location_ids=[RAITARU_LOC])
     (move,) = api("get", f"/api/plans/{p.pk}/result").json()["moves"]
     assert move == {
+        "kind": "stock",
+        "from_station_id": None,
         "type_id": 34,
         "name": "Tritanium",
         "quantity": PER_RIFTER - 20_000,

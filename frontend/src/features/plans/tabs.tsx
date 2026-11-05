@@ -28,7 +28,7 @@ export function ShoppingTab({ data, stale = false }: { data: PlanResultOut; stal
   const onHand = r.items.filter((i) => i.on_hand_used > 0)
   const volume = r.shopping_list.reduce((sum, s) => sum + s.volume, 0)
   const moved = new Map<number, number>()
-  for (const m of data.moves) moved.set(m.type_id, (moved.get(m.type_id) ?? 0) + m.quantity)
+  for (const m of data.moves) if (m.kind === 'stock') moved.set(m.type_id, (moved.get(m.type_id) ?? 0) + m.quantity)
   return (
     <div className="flex flex-col gap-4">
       <Panel
@@ -127,7 +127,7 @@ export function ShoppingTab({ data, stale = false }: { data: PlanResultOut; stal
                   <td>
                     {data.reservation.claims[i.type_id] ? <Badge tone="info">reserved</Badge> : null}{' '}
                     {moved.get(i.type_id) ? (
-                      <Badge tone="warn" title="not where the jobs that use it run; see Stock to move">
+                      <Badge tone="warn" title="not where the jobs that use it run; see To move">
                         move {qty(moved.get(i.type_id)!)}
                       </Badge>
                     ) : null}{' '}
@@ -144,18 +144,19 @@ export function ShoppingTab({ data, stale = false }: { data: PlanResultOut; stal
   )
 }
 
-/** Hangar stock the plan uses that sits away from the station whose jobs use it, one table
- *  per trip (from a structure's hangar to a station). */
+/** What the plan's jobs use that is not at the station they run at: hangar stock elsewhere,
+ *  or items another station builds. One table per trip (from a hangar or a station's job
+ *  output to a station). */
 function MovesPanel({ moves }: { moves: MoveOut[] }) {
   const trips = new Map<string, MoveOut[]>()
   for (const m of moves) {
-    const key = `${m.from_location_id}|${m.from_hangar}|${m.to_station_id}`
+    const key = m.kind === 'built' ? `built|${m.from_station_id}|${m.to_station_id}` : `stock|${m.from_location_id}|${m.from_hangar}|${m.to_station_id}`
     trips.set(key, [...(trips.get(key) ?? []), m])
   }
   const total = moves.reduce((sum, m) => sum + m.volume, 0)
   return (
     <Panel
-      title={`Stock to move · ${moves.length}`}
+      title={`To move · ${moves.length}`}
       testId="plan.moves"
       actions={
         <span className="text-ui text-muted" data-testid="plan.moves.volume">
@@ -164,12 +165,14 @@ function MovesPanel({ moves }: { moves: MoveOut[] }) {
       }
     >
       <div className="flex flex-col gap-3">
-        <p className="text-label text-muted">This plan counts the stock at all its stations as one pile. These items are not where the jobs that use them run; stock already at a station is used there first.</p>
+        <p className="text-label text-muted">
+          Items the jobs use that are not where they run: stock in another hangar, or made at another station. What a station makes and holds is used there first.
+        </p>
         {[...trips.entries()].map(([key, ms]) => (
           <div key={key} data-testid="plan.moves.trip">
             <div className="mb-1 flex flex-wrap items-baseline gap-x-2 text-ui">
               <span>
-                {ms[0].from_name} <span className="text-muted">· {ms[0].from_hangar}</span>
+                {ms[0].from_name} <span className="text-muted">· {ms[0].kind === 'built' ? 'built there' : ms[0].from_hangar}</span>
               </span>
               <span className="text-muted">→</span>
               <span>{ms[0].to_name}</span>
