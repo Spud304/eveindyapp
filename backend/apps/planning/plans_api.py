@@ -82,6 +82,7 @@ class PlanSummary(Schema):
     id: int
     name: str
     is_active: bool
+    completed_at: datetime | None  # set: marked complete (not active, reserves nothing)
     reserve_assets: bool
     priority: int
     visibility: str
@@ -116,6 +117,7 @@ def _summary(p: Plan) -> dict:
         "id": p.pk,
         "name": p.name,
         "is_active": p.is_active,
+        "completed_at": p.completed_at,
         "reserve_assets": p.reserve_assets,
         "priority": p.priority,
         "visibility": p.visibility,
@@ -188,7 +190,7 @@ def _picked_quantity(p: Plan, ln: LineIO, taken: set[int]) -> int:
         raise HttpError(422, "the picked BPCs do not manufacture this line's item")
     elsewhere = [
         other
-        for other in PlanLine.objects.filter(plan__user=p.user)
+        for other in PlanLine.objects.filter(plan__user=p.user, plan__completed_at=None)
         .exclude(plan=p)
         .exclude(blueprint_item_ids=[])
         .select_related("plan")
@@ -326,6 +328,8 @@ def put_lines(request: HttpRequest, plan_id: int, lines: list[LineIO]):
 def activate(request: HttpRequest, plan_id: int):
     """Make this the account's one active plan; the tracker attributes new jobs to it."""
     p = _plan(request, plan_id)
+    if p.completed_at is not None:
+        raise HttpError(409, "the plan is marked complete; reopen it first")
     with transaction.atomic():
         Plan.objects.filter(user=p.user, is_active=True).exclude(pk=p.pk).update(is_active=False)
         if not p.is_active:
@@ -340,6 +344,34 @@ def deactivate(request: HttpRequest, plan_id: int):
     p = _plan(request, plan_id)
     p.is_active = False
     p.save(update_fields=["is_active", "updated_at"])
+    return _out(p)
+
+
+@router.post("/plans/{plan_id}/complete", response=PlanOut)
+def complete(request: HttpRequest, plan_id: int):
+    """Mark the plan done: it stops being active, reserves no stock or BPC runs and releases
+    the BPCs its lines picked. Job links and lines stay, so it can be reopened."""
+    p = _plan(request, plan_id)
+    if p.completed_at is None:
+        p.completed_at = timezone.now()
+        p.is_active = False
+        p.save(update_fields=["completed_at", "is_active", "updated_at"])
+    return _out(p)
+
+
+@router.post("/plans/{plan_id}/reopen", response=PlanOut)
+def reopen(request: HttpRequest, plan_id: int):
+    p = _plan(request, plan_id)
+    if p.completed_at is not None:
+        # Its picked BPCs were released; another plan may have picked one since.
+        mine = {i for ln in p.lines.all() for i in ln.blueprint_item_ids}
+        taken = inputs.picked_blueprints(p.user)
+        clash = sorted({taken[i] for i in mine if i in taken})
+        if clash:
+            names = ", ".join(Plan.objects.filter(pk__in=clash).values_list("name", flat=True))
+            raise HttpError(409, f"a BPC this plan picked is now picked in plan {names}")
+        p.completed_at = None
+        p.save(update_fields=["completed_at", "updated_at"])
     return _out(p)
 
 
@@ -483,7 +515,7 @@ def plan_result(request: HttpRequest, plan_id: int, prices: Literal["jita", "ave
     if prices == "jita" and run.input is not None and run.result is not None:
         priced = jita_plan(run.input, run.result)
         result, failed = priced.result, priced.failed
-        if p.reserve_assets:
+        if reservation.reserves(p):
             # What this plan holds is what the priced run takes from stock (the same stock;
             # only a different automatic decryptor can change it).
             run.claims = {i.type_id: i.on_hand_used for i in result.items if i.on_hand_used}
@@ -503,7 +535,7 @@ def plan_result(request: HttpRequest, plan_id: int, prices: Literal["jita", "ave
             },
         },
         "reservation": {
-            "reserves": p.reserve_assets,
+            "reserves": reservation.reserves(p),
             "claims": run.claims,
             "held_elsewhere": {t: [asdict(h) for h in hs] for t, hs in run.held_elsewhere.items()},
         },

@@ -274,6 +274,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plans/{plan_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete
+         * @description Mark the plan done: it stops being active, reserves no stock or BPC runs and releases
+         *     the BPCs its lines picked. Job links and lines stay, so it can be reopened.
+         */
+        post: operations["apps_planning_plans_api_complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plans/{plan_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen */
+        post: operations["apps_planning_plans_api_reopen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plans/{plan_id}/result": {
         parameters: {
             query?: never;
@@ -799,6 +837,8 @@ export interface components {
             name: string;
             /** Is Active */
             is_active: boolean;
+            /** Completed At */
+            completed_at: string | null;
             /** Reserve Assets */
             reserve_assets: boolean;
             /** Priority */
@@ -837,6 +877,8 @@ export interface components {
             name: string;
             /** Is Active */
             is_active: boolean;
+            /** Completed At */
+            completed_at: string | null;
             /** Reserve Assets */
             reserve_assets: boolean;
             /** Priority */
@@ -2423,6 +2465,50 @@ export interface operations {
         };
     };
     apps_planning_plans_api_deactivate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_complete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanOut"];
+                };
+            };
+        };
+    };
+    apps_planning_plans_api_reopen: {
         parameters: {
             query?: never;
             header?: never;

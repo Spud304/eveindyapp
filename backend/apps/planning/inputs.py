@@ -257,10 +257,10 @@ def load(user: User) -> AccountData:
 
 
 def picked_blueprints(user: User) -> dict[int, int]:
-    """BPC item id -> the plan whose line picked it."""
+    """BPC item id -> the plan whose line picked it. Plans marked complete hold none."""
     out: dict[int, int] = {}
     for plan_id, ids in (
-        PlanLineRow.objects.filter(plan__user=user)
+        PlanLineRow.objects.filter(plan__user=user, plan__completed_at=None)
         .exclude(blueprint_item_ids=[])
         .values_list("plan_id", "blueprint_item_ids")
     ):

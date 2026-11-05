@@ -89,6 +89,9 @@ class Plan(models.Model):
     name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=False)
     activated_at = models.DateTimeField(null=True, blank=True)
+    # Set when the owner marks the plan done: it is not active, reserves no stock or BPC
+    # runs and holds no picked BPCs until reopened. Its job links stay.
+    completed_at = models.DateTimeField(null=True, blank=True)
     reserve_assets = models.BooleanField(default=False)
     priority = models.IntegerField(default=100)  # lower claims first
     visibility = models.CharField(

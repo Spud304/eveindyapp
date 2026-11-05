@@ -493,3 +493,39 @@ def test_result_priced_from_jita_orders(api, user, azbel, monkeypatch):
     avg = api("get", f"/api/plans/{p.pk}/result?prices=average").json()
     [trit] = [s for s in avg["result"]["shopping_list"] if s["type_id"] == 34]
     assert avg["prices"] == "average" and trit["price_source"] == "average"
+
+
+# --- completing a plan ---------------------------------------------------------------------
+
+
+def test_complete_deactivates_and_blocks_activation_until_reopened(api):
+    pid = api("post", "/api/plans", {"name": "done"}).json()["id"]
+    api("post", f"/api/plans/{pid}/activate")
+    body = api("post", f"/api/plans/{pid}/complete").json()
+    assert body["completed_at"] is not None and not body["is_active"]
+    assert api("post", f"/api/plans/{pid}/activate").status_code == 409
+    assert api("post", f"/api/plans/{pid}/reopen").json()["completed_at"] is None
+    assert api("post", f"/api/plans/{pid}/activate").json()["is_active"]
+
+
+def test_a_completed_plan_reserves_nothing(api, user, azbel):
+    asset(1, 34, 40_000, AZBEL_ID)
+    first = make_plan(user, "First", reserve_assets=True, priority=1)
+    second = make_plan(user, "Second", reserve_assets=True, priority=2)
+    assert trit(reservation.run_plans(user)[second.pk]).on_hand_used == 40_000 - PER_RIFTER
+    api("post", f"/api/plans/{first.pk}/complete")
+    assert trit(reservation.run_plans(user)[second.pk]).on_hand_used == PER_RIFTER
+    body = api("get", f"/api/plans/{first.pk}/result").json()
+    assert body["reservation"]["reserves"] is False and body["reservation"]["claims"] == {}
+
+
+def test_a_completed_plan_releases_its_picked_bpcs(api, azbel):
+    rifter_bp(1, 9)
+    done = api("post", "/api/plans", {"name": "done", "lines": [bpc_line(1)]}).json()["id"]
+    other = api("post", "/api/plans", {"name": "next"}).json()["id"]
+    assert api("put", f"/api/plans/{other}/lines", [bpc_line(1)]).status_code == 409
+    api("post", f"/api/plans/{done}/complete")
+    assert api("put", f"/api/plans/{other}/lines", [bpc_line(1)]).status_code == 200
+    # Reopening would pick the same copy twice.
+    resp = api("post", f"/api/plans/{done}/reopen")
+    assert resp.status_code == 409 and "next" in resp.json()["detail"]

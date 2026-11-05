@@ -93,6 +93,11 @@ def _run(
     return PlanRun(p, inp, result, rules=rules, stock=stock)
 
 
+def reserves(p: Plan) -> bool:
+    """A plan marked complete keeps its setting but claims nothing."""
+    return p.reserve_assets and p.completed_at is None
+
+
 def run_plans(user: User, plans: list[Plan] | None = None, data: AccountData | None = None):
     """Run every plan of the account (or the given ones; reserving plans always run, since
     they decide what the others see). Returns {plan id: PlanRun}."""
@@ -120,8 +125,8 @@ def run_plans(user: User, plans: list[Plan] | None = None, data: AccountData | N
     bpc_used: dict[int, int] = defaultdict(int)
     bpo_users: dict[int, list[str]] = defaultdict(list)
 
-    reserving = [p for p in all_plans if p.reserve_assets]  # ordered by priority, id
-    if not any(p.pk in wanted and not p.reserve_assets for p in all_plans):
+    reserving = [p for p in all_plans if reserves(p)]  # ordered by priority, id
+    if not any(p.pk in wanted and not reserves(p) for p in all_plans):
         # Only reserving plans asked for: the ones after the last of them cannot change it.
         last = max((i for i, p in enumerate(reserving) if p.pk in wanted), default=-1)
         reserving = reserving[: last + 1]
@@ -141,7 +146,7 @@ def run_plans(user: User, plans: list[Plan] | None = None, data: AccountData | N
         runs[p.pk] = run
 
     for p in all_plans:
-        if p.reserve_assets or p.pk not in wanted:
+        if reserves(p) or p.pk not in wanted:
             continue
         run = _run(p, data, pool, bpc_used)
         holders(p, run)
