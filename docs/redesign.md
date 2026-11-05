@@ -71,12 +71,19 @@ Decided (2026-11-03):
 - Non-reserving plans see only what's left over (and show "X reserved by plan Y").
 - Reservations shrink as the plan consumes materials (job started → inputs are gone from assets, so the reservation for them must be released, not double-counted). The tracker drives this.
 - Location filter per plan: default = assets at the plan's build stations; user can tick other locations/hangars.
-- **Stock to move (2026-11-05).** The engine counts a plan's stock at all of its locations as one pile. So the result also lists what has to be carried before jobs can start (`apps/planning/hauling.py`, `PlanResultOut.moves`).
-  - Per item, only the quantity taken from stock is placed: stock already at a station covers that station's jobs first, then the biggest stacks elsewhere cover the rest.
-  - A station with no known location (added by hand) gets no moves.
+- **To move (2026-11-05).** The engine counts a plan's stock at all of its locations as one pile. So the result also lists what has to be carried before jobs can start (`apps/planning/hauling.py`, `PlanResultOut.moves`). There are two kinds of move:
+  - Stock in a hangar away from the station that uses it.
+  - Items one station builds and another station's jobs use.
+- How each item is placed:
+  - A station's jobs are covered first by what that station makes, then by stock already there.
+  - Anything still missing comes from what other stations make, then from the biggest stacks elsewhere.
+  - Only the quantity taken from stock counts; bought items are not placed.
+  - A station with no known location (added by hand) gets built-item moves only.
   - Shared views leave the list out, because it names the owner's hangars.
   - Rejected: flagging every item whose stock sits in two places. joe's has enough Tritanium on its own even though Polite holds some, so that flag would warn when nothing needs moving.
-  - Live on maelstroms: Megacyte, Mexallon and Zydrine go from Polite to joe's (where the mineral jobs run), and five PI inputs go from joe's to Polite (where their job is planned).
+  - Live on maelstroms (first version): Megacyte, Mexallon and Zydrine went from Polite to joe's, where the mineral jobs run. Five PI inputs went from joe's to Polite, where the component jobs were planned.
+    - Those components then needed 148,450 m³ carried back to joe's, which the stock-only list did not show.
+    - That led to the station rule in Planning engine. The components are now built at joe's.
 - **Decided (2026-11-03): computed, not stored.** Each request reruns the account's reserving plans in priority order (lower number first, then id). Each claims what its engine run takes from stock (`on_hand_used`) out of a pool kept per (item, location, hangar), and only from buckets inside its own location and hangar filter. Non-reserving plans then run on the leftovers and claim nothing. Rejected: storing claims, because they would go stale whenever assets, plans, prices or rules change. Computing them costs one engine run per reserving plan (live: ~1.3 s for a two-plan account, most of it loading shared data). Claims come from remaining demand, so once the tracker (step 5) lowers demand as jobs start, they shrink without separate release logic.
 
 ### Job tracking
@@ -154,7 +161,10 @@ Pure package (no Django imports) inside the Django project; imported as `engine`
   - A plan line is always built, even if a rule would buy its category.
   - When several blueprints make one product (fixed 2026-11-03, panel review EVE-1): published first, manufacturing before reaction, then the lowest type id; invention sources the same way, without the activity step. Before, the last one loaded won, so build 3667080's unpublished "Test Reaction Blueprint" (45732, no fuel blocks, 20 units per run) could replace the Tungsten Carbide formula (46207). The SDE has 5 such products, each with exactly one published blueprint. [SDE] Invention with several published sources (T3 relics Intact / Malfunctioning / Wrecked, Capital Hull Repairer from the T1 or a meta blueprint, condenser packs from two T1 blueprints) now takes the lowest type id (Intact relics, the T1 hull repairer); choosing by what the account owns is not done.
   - Blueprint source per blueprint: owned BPO (one job, all runs, or split with copies; see Step 6 progress) → owned BPCs (best ME first, one job each) → invention for T2 → "missing" at ME 0 / TE 0 with a warning.
-  - Station: among stations offering the activity, lowest material multiplier, then time, then fee rate. Copy and invention jobs pick a station too, so hull and lab-rig time bonuses apply to them.
+  - Station: among stations offering the activity, lowest material multiplier, then the station whose jobs use the most of the product, then time, then fee rate. Copy and invention jobs pick a station too, so hull and lab-rig time bonuses apply to them.
+  - Decided 2026-11-05 by the owner: "where it is used" ranks above time and fee rate. Items are planned after the jobs that use them, so those stations are already known.
+    - Maelstroms, before the change: the components were built at Polite for the Azbel hull's ×0.80 time and ×0.96 cost, and then had to be carried to joe's (148,450 m³). Building at joe's added about 46 minutes and 10,600 ISK.
+    - Material still ranks first, because a material bonus saves ISK on every run.
   - Decryptor `auto`: lowest invention inputs + direct T2 job materials at market price (not invention cost alone, which ignores what the ME bonus saves). With no prices it says so and takes the fewest attempts.
   - Invention chance uses the best eligible inventor's skills; attempts = ceil(BPCs / chance).
   - Schedule: dependency-aware list scheduling, longest ready job first, onto the eligible character slot that finishes it earliest. Replaces the depth-phase timeline.
