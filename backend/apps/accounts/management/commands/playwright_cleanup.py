@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from apps.accounts.models import EveCharacter, User
-from apps.esidata.models import BlueprintItem, IndustryJob
+from apps.esidata.models import Asset, BlueprintItem, IndustryJob
 
 # Character ids reserved for browser tests (playwright_tests/conftest.py). Real EVE character
 # ids are far outside this range, so nothing else can match.
@@ -26,6 +26,10 @@ class Command(BaseCommand):
             ).delete()
             # BPCs made by `playwright_blueprint`.
             BlueprintItem.objects.filter(
+                item_id__range=(FIRST, LAST), owner_id__range=(FIRST, LAST)
+            ).delete()
+            # Stacks made by `playwright_asset`.
+            Asset.objects.filter(
                 item_id__range=(FIRST, LAST), owner_id__range=(FIRST, LAST)
             ).delete()
         self.stdout.write(

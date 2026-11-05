@@ -46,8 +46,8 @@ function SharedView({ data }: { data: SharedPlanOut }) {
   usePageTitle(data.name)
   const [tab, setTab] = useState<TabKey>('shopping')
   const r = data.result
-  // The tabs take a plan result; viewers get no reservation details or feed health (it names
-  // the owner's characters).
+  // The tabs take a plan result; viewers get no reservation details, feed health (it names
+  // the owner's characters) or stock moves (they name the owner's hangars).
   const asResult = {
     plan_id: data.plan_id ?? 0,
     error: data.error,
@@ -57,6 +57,7 @@ function SharedView({ data }: { data: SharedPlanOut }) {
     effective_rules: { item_blacklist: [], buy_categories: [], overrides: { blacklist_add: [], blacklist_remove: [], categories: {} } },
     reservation: { reserves: false, claims: {}, held_elsewhere: {} },
     inputs: { as_of: null, problems: [] },
+    moves: [],
   } as PlanResultOut
   const lookups: Lookups = {
     characters: new Map(Object.entries(data.characters).map(([k, v]) => [Number(k), v])),

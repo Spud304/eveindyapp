@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import { useCopy } from '@/hooks/useCopy'
 import { useBlueprintOptions, usePlanMutations } from '@/lib/api/hooks'
-import type { BlueprintChoice, BlueprintPlan, ChoiceIO, PlanOut, PlanResultOut, PurchaseOption } from '@/lib/api/client'
+import type { BlueprintChoice, BlueprintPlan, ChoiceIO, MoveOut, PlanOut, PlanResultOut, PurchaseOption } from '@/lib/api/client'
 import { duration, isk, iskExact, m3, pct, qty } from '@/lib/format'
 import { Badge, Button, Empty, Input, Mono, Num, Panel, Select, Table, Why } from '@/components/ui'
 
@@ -27,6 +27,8 @@ export function ShoppingTab({ data, stale = false }: { data: PlanResultOut; stal
   const paste = r.shopping_list.map((s) => `${s.name}\t${s.quantity}`).join('\n')
   const onHand = r.items.filter((i) => i.on_hand_used > 0)
   const volume = r.shopping_list.reduce((sum, s) => sum + s.volume, 0)
+  const moved = new Map<number, number>()
+  for (const m of data.moves) moved.set(m.type_id, (moved.get(m.type_id) ?? 0) + m.quantity)
   return (
     <div className="flex flex-col gap-4">
       <Panel
@@ -124,6 +126,11 @@ export function ShoppingTab({ data, stale = false }: { data: PlanResultOut; stal
                   <Num className="text-muted">{qty(i.input_quantity)}</Num>
                   <td>
                     {data.reservation.claims[i.type_id] ? <Badge tone="info">reserved</Badge> : null}{' '}
+                    {moved.get(i.type_id) ? (
+                      <Badge tone="warn" title="not where the jobs that use it run; see Stock to move">
+                        move {qty(moved.get(i.type_id)!)}
+                      </Badge>
+                    ) : null}{' '}
                     {held[i.type_id] ? <span className="text-label text-warn">{held[i.type_id].map((h) => `${qty(h.quantity)} held by ${h.plan_name}`).join('; ')}</span> : null}
                   </td>
                 </tr>
@@ -132,7 +139,64 @@ export function ShoppingTab({ data, stale = false }: { data: PlanResultOut; stal
           </Table>
         </Panel>
       ) : null}
+      {data.moves.length ? <MovesPanel moves={data.moves} /> : null}
     </div>
+  )
+}
+
+/** Hangar stock the plan uses that sits away from the station whose jobs use it, one table
+ *  per trip (from a structure's hangar to a station). */
+function MovesPanel({ moves }: { moves: MoveOut[] }) {
+  const trips = new Map<string, MoveOut[]>()
+  for (const m of moves) {
+    const key = `${m.from_location_id}|${m.from_hangar}|${m.to_station_id}`
+    trips.set(key, [...(trips.get(key) ?? []), m])
+  }
+  const total = moves.reduce((sum, m) => sum + m.volume, 0)
+  return (
+    <Panel
+      title={`Stock to move · ${moves.length}`}
+      testId="plan.moves"
+      actions={
+        <span className="text-ui text-muted" data-testid="plan.moves.volume">
+          <Mono className="text-fg">{m3(total)}</Mono>
+        </span>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-label text-muted">This plan counts the stock at all its stations as one pile. These items are not where the jobs that use them run; stock already at a station is used there first.</p>
+        {[...trips.entries()].map(([key, ms]) => (
+          <div key={key} data-testid="plan.moves.trip">
+            <div className="mb-1 flex flex-wrap items-baseline gap-x-2 text-ui">
+              <span>
+                {ms[0].from_name} <span className="text-muted">· {ms[0].from_hangar}</span>
+              </span>
+              <span className="text-muted">→</span>
+              <span>{ms[0].to_name}</span>
+              <Mono className="ml-auto text-muted">{m3(ms.reduce((sum, m) => sum + m.volume, 0))}</Mono>
+            </div>
+            <Table hover>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th className="text-right">Quantity</th>
+                  <th className="text-right">Volume</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ms.map((m) => (
+                  <tr key={m.type_id} data-testid={`plan.moves.${m.type_id}`}>
+                    <td>{m.name}</td>
+                    <Num>{qty(m.quantity)}</Num>
+                    <Num className="text-muted">{m3(m.volume)}</Num>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        ))}
+      </div>
+    </Panel>
   )
 }
 

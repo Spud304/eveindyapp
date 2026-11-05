@@ -1,6 +1,6 @@
 from playwright.sync_api import expect
 
-from .conftest import RIFTER, TRITANIUM, by_test_id, make_bpc, make_job, pick, uniq
+from .conftest import RIFTER, TRITANIUM, by_test_id, make_asset, make_bpc, make_job, pick, uniq
 
 
 def shopping_qty(page, type_id: int) -> int:
@@ -369,3 +369,24 @@ def test_prices_switch_between_jita_and_average(login):
     expect(by_test_id(page, "plan.cost.prices")).to_contain_text("CCP average prices")
     page.reload()  # remembered in this browser
     expect(by_test_id(page, "plan.prices")).to_have_value("average")
+
+
+def test_stock_away_from_the_building_station_is_listed_to_move(login):
+    s = login()
+    station = s.add_station(name="PW builder")
+    here, there = 1_000_000_000_011, 1_000_000_000_012  # structure-range ids: no name lookups
+    make_asset(s.character_id, TRITANIUM, 20_000, here, station=station["id"])
+    make_asset(s.character_id, TRITANIUM, 50_000, there)
+    plan = s.add_plan(uniq("haul"), [(RIFTER, 1)])
+    s.call("PATCH", f"/api/plans/{plan['id']}", {"extra_location_ids": [there]})
+    need = next(
+        i["input_quantity"]
+        for i in s.json(f"/api/plans/{plan['id']}/result")["result"]["items"]
+        if i["type_id"] == TRITANIUM
+    )
+    page = s.page
+    page.goto(f"/plans/{plan['id']}")
+    row = by_test_id(page, f"plan.moves.{TRITANIUM}")
+    expect(row).to_contain_text(f"{need - 20_000:,}")
+    expect(by_test_id(page, "plan.moves.trip")).to_contain_text("PW builder")
+    expect(by_test_id(page, "plan.on-hand")).to_contain_text(f"move {need - 20_000:,}")

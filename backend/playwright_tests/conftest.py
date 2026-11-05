@@ -224,3 +224,19 @@ def make_bpc(character_id: int, blueprint: int, runs: int, me: int = 10, te: int
     ]
     subprocess.run(args, cwd=BACKEND_DIR, check=True, capture_output=True)
     return _next_item
+
+
+def make_asset(
+    character_id: int, type_id: int, quantity: int, location: int, station: int | None = None
+) -> int:
+    """A stack in a test character's hangar at `location` (manage.py playwright_asset);
+    `station` puts that station of the account at the same location."""
+    global _next_item
+    _next_item += 1
+    args = ["uv", "run", "python", "manage.py", "playwright_asset"]
+    args += ["--character", str(character_id), "--item-id", str(_next_item)]
+    args += ["--type", str(type_id), "--quantity", str(quantity), "--location", str(location)]
+    if station is not None:
+        args += ["--station", str(station)]
+    subprocess.run(args, cwd=BACKEND_DIR, check=True, capture_output=True)
+    return _next_item
