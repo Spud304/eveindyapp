@@ -1137,6 +1137,24 @@ export interface components {
             quantity: number;
         };
         /**
+         * InputValue
+         * @description One raw input of a line: what comes from stock and what is bought.
+         */
+        InputValue: {
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            /** From Stock */
+            from_stock: number;
+            /** Stock Value */
+            stock_value: number;
+            /** To Buy */
+            to_buy: number;
+            /** Buy Value */
+            buy_value: number;
+        };
+        /**
          * InputsHealthOut
          * @description How old the ESI data behind this result is: the oldest last sync of the skills, assets,
          *     blueprints and jobs it read (None if one never synced), and every feed that failed or is
@@ -1251,6 +1269,35 @@ export interface components {
              */
             security_tax: number;
         };
+        /** LineValue */
+        LineValue: {
+            /** Line Id */
+            line_id: string;
+            /** Type Id */
+            type_id: number;
+            /** Name */
+            name: string;
+            /** Quantity */
+            quantity: number;
+            /** Stock */
+            stock: number;
+            /** Bought */
+            bought: number;
+            /** Job Fees */
+            job_fees: number;
+            /** Blueprints */
+            blueprints: number;
+            /** Started */
+            started: number;
+            /** Total */
+            total: number;
+            /** Per Unit */
+            per_unit: number;
+            /** Inputs */
+            inputs: components["schemas"]["InputValue"][];
+            /** Unpriced Type Ids */
+            unpriced_type_ids: number[];
+        };
         /** Material */
         Material: {
             /** Type Id */
@@ -1332,6 +1379,19 @@ export interface components {
              * @default []
              */
             moves: components["schemas"]["MoveOut"][];
+            value?: components["schemas"]["PlanValue"] | null;
+        };
+        /** PlanValue */
+        PlanValue: {
+            /** Lines */
+            lines: components["schemas"]["LineValue"][];
+            /** Left Over */
+            left_over: number;
+            /**
+             * Unpriced Type Ids
+             * @default []
+             */
+            unpriced_type_ids: number[];
         };
         /** PlanWarning */
         PlanWarning: {

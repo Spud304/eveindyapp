@@ -20,6 +20,7 @@ from apps.esidata.overview_api import JobRow, divisions, location_names
 from apps.sde.models import BlueprintProduct, EveType
 from engine import BlueprintOptions, purchase_options
 from engine.types import BuildCategory, PlanResult
+from engine.valuation import PlanValue, plan_value
 
 from . import hauling, inputs, reservation, sharing, tracker
 from .models import JobLink, LinkSource, Plan, PlanLine, Visibility
@@ -449,6 +450,8 @@ class PlanResultOut(Schema):
     reservation: ReservationOut
     inputs: InputsHealthOut
     moves: list[MoveOut] = []
+    # What goes into each line in ISK, stock included, priced like the shopping list.
+    value: PlanValue | None = None
 
 
 def moves_out(user: User, run: reservation.PlanRun, result: PlanResult | None) -> list[dict]:
@@ -511,10 +514,10 @@ def plan_result(request: HttpRequest, plan_id: int, prices: Literal["jita", "ave
     p = _plan(request, plan_id)
     run = reservation.run_plans(_user(request), [p])[p.pk]
     rules = run.rules
-    result, failed = run.result, 0
+    result, failed, priced_input = run.result, 0, run.input
     if prices == "jita" and run.input is not None and run.result is not None:
         priced = jita_plan(run.input, run.result)
-        result, failed = priced.result, priced.failed
+        result, failed, priced_input = priced.result, priced.failed, priced.input
         if reservation.reserves(p):
             # What this plan holds is what the priced run takes from stock (the same stock;
             # only a different automatic decryptor can change it).
@@ -541,6 +544,7 @@ def plan_result(request: HttpRequest, plan_id: int, prices: Literal["jita", "ave
         },
         "inputs": inputs_health(_user(request)),
         "moves": moves_out(_user(request), run, result),
+        "value": plan_value(result, priced_input) if result and priced_input else None,
     }
 
 

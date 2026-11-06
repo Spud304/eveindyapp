@@ -270,6 +270,21 @@ def test_result_endpoint(api, user, azbel):
     assert body["moves"] == []
 
 
+def test_result_values_what_goes_into_each_line(api, user, azbel):
+    from apps.esidata.models import MarketPrice
+
+    MarketPrice.objects.create(
+        type_id=34, adjusted_price=3.0, average_price=4.0, updated_at="2026-11-05T00:00:00Z"
+    )
+    asset(1, 34, 10_000, AZBEL_ID)
+    p = make_plan(user, "Valued", rifters=1)
+    (line,) = api("get", f"/api/plans/{p.pk}/result").json()["value"]["lines"]
+    (trit,) = line["inputs"]
+    assert (trit["from_stock"], trit["stock_value"]) == (10_000, 40_000)
+    assert (trit["to_buy"], trit["buy_value"]) == (PER_RIFTER - 10_000, (PER_RIFTER - 10_000) * 4)
+    assert line["total"] == PER_RIFTER * 4 + line["job_fees"]
+
+
 def test_result_lists_stock_to_carry_to_the_building_station(api, user, azbel, raitaru):
     asset(1, 34, 20_000, AZBEL_ID)
     asset(2, 34, 30_000, RAITARU_LOC, flag="CorpSAG3", kind="corporation", owner=CORP)
