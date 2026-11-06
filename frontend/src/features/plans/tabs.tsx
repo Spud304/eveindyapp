@@ -587,6 +587,7 @@ export function CostTab({ data }: { data: PlanResultOut }) {
   const feeTotal = fees.reduce((sum, [, v]) => sum + (v ?? 0), 0)
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      {data.value ? <LineValuePanel data={data} /> : null}
       <Panel title="Total" testId="plan.cost.summary">
         <table className="w-full text-ui [&_td]:py-0.5">
           <tbody>
@@ -653,5 +654,97 @@ export function CostTab({ data }: { data: PlanResultOut }) {
         </Table>
       </Panel>
     </div>
+  )
+}
+
+/** What goes into each line in ISK: stock at market price, items to buy, job fees and bought
+ *  copies, rolled up through the build tree (engine/valuation.py). */
+function LineValuePanel({ data }: { data: PlanResultOut }) {
+  const v = data.value!
+  const [open, setOpen] = useState<string | null>(null)
+  const showBlueprints = v.lines.some((l) => l.blueprints > 0)
+  const showStarted = v.lines.some((l) => l.started > 0)
+  const cols = 7 + (showBlueprints ? 1 : 0) + (showStarted ? 1 : 0)
+  return (
+    <Panel title="Value per line" testId="plan.value" flush className="lg:col-span-2">
+      <Table hover>
+        <thead>
+          <tr>
+            <th>Line</th>
+            <th className="text-right">Qty</th>
+            <th className="text-right" title="hangar stock used, at market price">
+              From stock
+            </th>
+            <th className="text-right" title="items on the shopping list">
+              To buy
+            </th>
+            <th className="text-right">Job fees</th>
+            {showBlueprints ? <th className="text-right">Bought BPCs</th> : null}
+            {showStarted ? (
+              <th className="text-right" title="units already in running jobs, valued like a built unit">
+                Started
+              </th>
+            ) : null}
+            <th className="text-right">Total</th>
+            <th className="text-right">Per unit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {v.lines.map((l) => (
+            <Fragment key={l.line_id}>
+              <tr data-testid={`plan.value.${l.type_id}`} className="cursor-pointer" onClick={() => setOpen(open === l.line_id ? null : l.line_id)} title="show the raw inputs">
+                <td>
+                  <span className="text-muted">{open === l.line_id ? '▾' : '▸'}</span> {l.name}
+                  {l.unpriced_type_ids.length ? <span className="ml-1 text-label text-warn">{l.unpriced_type_ids.length} unpriced</span> : null}
+                </td>
+                <Num>{qty(l.quantity)}</Num>
+                <Num title={iskExact(l.stock)}>{isk(l.stock)}</Num>
+                <Num title={iskExact(l.bought)}>{isk(l.bought)}</Num>
+                <Num className="text-muted">{isk(l.job_fees)}</Num>
+                {showBlueprints ? <Num className="text-muted">{isk(l.blueprints)}</Num> : null}
+                {showStarted ? <Num className="text-muted">{isk(l.started)}</Num> : null}
+                <Num className="font-semibold" title={iskExact(l.total)}>
+                  {isk(l.total)}
+                </Num>
+                <Num title={iskExact(l.per_unit)}>{isk(l.per_unit)}</Num>
+              </tr>
+              {open === l.line_id ? (
+                <tr>
+                  <td colSpan={cols} className="bg-panel-2">
+                    <Table>
+                      <thead>
+                        <tr>
+                          <th>Input</th>
+                          <th className="text-right">From stock</th>
+                          <th className="text-right">Value</th>
+                          <th className="text-right">To buy</th>
+                          <th className="text-right">Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {l.inputs.map((i) => (
+                          <tr key={i.type_id} data-testid={`plan.value.${l.type_id}.${i.type_id}`}>
+                            <td>{i.name}</td>
+                            <Num>{i.from_stock ? qty(Math.round(i.from_stock)) : ''}</Num>
+                            <Num className="text-muted">{i.from_stock ? isk(i.stock_value) : ''}</Num>
+                            <Num>{i.to_buy ? qty(Math.round(i.to_buy)) : ''}</Num>
+                            <Num className="text-muted">{i.to_buy ? isk(i.buy_value) : ''}</Num>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </td>
+                </tr>
+              ) : null}
+            </Fragment>
+          ))}
+        </tbody>
+      </Table>
+      <p className="px-3 py-2 text-label text-muted" data-testid="plan.value.note">
+        Stock and purchases at {data.prices === 'jita' ? 'Jita 4-4 sell prices for the quantity used' : 'CCP average prices'}. Shared parts are split by how much each line uses.
+        {v.left_over > 0 ? ` ${isk(v.left_over)} goes into units built beyond need and is not charged to a line.` : ''} Owned blueprints are not counted.
+        {v.unpriced_type_ids.length ? <span className="text-warn"> {v.unpriced_type_ids.length} input(s) have no price and are left out.</span> : null}
+      </p>
+    </Panel>
   )
 }

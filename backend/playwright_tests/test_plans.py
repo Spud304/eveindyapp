@@ -411,3 +411,19 @@ def test_mark_complete_moves_the_plan_to_completed_and_reopen_brings_it_back(log
     by_test_id(page, "plan.reopen").click()
     expect(by_test_id(page, "plan.activate")).to_be_visible()  # reopened, not active again
     expect(by_test_id(page, "plan.completed")).to_have_count(0)
+
+
+def test_cost_tab_values_each_line_and_lists_its_inputs(login):
+    s = login()
+    station = s.add_station(name="PW valued")
+    here = 1_000_000_000_021
+    make_asset(s.character_id, TRITANIUM, 10_000, here, station=station["id"])
+    plan = s.add_plan(uniq("value"), [(RIFTER, 2)])
+    page = s.page
+    page.goto(f"/plans/{plan['id']}?tab=cost")
+    row = by_test_id(page, f"plan.value.{RIFTER}")
+    expect(row).to_be_visible()
+    row.click()
+    trit = by_test_id(page, f"plan.value.{RIFTER}.{TRITANIUM}")
+    expect(trit.locator("td").nth(1)).to_have_text("10,000")  # from stock
+    expect(by_test_id(page, "plan.value.note")).to_contain_text("Owned blueprints are not counted")
