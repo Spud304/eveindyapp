@@ -133,6 +133,15 @@ Data needed, with the ESI role it requires:
 
 ## What goes away
 - Standalone **Production** (continuous profit) page — doesn't match the use case. No plan-level profit view either (decided 2026-11-04: not wanted).
+- Changed 2026-11-05 (owner): a plan does show what goes into each line in ISK, stock included (Cost tab, "Value per line"). It is for building for someone else from your own stock. It shows input value only: no sale prices and no margin.
+  - Code: `engine/valuation.py`, `PlanResultOut.value`.
+  - Every unit of an item carries the average value of all its supply:
+    - Stock and bought units at market price. With Jita prices, stock items are looked up too, priced as buying the quantity used.
+    - Built units at their jobs' inputs and fees, plus a share of the copy and invention jobs that made their blueprint (split by runs).
+    - Started units like a built unit.
+  - Shared parts split by quantity used. Surplus and unused copies are reported as left over.
+  - Owned blueprints and bought extra BPOs are not counted.
+  - Live: dreadbatch 1 is 2.29 B per Phoenix, 6.50 B of the 6.87 B from stock.
 - The Flask app itself: removed on 2026-11-04 (`src/`, its migrations, tests, Dockerfile and compose file); git history has it.
 - Standalone **Invention** page — folded into plans for T2 lines.
 - The **Industry** hub page, the three-form calculator, URL-encoded state.
