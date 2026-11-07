@@ -94,6 +94,31 @@ def test_paged_starts_again_when_pages_come_from_two_snapshots():
     assert calls == [1, 2, 1, 2]
 
 
+def test_paged_uses_the_snapshot_time_esi_sends_with_a_304():
+    # Seen 2026-11-07: only page 2 changed, so page 1 answered 304. The cached page 1 kept the
+    # old Last-Modified, never matched page 2 again, and the feed failed every hour.
+    snapshot = {"modified": "Sat, 07 Nov 2026 18:00:00 GMT", "page2": "a"}
+    calls = []
+
+    def pages(request):
+        page = int(request.url.params.get("page", 1))
+        etag = "p1" if page == 1 else f"p2{snapshot['page2']}"
+        headers = {"X-Pages": "2", "Last-Modified": snapshot["modified"], "ETag": etag}
+        calls.append((page, request.headers.get("If-None-Match") == etag))
+        if request.headers.get("If-None-Match") == etag:
+            return httpx.Response(304, headers=headers)
+        return httpx.Response(
+            200, json=[f"{page}{snapshot['page2'] if page == 2 else ''}"], headers=headers
+        )
+
+    client = EsiClient(base_url="https://esi.test", transport=httpx.MockTransport(pages))
+    assert client.paged("/characters/1/assets/", token="t", character_id=1) == ["1", "2a"]
+
+    snapshot.update(modified="Sat, 07 Nov 2026 19:00:00 GMT", page2="b")
+    assert client.paged("/characters/1/assets/", token="t", character_id=1) == ["1", "2b"]
+    assert calls[2:] == [(1, True), (2, False)]  # page 1 from cache, no second pass
+
+
 def test_paged_gives_up_when_the_snapshot_keeps_changing():
     n = iter(range(100))
 

@@ -104,6 +104,17 @@ class EsiClient:
                 raise EsiUnavailable(f"ESI unreachable on {path}: {exc}") from exc
             self._log_ratelimit(resp)
             if resp.status_code == 304 and cached:
+                # The body is unchanged, but the snapshot it belongs to may be newer than when
+                # it was cached: ESI sends the current Last-Modified and X-Pages on a 304.
+                # `paged` compares Last-Modified across pages, so keep the cache entry current.
+                pages_header = resp.headers.get("X-Pages")
+                cached = {
+                    **cached,
+                    "pages": int(pages_header) if pages_header else cached.get("pages", 1),
+                    "last_modified": resp.headers.get("Last-Modified")
+                    or cached.get("last_modified"),
+                }
+                cache.set(key, cached, ETAG_TTL)
                 if with_meta:
                     return cached["body"], cached.get("pages", 1), cached.get("last_modified")
                 return (cached["body"], cached.get("pages", 1)) if with_pages else cached["body"]
