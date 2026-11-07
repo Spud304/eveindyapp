@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, replace
+from functools import cached_property
 
 from . import constants as c
 from . import formulas as f
@@ -281,6 +282,7 @@ class _Planner:
         t = self.types.get(type_id)
         return t.volume if t else 0.0
 
+    @cached_property
     def adjusted(self) -> dict[TypeId, float | None]:
         return {t: p.adjusted_price for t, p in self.inp.prices.items()}
 
@@ -1385,7 +1387,7 @@ class _Planner:
         """Install cost split as in the client (industry/job.py). Copying uses the T1
         product's EIV x 2% x runs per copy x copies; invention the T2 product's EIV x 2% x
         attempts."""
-        eiv = f.estimated_item_value(meta.eiv_materials, job.runs * job.copies, self.adjusted())
+        eiv = f.estimated_item_value(meta.eiv_materials, job.runs * job.copies, self.adjusted)
         station = meta.station
         if station is None:
             return JobCost(
