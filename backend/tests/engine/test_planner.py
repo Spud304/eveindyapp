@@ -464,6 +464,8 @@ def test_running_jobs_hold_their_slots_until_they_end():
     r = plan(make_input([(COMP_A, 1)], blueprints=(bpo(BP_COMP_A),), characters=(busy,)))
     [job] = jobs_for(r, BP_COMP_A)
     assert job.schedule.start_seconds == 5000.0
+    assert job.schedule.waits_for == "slot"
+    assert job.schedule.reason.text.startswith("Waits for a free manufacturing slot.")
     # A science job does not take a manufacturing slot.
     lab_busy = character(busy={"science": (5000.0,)})
     r = plan(make_input([(COMP_A, 1)], blueprints=(bpo(BP_COMP_A),), characters=(lab_busy,)))
@@ -1083,6 +1085,24 @@ def test_extra_bpo_replaces_a_missing_blueprint():
 # --- schedule ------------------------------------------------------------------
 
 
+def test_a_job_waiting_for_its_blueprint_says_so():
+    busy = replace(bpo(BP_HULL), job_activity_id=5, job_ends_in=5000.0)
+    r = plan(
+        make_input(
+            [(HULL, 2)],
+            blueprints=(busy,),
+            characters=(character(),),
+            rules=BuildRules(item_blacklist=frozenset({COMP_A})),
+        )
+    )
+    [hull] = jobs_for(r, BP_HULL)
+    assert hull.schedule.start_seconds == 5000
+    assert hull.schedule.waits_for == "blueprint"
+    assert hull.schedule.reason.text.startswith(
+        "Waits for its blueprint to come out of an earlier job."
+    )
+
+
 def test_components_finish_before_hull_starts():
     r = plan(
         make_input(
@@ -1097,6 +1117,9 @@ def test_components_finish_before_hull_starts():
     assert comp.schedule.end_seconds == pytest.approx(100 * 7 * 0.8 * 0.85)
     assert hull.schedule.start_seconds == comp.schedule.end_seconds
     assert r.total_seconds == hull.schedule.end_seconds
+    assert comp.schedule.waits_for is None
+    assert hull.schedule.waits_for == "inputs"
+    assert hull.schedule.reason.text.startswith("Waits for its inputs.")
 
 
 def test_parallel_jobs_use_separate_slots():

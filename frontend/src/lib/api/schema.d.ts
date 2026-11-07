@@ -1482,6 +1482,8 @@ export interface components {
             /** End Seconds */
             end_seconds: number;
             reason: components["schemas"]["Reason"];
+            /** Waits For */
+            waits_for?: ("slot" | "inputs" | "blueprint") | null;
         };
         /** ShoppingItem */
         ShoppingItem: {

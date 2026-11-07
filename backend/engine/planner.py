@@ -1378,6 +1378,7 @@ class _Planner:
                 start_seconds=job.start,
                 end_seconds=job.end,
                 reason=job.schedule_reason,
+                waits_for=job.waits_for,
             ),
             copies=job.copies if job.activity == Activity.COPYING else 0,
             blueprint_item_id=_locked_item(job.lock),

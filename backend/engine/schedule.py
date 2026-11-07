@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Literal
 
 from . import formulas as f
 from .types import Activity, Character, Reason, ReasonCode, SkillRequirement
@@ -36,6 +37,7 @@ class WorkJob:
     start: float = 0.0
     end: float = 0.0
     schedule_reason: Reason | None = None
+    waits_for: Literal["slot", "inputs", "blueprint"] | None = None
 
     def duration(self, character: Character | None) -> float:
         seconds = (
@@ -100,10 +102,9 @@ def schedule(
             raise ValueError("job dependency cycle")
         job = by_id[max(ready_ids, key=lambda i: (longest[i], i))]
         ready_ids.discard(job.job_id)
-        ready_at = max((by_id[d].end for d in job.depends_on), default=0.0)
-        if job.lock is not None:
-            ready_at = max(ready_at, locks.get(job.lock, 0.0))
-        _place(job, ready_at, characters, free)
+        inputs_at = max((by_id[d].end for d in job.depends_on), default=0.0)
+        blueprint_at = locks.get(job.lock, 0.0) if job.lock is not None else 0.0
+        _place(job, inputs_at, blueprint_at, characters, free)
         if job.lock is not None:
             locks[job.lock] = job.end
         pending.discard(job.job_id)
@@ -114,8 +115,14 @@ def schedule(
     return max((j.end for j in jobs), default=0.0)
 
 
-def _place(job: WorkJob, ready_at: float, characters, free) -> None:
+SLOT_NAME = {"mfg": "manufacturing", "science": "science", "reaction": "reaction"}
+
+
+def _place(job: WorkJob, inputs_at: float, blueprint_at: float, characters, free) -> None:
+    """Put `job` on the eligible slot that finishes it earliest, starting no sooner than its
+    inputs (`inputs_at`) and its blueprint (`blueprint_at`) are ready."""
     kind = SLOT_KIND[job.activity]
+    ready_at = max(inputs_at, blueprint_at)
     eligible = [
         ch
         for ch in characters
@@ -147,10 +154,14 @@ def _place(job: WorkJob, ready_at: float, characters, free) -> None:
     end, start, ch, idx = best
     free[(ch.character_id, kind)][idx] = end
     job.character, job.start, job.end = ch, start, end
-    waited = (
-        " after its inputs and blueprint are ready" if start == ready_at and ready_at > 0 else ""
-    )
-    job.schedule_reason = Reason(
-        ReasonCode.SCHEDULED,
-        f"{ch.name}: earliest finish of {len(eligible)} eligible character(s){waited}.",
-    )
+    chosen = f"{ch.name}: earliest finish of {len(eligible)} eligible character(s)."
+    if start <= 0:
+        job.schedule_reason = Reason(ReasonCode.SCHEDULED, chosen)
+        return
+    if start > ready_at:
+        job.waits_for, waits = "slot", f"a free {SLOT_NAME[kind]} slot"
+    elif blueprint_at > inputs_at:
+        job.waits_for, waits = "blueprint", "its blueprint to come out of an earlier job"
+    else:
+        job.waits_for, waits = "inputs", "its inputs"
+    job.schedule_reason = Reason(ReasonCode.SCHEDULED, f"Waits for {waits}. {chosen}")

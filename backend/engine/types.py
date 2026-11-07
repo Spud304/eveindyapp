@@ -492,6 +492,10 @@ class ScheduledSlot:
     start_seconds: float
     end_seconds: float
     reason: Reason
+    # What holds the start back past plan start: "slot" (the character's slots are all busy),
+    # "inputs" (jobs making its inputs), "blueprint" (its blueprint is in an earlier job).
+    # None when it starts at plan start.
+    waits_for: Literal["slot", "inputs", "blueprint"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
