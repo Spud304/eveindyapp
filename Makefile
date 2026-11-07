@@ -77,8 +77,8 @@ test: test-backend test-frontend
 test-backend:      ## pytest; needs `make services` (tests use Postgres on :5434)
 	cd backend && uv run pytest -q
 
-test-frontend:     ## type check, lint and production build
-	cd frontend && npx tsc -b && npx eslint . && npx vite build
+test-frontend:     ## type check, lint, unit tests and production build
+	cd frontend && npx tsc -b && npx eslint . && npx vitest run && npx vite build
 
 lint:              ## ruff check and format check (backend), eslint (frontend)
 	cd backend && uvx ruff check && uvx ruff format --check
