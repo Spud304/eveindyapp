@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from apps.esidata import market
 from engine import plan
 from engine.pricing import market_prices, reprice
-from engine.types import PlanInput, PlanResult
+from engine.types import Activity, PlanInput, PlanResult
 
 
 @dataclass
@@ -17,14 +17,19 @@ class JitaPlan:
 
 
 def jita_plan(inp: PlanInput, first: PlanResult, also: tuple[int, ...] = ()) -> JitaPlan:
-    """Plan again with Jita prices, then price the shopping list through the order books.
+    """Plan again with Jita prices where that can change the result, then price the shopping
+    list through the order books.
 
     `first` is the plan at CCP average prices; its shopping list says what to look up. The
     decryptors on offer and the datacores of invented blueprints are looked up too, so the
     automatic decryptor is chosen on the prices the shopping list will show. `also`: more types
     to price (a blueprint whose purchase is being weighed). Stock the plan uses is looked up as
     well, so the value of what goes into each line (`engine.valuation`) prices stock and
-    purchases alike; a stock-only item is priced as buying the quantity used."""
+    purchases alike; a stock-only item is priced as buying the quantity used.
+
+    Prices drive only the automatic decryptor and the ISK quoted for the materials an
+    auto-copy split adds (`engine.pricing`). A plan without invention or copy jobs comes out
+    the same at any price, so it is repriced without planning again."""
     invention_inputs = {
         m.type_id
         for b in first.blueprints
@@ -47,6 +52,7 @@ def jita_plan(inp: PlanInput, first: PlanResult, also: tuple[int, ...] = ()) -> 
     books, failed = market.jita_sell_books(sorted(wanted))
     quantities = {**stock, **{s.type_id: s.quantity for s in first.shopping_list}}
     priced = dataclasses.replace(inp, prices=market_prices(inp.prices, books, quantities))
-    result = reprice(plan(priced), books)
+    price_driven = invention_inputs or any(j.activity == Activity.COPYING for j in first.jobs)
+    result = reprice(plan(priced) if price_driven else first, books)
     on_list = {s.type_id for s in result.shopping_list}
     return JitaPlan(priced, result, len(set(failed) & on_list))
