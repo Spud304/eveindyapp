@@ -133,9 +133,20 @@ def test_tabs_show_reasons(login):
     expect(bp).to_contain_text("Lowest materials, then time")
 
     by_test_id(page, "plan.tabs.schedule").click()
-    expect(by_test_id(page, "plan.schedule")).to_contain_text(
-        "nobody"
-    )  # no character skills synced
+    schedule = by_test_id(page, "plan.schedule")
+    # No character skills synced: the jobs are grouped under "nobody", with the reason shown.
+    group = by_test_id(page, "plan.schedule.char.none")
+    expect(group).to_contain_text("nobody")
+    expect(by_test_id(page, "plan.schedule.now.none")).to_contain_text("start now")
+    expect(schedule).to_contain_text("No character is allowed to run manufacturing")
+    # One station: named once in the header, no station column.
+    expect(schedule).to_contain_text("at PW Azbel")
+    expect(schedule.locator("th", has_text="Station")).to_have_count(0)
+    # The group folds and unfolds.
+    group.click()
+    expect(by_test_id(page, "plan.schedule.now.none")).to_have_count(0)
+    group.click()
+    expect(by_test_id(page, "plan.schedule.now.none")).to_be_visible()
 
     by_test_id(page, "plan.tabs.cost").click()
     expect(by_test_id(page, "plan.cost.summary")).to_contain_text("Total")

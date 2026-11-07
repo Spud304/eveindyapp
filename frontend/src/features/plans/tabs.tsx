@@ -1,9 +1,11 @@
+import clsx from 'clsx'
 import { Fragment, useMemo, useState } from 'react'
 import { useCopy } from '@/hooks/useCopy'
 import { useBlueprintOptions, usePlanMutations } from '@/lib/api/hooks'
 import type { BlueprintChoice, BlueprintPlan, ChoiceIO, MoveOut, PlanOut, PlanResultOut, PurchaseOption } from '@/lib/api/client'
 import { duration, isk, iskExact, m3, pct, qty } from '@/lib/format'
 import { Badge, Button, Empty, Input, Mono, Num, Panel, Select, Table, Why } from '@/components/ui'
+import { groupSchedule, type Bucket, type JobRow } from './schedule'
 
 export type Lookups = { characters: Map<number, string>; stations: Map<number, string> }
 
@@ -441,10 +443,48 @@ function PurchasePanel({ plan, bp }: { plan: PlanOut; bp: BlueprintPlan }) {
 
 // --- schedule ------------------------------------------------------------------------------
 
+const BUCKETS: Bucket[] = ['now', 'soon', 'later']
+const BUCKET_LABEL: Record<Bucket, string> = { now: 'start now', soon: 'within a day', later: 'later' }
+
 export function ScheduleTab({ data, lookups }: { data: PlanResultOut; lookups: Lookups }) {
   const r = data.result!
   const productNames = names(data)
+  const productName = (bp: number) => productNames.get(bp) ?? String(bp)
+  const groups = groupSchedule(r.jobs, (id) => lookups.characters.get(id) ?? String(id), productName)
   const unscheduled = r.jobs.filter((j) => j.schedule.character_id == null).length
+  const stationIds = new Set(r.jobs.map((j) => j.station_id))
+  const oneStation = stationIds.size === 1 ? [...stationIds][0] : undefined
+  const cols = oneStation === undefined ? 7 : 6
+  // Characters collapsed, and characters whose later jobs are shown; keyed by character id ('none': nobody).
+  const [closed, setClosed] = useState<Set<string>>(new Set())
+  const [laterOpen, setLaterOpen] = useState<Set<string>>(new Set())
+  const toggle = (set: Set<string>, key: string, update: (s: Set<string>) => void) => {
+    const next = new Set(set)
+    if (!next.delete(key)) next.add(key)
+    update(next)
+  }
+
+  const jobRow = (row: JobRow) => {
+    const j = row.job
+    const s = j.schedule
+    return (
+      <tr key={row.key} data-testid={`plan.job.${j.job_id}`} title={s.reason.text}>
+        <Num className={s.start_seconds <= 0 ? 'text-ok' : undefined}>{s.start_seconds <= 0 ? 'now' : duration(s.start_seconds)}</Num>
+        <td className="text-muted">{s.waits_for ?? ''}</td>
+        <Num>{duration(s.end_seconds - s.start_seconds)}</Num>
+        <td>{j.activity}</td>
+        <td>
+          {productName(j.blueprint_type_id)}
+          {j.copies > 1 ? <span className="text-muted"> × {j.copies} copies</span> : null}
+          {/* The reason is on the row's hover; a job no character may run shows it. */}
+          {s.character_id == null ? <Why text={s.reason.text} className="block" /> : null}
+        </td>
+        <Num>{row.count > 1 ? `${row.count} × ${qty(j.runs)}` : qty(j.runs)}</Num>
+        {oneStation === undefined ? <td className="text-muted">{j.station_id != null ? lookups.stations.get(j.station_id) : ''}</td> : null}
+      </tr>
+    )
+  }
+
   return (
     <Panel
       title={`Jobs · ${r.jobs.length}`}
@@ -452,43 +492,70 @@ export function ScheduleTab({ data, lookups }: { data: PlanResultOut; lookups: L
       flush
       actions={
         <span className="text-ui text-muted">
+          {oneStation != null ? <span className="mr-2">at {lookups.stations.get(oneStation)}</span> : null}
           finishes after <Mono className="text-fg">{duration(r.total_seconds)}</Mono>
           {unscheduled ? <span className="ml-2 text-bad">{unscheduled} jobs have no character</span> : null}
         </span>
       }
     >
-      <Table hover>
+      <Table>
         <thead>
           <tr>
             <th className="text-right" title="time from plan start">
               Start
             </th>
+            <th title="what the start waits for: a free slot, jobs making its inputs, or its blueprint in an earlier job">Waits for</th>
             <th className="text-right">Takes</th>
             <th>Activity</th>
             <th>Blueprint</th>
-            <th className="text-right">Runs</th>
-            <th>Character</th>
-            <th>Station</th>
+            <th className="text-right" title="runs per job; 3 × 40 is three jobs of 40 runs">
+              Runs
+            </th>
+            {oneStation === undefined ? <th>Station</th> : null}
           </tr>
         </thead>
         <tbody>
-          {r.jobs.map((j) => (
-            <tr key={j.job_id} data-testid={`plan.job.${j.job_id}`}>
-              <Num>{duration(j.schedule.start_seconds)}</Num>
-              <Num>{duration(j.schedule.end_seconds - j.schedule.start_seconds)}</Num>
-              <td>{j.activity}</td>
-              <td>
-                {productNames.get(j.blueprint_type_id) ?? j.blueprint_type_id}
-                {j.copies > 1 ? <span className="text-muted"> × {j.copies} copies</span> : null}
-              </td>
-              <Num>{qty(j.runs)}</Num>
-              <td className="max-w-80">
-                <div>{j.schedule.character_id != null ? (lookups.characters.get(j.schedule.character_id) ?? j.schedule.character_id) : <span className="text-bad">nobody</span>}</div>
-                <Why text={j.schedule.reason.text} />
-              </td>
-              <td className="text-muted">{j.station_id != null ? lookups.stations.get(j.station_id) : ''}</td>
-            </tr>
-          ))}
+          {groups.map((g) => {
+            const key = g.characterId == null ? 'none' : String(g.characterId)
+            const open = !closed.has(key)
+            const jobs = (rows: JobRow[]) => rows.reduce((n, row) => n + row.count, 0)
+            const counts = BUCKETS.filter((b) => g[b].length)
+              .map((b) => `${jobs(g[b])} ${BUCKET_LABEL[b]}`)
+              .join(' · ')
+            return (
+              <Fragment key={key}>
+                <tr className="cursor-pointer border-t-2 bg-panel-2" data-testid={`plan.schedule.char.${key}`} onClick={() => toggle(closed, key, setClosed)} title={open ? 'hide these jobs' : 'show these jobs'}>
+                  <td colSpan={cols}>
+                    <span className="text-muted">{open ? '▾' : '▸'}</span> <span className={clsx('font-semibold', g.characterId == null && 'text-bad')}>{g.name}</span>
+                    <span className="ml-2 text-label text-muted">{counts}</span>
+                  </td>
+                </tr>
+                {open
+                  ? BUCKETS.map((b) => {
+                      const rows = g[b]
+                      if (!rows.length) return null
+                      const folded = b === 'later' && !laterOpen.has(key)
+                      return (
+                        <Fragment key={b}>
+                          <tr
+                            data-testid={`plan.schedule.${b}.${key}`}
+                            className={clsx(b === 'later' && 'cursor-pointer')}
+                            onClick={b === 'later' ? () => toggle(laterOpen, key, setLaterOpen) : undefined}
+                            title={b === 'later' ? (folded ? 'show the later jobs' : 'hide the later jobs') : undefined}
+                          >
+                            <td colSpan={cols} className="pl-4 text-label font-semibold tracking-wide text-muted uppercase">
+                              {b === 'later' ? <span>{folded ? '▸' : '▾'} </span> : null}
+                              {BUCKET_LABEL[b]} · {jobs(rows)}
+                            </td>
+                          </tr>
+                          {folded ? null : rows.map(jobRow)}
+                        </Fragment>
+                      )
+                    })
+                  : null}
+              </Fragment>
+            )
+          })}
         </tbody>
       </Table>
     </Panel>
